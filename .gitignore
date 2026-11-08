@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Raw fetch archive (object storage in production, never git)
+raw_snapshots/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini

@@ -1,0 +1,57 @@
+name: sneaker-aggregator
+
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    container_name: mkagg-postgres
+    environment:
+      POSTGRES_DB: mkagg
+      POSTGRES_USER: mkagg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mkagg_dev_only}
+      # Cyrillic product data: make the collation explicit rather than
+      # inheriting whatever the host locale happens to be.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"   # 5433 to avoid clashing with a local PG
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mkagg -d mkagg"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Applies db/migrations in version order, then exits.
+  #   docker compose run --rm flyway migrate
+  #   docker compose run --rm flyway info
+  flyway:
+    image: flyway/flyway:10.17-alpine
+    container_name: mkagg-flyway
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/flyway/sql:ro
+    command: >-
+      -url=jdbc:postgresql://postgres:5432/mkagg
+      -user=mkagg
+      -password=${POSTGRES_PASSWORD:-mkagg_dev_only}
+      -connectRetries=20
+      -baselineOnMigrate=true
+      migrate
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: mkagg-redis
+    # Token buckets for per-domain rate limiting, plus the probe queue.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
