@@ -158,5 +158,9 @@ CREATE TABLE size_mapping (
     notes      text
 );
 
+-- The enum literal is cast explicitly: an index expression must resolve its
+-- types without relying on context inference.
 CREATE UNIQUE INDEX size_mapping_uq
-    ON size_mapping (COALESCE(brand_id, 0), COALESCE(gender, 'unisex'), raw_label);
+    ON size_mapping (COALESCE(brand_id, 0),
+                     COALESCE(gender, 'unisex'::gender_t),
+                     raw_label);
