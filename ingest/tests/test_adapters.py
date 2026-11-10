@@ -5,6 +5,8 @@ failure names the exact field that moved.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from conftest import TEST_CASE_A, TEST_CASE_B, load_bytes, load_json
 
@@ -232,10 +234,6 @@ class TestAspNetMkAdapter:
 # Registry
 # ---------------------------------------------------------------------------
 
-def test_four_adapters_cover_seven_stores():
-    from mkagg.adapters import all_adapters
-    assert set(all_adapters()) == {
-        "sportvision", "magento", "woocommerce", "aspnet_mk"}
 
 
 class TestSizeBlockBoundary:
@@ -288,3 +286,157 @@ class TestSizeBlockBoundary:
             "sportreality")
         # One shoe never has 40+ sizes; the raw page holds 160 combids.
         assert len(offer.variants) < 40
+
+
+# ---------------------------------------------------------------------------
+# The robots-permitted HTML routes
+# ---------------------------------------------------------------------------
+
+class TestMagentoHtmlAdapter:
+    """dsport.mk via its product page, because /graphql is disallowed."""
+
+    URL = ("https://www.dsport.mk/muskarci/obuca/cizme/"
+           "adidas-terrex-skychaser-ax5-mid-gtx-za-mazhi-kj8942")
+
+    def _offer(self):
+        return get_adapter("magento_html").parse_product(
+            load_bytes("dsport_product_kj8942.html"), self.URL, "dsport")
+
+    def test_extracts_mpn_title_and_price(self):
+        offer = self._offer()
+        assert offer is not None
+        assert offer.raw_mpn == "KJ8942"
+        assert offer.raw_brand == "Adidas"
+        assert "TERREX" in offer.raw_title.upper()
+        assert offer.min_price_minor == 8599
+
+    def test_merchant_sku_matches_the_api_adapter(self):
+        """Switching routes must update the offer, not duplicate it.
+
+        The GraphQL adapter uses the Magento sku as merchant_sku, so the HTML
+        adapter has to agree or V7 would fork every dsport offer in two.
+        """
+        offer = self._offer()
+        assert offer.merchant_sku == offer.raw_mpn == "KJ8942"
+
+    def test_reads_the_full_size_matrix_from_spconfig(self):
+        offer = self._offer()
+        assert len(offer.variants) == 12
+        assert all(v.merchant_variant_id for v in offer.variants)
+        assert all(v.price_minor == 8599 for v in offer.variants)
+
+    def test_dash_fractions_normalise(self):
+        """dsport writes "41-1/3" where buzz writes "44 2/3"."""
+        offer = self._offer()
+        labels = {v.size_label for v in offer.variants}
+        assert "41-1/3" in labels
+        by_label = {v.size_label: v.size_eu for v in offer.variants}
+        assert by_label["41-1/3"] == Decimal("41.333")
+        assert by_label["42-2/3"] == Decimal("42.667")
+        assert by_label["40"] == Decimal("40")
+
+    def test_sizes_are_distinct(self):
+        offer = self._offer()
+        sizes = [v.size_eu for v in offer.variants if v.size_eu is not None]
+        assert len(sizes) == len(set(sizes)) == 12
+
+    def test_listed_options_are_in_stock(self):
+        """Magento omits non-purchasable children.
+
+        Verified against this store's own GraphQL capture, where every
+        returned variant was IN_STOCK: both routes list only buyable sizes.
+        """
+        offer = self._offer()
+        assert all(v.in_stock is True for v in offer.variants)
+
+    def test_passes_quality_validation(self):
+        assert self._offer().quality_issues() == []
+
+
+class TestWooCommerceHtmlAdapter:
+    """megasport via its product page, because /wp-json/ is disallowed."""
+
+    URL = "https://megasportonlineshop.com/p/patiki-puma-caven-2-0-2/"
+
+    def _offer(self):
+        return get_adapter("woocommerce_html").parse_product(
+            load_bytes("megasport_product_caven20.html"), self.URL, "megasport")
+
+    def test_finds_the_product_node_inside_graph(self):
+        """The Product node is nested in JSON-LD @graph, not at the top level."""
+        offer = self._offer()
+        assert offer is not None
+        assert normalize_sku(offer.raw_mpn) == TEST_CASE_A["mpn_norm"]
+        assert offer.raw_brand
+        assert "Caven" in offer.raw_title
+
+    def test_merchant_sku_matches_the_store_api(self):
+        offer = self._offer()
+        assert offer.merchant_sku == "31527", \
+            "must equal the Store API's product id or V7 duplicates the offer"
+
+    def test_per_size_prices_and_quantities(self):
+        offer = self._offer()
+        assert len(offer.variants) == 7
+        assert all(v.in_stock is True for v in offer.variants)
+        assert all(isinstance(v.stock_qty, int) and v.stock_qty > 0
+                   for v in offer.variants)
+        assert all(v.merchant_variant_id for v in offer.variants)
+
+    def test_page_price_beats_the_api_parent_price(self):
+        """The finding that makes this route preferable even with permission.
+
+        The Store API reported prices.price = 3999 for this product while every
+        variation on the page is 3199.2 -- the parent price missed a 20%
+        reduction that applies to all sizes.
+        """
+        offer = self._offer()
+        assert offer.min_price_minor == 3199
+        api_parent = TEST_CASE_A["stores"]["megasport"][2]   # 3999
+        assert offer.min_price_minor < api_parent
+
+    def test_dash_decimal_sizes_normalise(self):
+        """Woo writes "44-5" for 44.5 in variation attributes."""
+        offer = self._offer()
+        by_label = {v.size_label: v.size_eu for v in offer.variants}
+        assert "44-5" in by_label
+        assert by_label["44-5"] == Decimal("44.5")
+
+    def test_passes_quality_validation(self):
+        assert self._offer().quality_issues() == []
+
+
+def test_six_adapters_cover_seven_stores_on_two_routes():
+    from mkagg.adapters import all_adapters
+    assert set(all_adapters()) == {
+        "sportvision", "aspnet_mk",                  # crawlable as found
+        "magento", "woocommerce",                    # API: need permission
+        "magento_html", "woocommerce_html",          # robots-permitted route
+    }
+
+
+class TestProductTitleSource:
+    """The title must come from the page, never from a bare JSON "name".
+
+    buzzsneakers.mk ships broken JSON-LD, and the first `"name"` in that
+    document belongs to the Organization node. Rescuing it produced the
+    catalogue product "Adidas buzz online shop" -- which every test still
+    passed, because they only checked the SKU and the price.
+    """
+
+    def test_buzz_title_is_the_product_not_the_site(self):
+        adapter = get_adapter("sportvision")
+        fixture, url, _ = TEST_CASE_B["stores"]["buzz"]
+        offer = adapter.parse_product(load_bytes(fixture), url, "buzz")
+        title = offer.raw_title.lower()
+        assert "stan smith" in title
+        assert "online shop" not in title
+        assert "buzz" not in title
+        assert offer.extractors["title"] == "css"
+
+    def test_jsonld_title_still_wins_where_it_parses(self):
+        adapter = get_adapter("sportvision")
+        fixture, url, _ = TEST_CASE_A["stores"]["sportvision"]
+        offer = adapter.parse_product(load_bytes(fixture), url, "sportvision")
+        assert offer.raw_title == "Puma Caven 2.0"
+        assert offer.extractors["title"] == "jsonld"

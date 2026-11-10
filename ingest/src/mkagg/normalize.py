@@ -95,6 +95,9 @@ _NO_SIZE = {
 }
 
 _ASCII_FRACTION = re.compile(r"^(\d{1,2})\s+(\d)\s*/\s*(\d)$")
+# dsport's Magento swatch labels, e.g. "41-1/3", "42-2/3": a dash where the
+# other stores put a space. Must be tried before _DASH_DECIMAL.
+_DASH_FRACTION = re.compile(r"^(\d{1,2})-(\d)\s*/\s*(\d)$")
 _DASH_DECIMAL = re.compile(r"^(\d{1,2})-(\d)$")
 _RANGE = re.compile(r"^(\d{1,2})\s*[-/]\s*(\d{2})$")
 # NFKC output for a vulgar fraction: "41<U+2153>" becomes "411<U+2044>3".
@@ -148,8 +151,9 @@ def normalize_size(raw: str | None) -> Decimal | None:
             except InvalidOperation:
                 return None
 
-    # ASCII fraction: "44 2/3".
-    m = _ASCII_FRACTION.match(s)
+    # ASCII fraction, space- or dash-separated: "44 2/3" (buzz), "41-1/3"
+    # (dsport Magento swatch labels).
+    m = _ASCII_FRACTION.match(s) or _DASH_FRACTION.match(s)
     if m:
         whole, num, den = m.groups()
         if den == "0":

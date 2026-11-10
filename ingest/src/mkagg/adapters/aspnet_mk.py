@@ -119,6 +119,17 @@ def parse_sizes(payload, *, price_minor: int, currency: str = "MKD",
     return variants
 
 
+def _brand_from_title(title: str | None) -> str | None:
+    """First token of the title, which is the brand on this platform."""
+    if not title:
+        return None
+    first = title.strip().split()
+    if not first:
+        return None
+    token = first[0].strip(" -|,")
+    return token.title() if 2 <= len(token) <= 20 else None
+
+
 class AspNetMkAdapter(Adapter):
     slug = "aspnet_mk"
     is_api = True   # sizes come from JSON; only the price needs the HTML
@@ -168,6 +179,10 @@ class AspNetMkAdapter(Adapter):
             # The URL's ProductID is the manufacturer code on this platform.
             raw_mpn=product_id,
             raw_title=title or product_id,
+            # Titles on this platform lead with the brand ("Hoka Clifton 11").
+            # Without it the matcher cannot block, and the offer stays
+            # unmatched however good its article code is.
+            raw_brand=_brand_from_title(title),
             product_url=url,
             currency_code="MKD",
             variants=variants,

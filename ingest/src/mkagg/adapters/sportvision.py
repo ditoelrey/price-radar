@@ -35,10 +35,32 @@ _SIZE_UL = re.compile(r'<ul[^>]*class="[^"]*product-attributes[^"]*"[^>]*>', re.
 _SIZE_LI = re.compile(
     r'<li([^>]*?data-productsize-combid="(\d+)"[^>]*?)>(.*?)</li>', re.S)
 _EUR_SIZE = re.compile(r'class="eur-size"[^>]*>([^<]*)', re.I)
+_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I)
+_OG_TITLE = re.compile(r'<meta[^>]+property="og:title"[^>]+content="([^"]*)"', re.I)
+_TAGS = re.compile(r"<[^>]+>")
 _CM_SIZE = re.compile(r'class="cm-size"[^>]*>([^<]*)', re.I)
 _ORIG_SIZE = re.compile(r'class="original-size"[^>]*>([^<]*)', re.I)
 # /mk/patiki/8550245-puma-caven-2-0  ->  8550245
 _URL_ID = re.compile(r"/(\d{3,12})-[^/]+/?$")
+
+
+def _page_title(html: str) -> str | None:
+    """The product's own title, from the page rather than from JSON-LD.
+
+    Prefers ``<h1>``; falls back to ``og:title``, stripping the
+    " | Buzz - Online Shop" style site suffix these themes append.
+    """
+    m = _H1.search(html)
+    if m:
+        text = re.sub(r"\s+", " ", _TAGS.sub(" ", m.group(1))).strip()
+        if text:
+            return text
+    m = _OG_TITLE.search(html)
+    if m:
+        text = m.group(1).split("|")[0].strip()
+        if text:
+            return text
+    return None
 
 
 class SportVisionAdapter(Adapter):
@@ -63,15 +85,19 @@ class SportVisionAdapter(Adapter):
                 extractors[key] = "jsonld"
         else:
             # buzzsneakers.mk lands here: broken JSON-LD, rescue by regex.
-            title = rescue_field(html, "name")
+            # Deliberately NOT rescuing "name": the first "name" in the
+            # document is the Organization's, so that path produced the
+            # product title "Buzz - Online Shop". The <h1> is the real one.
+            title = _page_title(html)
             mpn = rescue_field(html, "sku") or rescue_field(html, "mpn")
             brand = rescue_field(html, "brand")
             store_id = rescue_field(html, "productID")
             price_raw = rescue_field(html, "price")
             currency = rescue_field(html, "priceCurrency") or "MKD"
             image = None
-            for key in ("title", "mpn", "price"):
+            for key in ("mpn", "price"):
                 extractors[key] = "regex"
+            extractors["title"] = "css"
 
         # The store's own listing id: JSON-LD productID, else the URL segment.
         if not store_id:

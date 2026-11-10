@@ -1,4 +1,4 @@
-name: sneaker-aggregator
+name: price-radar
 
 services:
   postgres:
