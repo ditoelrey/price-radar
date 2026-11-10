@@ -42,14 +42,18 @@ INSERT INTO brand (slug, name, aliases) VALUES
 INSERT INTO category (slug, kind, name_en, name_mk, name_sq) VALUES
     ('footwear', 'footwear', 'Footwear', 'Обувки', 'Këpucë');
 
+-- The ::category_kind casts are required, not cosmetic: in a UNION the column
+-- type is resolved from the FIRST branch, where a bare 'footwear' is an
+-- untyped literal that resolves to text, and the insert then fails with
+-- "column kind is of type category_kind but expression is of type text".
 INSERT INTO category (parent_id, slug, kind, name_en, name_mk, name_sq)
-SELECT id, 'sneakers', 'footwear', 'Sneakers', 'Патики', 'Atlete'  FROM category WHERE slug = 'footwear'
+SELECT id, 'sneakers', 'footwear'::category_kind, 'Sneakers', 'Патики', 'Atlete'   FROM category WHERE slug = 'footwear'
 UNION ALL
-SELECT id, 'running',  'footwear', 'Running',  'Трчање', 'Vrapim'  FROM category WHERE slug = 'footwear'
+SELECT id, 'running',  'footwear'::category_kind, 'Running',  'Трчање', 'Vrapim'   FROM category WHERE slug = 'footwear'
 UNION ALL
-SELECT id, 'boots',    'footwear', 'Boots',    'Чизми',  'Çizme'   FROM category WHERE slug = 'footwear'
+SELECT id, 'boots',    'footwear'::category_kind, 'Boots',    'Чизми',  'Çizme'    FROM category WHERE slug = 'footwear'
 UNION ALL
-SELECT id, 'slides',   'footwear', 'Slides',   'Папучи', 'Pantofla' FROM category WHERE slug = 'footwear';
+SELECT id, 'slides',   'footwear'::category_kind, 'Slides',   'Папучи', 'Pantofla' FROM category WHERE slug = 'footwear';
 
 -- -----------------------------------------------------------------------------
 -- Merchants -- adapter assignment is the key recon outcome: 7 stores, 4 adapters

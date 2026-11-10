@@ -13,9 +13,10 @@ adapters cover the RS / HR / BA / SI siblings of most of these chains.
 | Piece | State |
 |---|---|
 | Phase 1 store recon | **done** — all 7 stores profiled live |
-| Postgres schema (Flyway) | written, **not yet executed** (needs Docker running) |
-| 4 Python adapters | **done**, 96 tests green against golden files |
+| Postgres schema (Flyway) | **done** — V1–V4 applied to PostgreSQL 16.4 |
+| 4 Python adapters | **done**, 100 tests green against golden files |
 | Matcher | **done** — both golden test cases pass |
+| End-to-end smoke load | **done** — `ingest/scripts/smoke_load.py` |
 | Fetcher / scheduler | not started |
 | Loader (staging + swap) | not started |
 | Spring Boot serving API | not started |
@@ -89,6 +90,18 @@ docker compose up -d postgres redis && docker compose run --rm flyway migrate
 docker compose run --rm flyway info
 ```
 
+End-to-end check — fixtures through the adapters and matcher into Postgres,
+then the real offer-list and size-filter queries:
+
+```bash
+cd ingest && ./.venv/Scripts/python.exe -X utf8 scripts/smoke_load.py
+```
+
+Flyway's connection settings live in `environment:`, **not** `command:`.
+`docker compose run <service> <args>` replaces the compose `command`, so
+`-url`/`-user`/`-password` placed there are dropped and Flyway fails with
+*"Unable to connect to the database. Configure the url, user and password!"*.
+
 ## Rules this codebase enforces
 
 These exist because recon proved each one necessary. Please don't "simplify"
@@ -123,13 +136,32 @@ them away.
    rates and record-count deltas against the 7-day median, then swap. A parser
    showing "0 MKD" on the homepage is worse than data a few hours stale.
 
+8. **Bound HTML extraction on the element, never on a byte window.** The
+   Sport Vision size reader originally took a fixed 20 KB slice. That
+   truncated sportvision's own 23-element size run (which spans ~20.6 KB) and,
+   read any wider, bled into the recommendation tiles lower on the page —
+   160+ stray size elements on sportreality, 249 on buzz. Both failures look
+   the same from outside: a plausible list of wrong sizes. It is now bounded
+   by the size list's own `</ul>`, and `TestSizeBlockBoundary` locks the exact
+   counts (20 / 20 / 30).
+
 8. **Windows + Cyrillic:** always run Python with `-X utf8` or
    `PYTHONIOENCODING=utf-8`. The default `cp1252` console encoding raises on
    Macedonian product names.
 
+## Why the size filter is not optional
+
+The smoke load makes the case better than any argument. For the Stan Smith,
+the headline is **"from 4 072 MKD"** at Buzz — true, and Buzz has 30 sizes
+listed. But only **one** of them is actually in stock (EU 45 1/3). Ask for
+EU 44 and the real cheapest offer is **6 799 MKD**, a 67% jump.
+
+A comparison site that shows the 4 072 headline to someone shopping for size
+44 has told them something true and useless, and they find out after the
+click. Size-aware pricing is the whole difference.
+
 ## Known gaps
 
-- Migrations have never been run against a live Postgres.
 - `sizeer.com.mk` has no `robots.txt` and no sitemap; neither does the Sport
   Vision group. Discovery must use category pagination plus a brand-term
   search sweep.

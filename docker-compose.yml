@@ -24,21 +24,30 @@ services:
   # Applies db/migrations in version order, then exits.
   #   docker compose run --rm flyway migrate
   #   docker compose run --rm flyway info
+  #   docker compose run --rm flyway validate
+  #
+  # Connection details MUST live in `environment`, not in `command`:
+  # `docker compose run <service> <args>` REPLACES the compose `command`, so
+  # any -url/-user/-password put there is silently dropped and Flyway fails
+  # with "Unable to connect to the database. Configure the url, user and
+  # password!". Env vars survive the override, so every subcommand works.
   flyway:
     image: flyway/flyway:10.17-alpine
     container_name: mkagg-flyway
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/mkagg
+      FLYWAY_USER: mkagg
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-mkagg_dev_only}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_CONNECT_RETRIES: "20"
+      FLYWAY_BASELINE_ON_MIGRATE: "true"
+      # Migrations are hand-reviewed; fail loudly rather than reorder.
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
     volumes:
       - ./db/migrations:/flyway/sql:ro
-    command: >-
-      -url=jdbc:postgresql://postgres:5432/mkagg
-      -user=mkagg
-      -password=${POSTGRES_PASSWORD:-mkagg_dev_only}
-      -connectRetries=20
-      -baselineOnMigrate=true
-      migrate
 
   redis:
     image: redis:7.4-alpine

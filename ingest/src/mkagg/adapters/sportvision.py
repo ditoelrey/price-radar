@@ -26,6 +26,12 @@ from .base import (Adapter, as_text, datalayer_product_codes, jsonld_product,
                    ld_offer, ld_text, register, rescue_field)
 
 _SIZE_CONTAINER = "product-size-tabs-new"
+# The product's own size run lives in exactly one <ul class="product-attributes
+# ...">. Bounding extraction to that element's closing </ul> is essential:
+# a fixed byte window either truncates the run (sportvision ships 23 size <li>
+# spanning ~20.6 KB) or bleeds into the recommendation tiles further down the
+# page, which carry size widgets of their own (160+ combids on sportreality).
+_SIZE_UL = re.compile(r'<ul[^>]*class="[^"]*product-attributes[^"]*"[^>]*>', re.I)
 _SIZE_LI = re.compile(
     r'<li([^>]*?data-productsize-combid="(\d+)"[^>]*?)>(.*?)</li>', re.S)
 _EUR_SIZE = re.compile(r'class="eur-size"[^>]*>([^<]*)', re.I)
@@ -113,17 +119,28 @@ class SportVisionAdapter(Adapter):
     @staticmethod
     def _parse_sizes(html: str, price_minor: int | None,
                      currency: str) -> list[RawVariant]:
-        """Read the size grid.
+        """Read the size grid, bounded by the size list's own ``</ul>``.
 
         Regex rather than a DOM parser on purpose: the target is a flat run of
         sibling ``<li>`` elements inside one known container, which recon
-        verified against all three stores. Swapping in selectolax here is a
-        drop-in change if the markup ever gains nesting.
+        verified against all three stores. The ``<li>`` items contain no
+        nested lists, so the first ``</ul>`` after the opening tag is the
+        correct terminator. Swapping in selectolax here is a drop-in change if
+        the markup ever gains nesting.
         """
-        start = html.find(_SIZE_CONTAINER)
-        if start < 0:
+        anchor = html.find(_SIZE_CONTAINER)
+        if anchor < 0:
             return []
-        block = re.sub(r">\s+<", "><", html[start:start + 20000])
+
+        opening = _SIZE_UL.search(html, anchor)
+        if not opening:
+            # No size list on this page (one-size article, or markup changed).
+            # Return nothing rather than guess: a wrong size run sends a
+            # shopper to buy a size the shop does not have.
+            return []
+        closing = html.find("</ul>", opening.end())
+        block = html[opening.end():closing if closing != -1 else len(html)]
+        block = re.sub(r">\s+<", "><", block)
 
         variants: list[RawVariant] = []
         seen: set[str] = set()

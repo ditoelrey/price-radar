@@ -5,6 +5,7 @@ failure names the exact field that moved.
 """
 from __future__ import annotations
 
+import pytest
 from conftest import TEST_CASE_A, TEST_CASE_B, load_bytes, load_json
 
 from mkagg.adapters import get_adapter
@@ -235,3 +236,55 @@ def test_four_adapters_cover_seven_stores():
     from mkagg.adapters import all_adapters
     assert set(all_adapters()) == {
         "sportvision", "magento", "woocommerce", "aspnet_mk"}
+
+
+class TestSizeBlockBoundary:
+    """Regression guard for the size-container boundary.
+
+    The first implementation read a fixed 20 KB window after the size-tabs
+    marker. That is wrong in both directions and the two failures look
+    identical from the outside:
+
+    * **truncation** -- sportvision's own size run spans ~20.6 KB, so 5 of its
+      23 size elements were silently dropped;
+    * **bleed** -- reading further picks up the recommendation tiles lower on
+      the page, which carry size widgets of their own (160+ combids on
+      sportreality, 249 on buzz).
+
+    Bounding on the size list's own ``</ul>`` fixes both. These exact counts
+    lock that boundary: a change in either direction breaks a number here.
+    """
+
+    EXPECTED = {
+        "sportvision": ("sportvision_caven20.html", 20, "35,5", "48.5"),
+        "sportreality": ("sportreality_caven20.html", 20, "35.5", "48.5"),
+        "buzz": ("buzz_stansmith.html", 30, "35.5", "57"),
+    }
+
+    @pytest.mark.parametrize("slug", sorted(EXPECTED))
+    def test_full_size_run_no_truncation_no_bleed(self, slug):
+        fixture, count, smallest, largest = self.EXPECTED[slug]
+        adapter = get_adapter("sportvision")
+        url = f"https://www.{slug}.mk/mk/patiki/1-x"
+        offer = adapter.parse_product(load_bytes(fixture), url, slug)
+
+        assert len(offer.variants) == count, (
+            f"{slug}: expected {count} sizes, got {len(offer.variants)} -- "
+            "the size-list boundary moved (truncation or bleed)")
+        labels = {v.size_label for v in offer.variants}
+        assert smallest in labels, f"{slug}: smallest size missing -> truncated"
+        assert largest in labels, f"{slug}: largest size missing -> truncated"
+
+    def test_sizes_are_one_contiguous_list(self):
+        """Every size must come from the product's own list.
+
+        Bleed shows up as an implausible count, since each recommendation tile
+        contributes a whole size run of its own.
+        """
+        adapter = get_adapter("sportvision")
+        offer = adapter.parse_product(
+            load_bytes("sportreality_caven20.html"),
+            "https://www.sportreality.mk/mk/patiki/51378-puma-caven-2-0",
+            "sportreality")
+        # One shoe never has 40+ sizes; the raw page holds 160 combids.
+        assert len(offer.variants) < 40
