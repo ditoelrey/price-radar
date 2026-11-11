@@ -22,10 +22,8 @@ adapters cover the RS / HR / BA / SI siblings of most of these chains.
 | HTML routes (dsport + megasport) | **done** |
 | URL discovery | **done** — sitemap / paginated / sampled, per platform |
 | Worker loop | **done** — `scripts/run_pipeline.py` runs it autonomously |
-| Spring Boot serving API | not started |
-| Next.js frontend | not started |
-| Spring Boot serving API | not started |
-| Next.js frontend | not started |
+| Spring Boot serving API | **done** — listing, detail, `/out/{id}` redirect |
+| Next.js frontend | **done** — listing + detail, size-aware throughout |
 
 ## The core finding
 
@@ -139,10 +137,71 @@ ingest/
     verify_fetcher.py live check against real stores (~8 requests)
   tests/
     fixtures/         golden files captured from the live stores
+web/                  Next.js 16 / React 19 storefront (App Router, TS)
+  src/app/products/     listing and detail pages (server components)
+  src/components/       catalog/ (size picker, cards, offer rows) + ui/ (shadcn)
+  src/lib/              typed API client, money and size formatting
+api/                  Spring Boot 3.3 / Java 21 serving layer
+  src/main/java/mk/priceradar/api/
+    catalog/            listing + detail: Dtos, repository, service, controller
+    outbound/           /out/{id}: click ledger then 302
+  Dockerfile            multi-stage; builds with no local JDK
 tools/
   probe_mk_stores.py  store recon prober (stdlib only)
-docker-compose.yml    postgres + flyway + redis
+docker-compose.yml    postgres + flyway + redis + api
 ```
+
+## The serving API
+
+Spring Boot 3.3 on Java 21, with virtual threads on — the layer is almost
+entirely waiting on Postgres, so that lifts the thread ceiling with no
+reactive rewrite. Plain `JdbcClient`, no ORM: the queries *are* the value
+here, and an ORM would hide the one thing that has to stay readable.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/products?q=&brand=&sizeEu=&page=&pageSize=` | listing, cheapest first |
+| `GET /api/v1/products/{slug}?sizeEu=` | detail, every offer by total price |
+| `GET /out/{offerVariantId}` | log the click, then 302 to the shop |
+| `GET /actuator/health` | liveness |
+
+Three rules it exists to enforce:
+
+**The listing never aggregates.** It reads `product_price_summary`, one
+pre-computed row per product. Computing `MIN(price)` over `offer_variant` at
+request time would scan ~1.2M rows per search today and more per merchant
+added.
+
+**`sizeEu` changes the price, and the response says so.** Without it you get
+the product's cheapest offer; with it, the cheapest offer *in that size*,
+recomputed from the variants, and `fromPriceIsSizeSpecific: true`. For the
+Stan Smith that is the difference between the 4 072 MKD headline and the
+6 799 a shopper asking for EU 44 actually pays.
+
+**Offers sort by total, not sticker.** 2 863 MKD plus 400 postage is dearer
+than 3 000 delivered free, and sorting on the sticker would mislead on
+precisely the comparison the site exists to make.
+
+### The redirect is the business
+
+`/out/{id}` logs the click **synchronously, before** the 302, and **fails
+open**: if the insert throws, the shopper is still redirected and the failure
+is logged with every id needed to reconstruct the row by hand. Losing a ledger
+row is bad; breaking the shopper's journey — and the shop's sale — because our
+database hiccuped is worse. The response is `no-store`, since a cached
+redirect would both stale the destination and stop the click reaching us.
+
+No raw IP is ever stored: `click_event.ip_hash` is a salted SHA-256 truncated
+to 16 bytes. An unsalted hash of an IPv4 address is not anonymisation — the
+space is four billion values — so `CLICK_IP_HASH_SALT` is required
+configuration, not a default. Bot clicks are **flagged and kept**, never
+dropped, so the ledger can still explain itself when a merchant disputes an
+invoice.
+
+`merchant.affiliate_url_template` (V9) builds attributable deep links, with
+`{url}` / `{rawUrl}` / `{variantId}` substituted at redirect time. NULL means
+a direct redirect, which is correct for a direct CPC deal and is where every
+merchant is today.
 
 ## The priority ladder
 
@@ -241,6 +300,16 @@ cd ingest && ./.venv/Scripts/python.exe -X utf8 scripts/run_pipeline.py discover
 cd ingest && ./.venv/Scripts/python.exe -X utf8 scripts/run_pipeline.py probe
 ```
 
+The API — builds and tests with **no JDK or Maven on the host**:
+
+```bash
+docker compose run --rm api-test
+```
+
+```bash
+docker compose up -d --build api && curl -s localhost:8080/actuator/health
+```
+
 **The database tests TRUNCATE, so they point at a separate `mkagg_test`
 database** (`MKAGG_TEST_DSN`). Create it once with:
 
@@ -304,7 +373,21 @@ them away.
    test still passed, because they only asserted the SKU and the price. Titles
    come from `<h1>`, then `og:title` with the site suffix stripped.
 
-11. **Zero is never falsy enough to skip a check.** The probe guard first read
+11. **Never default a category.** `create_product` hard-coded `sneakers` for
+   everything it created, so a pack of socks became footwear. `category_id` is
+   nullable and NULL is the right value for a title that does not say: a null
+   reads as a question in admin, a wrong value reads as settled. See
+   `taxonomy.classify`, which returns None rather than guessing.
+
+12. **Match keywords on whole words.** The classifier compared
+   space-padded text but stripped the padding off its needles, so `ball`
+   matched inside `HANDBALL SPEZIAL` and filed a shoe as equipment.
+
+13. **List both the singular and the plural.** The noise list had `тренерки`
+   but not `тренерка`, which left "Dolna Trenerka" sitting inside a product
+   name. Macedonian category nouns need both forms, in both scripts.
+
+14. **Zero is never falsy enough to skip a check.** The probe guard first read
    `if old_price and new_price and abs(...)`, so a price of `0` — the exact
    value a broken parser produces — bypassed it and would have been published.
    Compare with `is None` and `== 0` explicitly. Relatedly, sport-m's
@@ -312,17 +395,17 @@ them away.
    "stock only, keep the stored price", while zeros mixed in among real prices
    mean a parser fault and are quarantined.
 
-12. **Postgres forbids `EXCLUDED` in `RETURNING`.** To learn whether an upsert
+15. **Postgres forbids `EXCLUDED` in `RETURNING`.** To learn whether an upsert
    actually changed anything, read the prior row in a CTE and compare against
    the bound parameters. `promote.py` does this, and it is what makes
    write-on-change work in the loader.
 
-13. **A clock and a sleep must come from the same source.** `MemoryRateLimiter`
+16. **A clock and a sleep must come from the same source.** `MemoryRateLimiter`
    and `Fetcher` take both. Injecting a test clock while sleeping on the real
    one makes every wait loop measure a time that never advances — it hangs
    rather than failing, which is the worst way for a bug to present.
 
-14. **Bound HTML extraction on the element, never on a byte window.** The
+17. **Bound HTML extraction on the element, never on a byte window.** The
    Sport Vision size reader originally took a fixed 20 KB slice. That
    truncated sportvision's own 23-element size run (which spans ~20.6 KB) and,
    read any wider, bled into the recommendation tiles lower on the page —
@@ -374,6 +457,142 @@ jobs=5  fetched=5  probes=64(changed=0,rejected=0)  4.9s
 per-offer probe design working: one page fetch resolves every size of an
 offer, so sizes do not multiply requests.
 
+## The API, verified live
+
+Detail page for the Stan Smith, straight out of `/api/v1/products/{slug}`:
+
+```
+Adidas Stan Smith   MPN M20325
+  from 4,072 to 6,799 MKD | 3 offers / 3 shops
+
+  shop             from(total)  sizes  in stock  unknown  operator
+  Buzz Sneakers          4,072     30         1        0  -
+  Sizeer                 6,799      8         0        8  sportm
+  Sport-M                6,799      8         8        0  sizeer
+```
+
+Sizeer reports eight sizes and zero stock claims — `NOT_PUBLISHED`, not
+`SOLD_OUT` — and both it and Sport-M are badged as the same operator, because
+both are on the page.
+
+Now add `?sizeEu=44`:
+
+```
+  Buzz Sneakers      4,072 MKD  size 44   SOLD_OUT                -> /out/348
+  Sizeer             6,799 MKD  size 44   NOT_PUBLISHED           -> /out/119
+  Sport-M            6,799 MKD  size 44   IN_STOCK        qty 1   -> /out/368
+```
+
+The 4,072 headline is **sold out in size 44**. A shopper asking for that size
+really pays 6,799 — a 67% jump — and the API says so rather than advertising a
+price they cannot buy.
+
+And the redirect:
+
+```
+GET /out/368
+  HTTP 302
+  Location: https://www.sport-m.com.mk/ProductCatalog/ProductDetails?ProductID=M20325
+  Cache-Control: no-store, no-cache, must-revalidate, max-age=0
+  Referrer-Policy: no-referrer
+
+click_event
+ variant | merchant | price | cur | is_bot | ip_hash_bytes
+     368 | sportm   |  6799 | MKD | t      |            16
+```
+
+The price is captured *as shown at click time*, which is what makes the
+click-time mismatch KPI computable and an invoice defensible.
+
+## Product naming
+
+Shop titles are not product names. Megasport's are shaped
+`"{article code} {category word} {model} - Megasport"`, so a naive clean
+produced the catalogue entry **"Adidas Gh0331 Chorapi Act Core Mid Crew Sock
+3p Megasport"**. `clean_model_name` now also takes the `mpn` and the
+`merchant`:
+
+| shop title | catalogue name | category |
+|---|---|---|
+| `GH0331 Чорапи ACT CORE MID CREW SOCK 3P - Megasport` | Adidas Act Core Mid Crew Sock 3p | `socks` |
+| `JQ2626 Патики GALAXY 7 M - Megasport` | Adidas Galaxy 7 M | `sneakers` |
+| `857797631I-990 ICEPEAK IRWINTON SKI HELANKI/CR` | Icepeak Irwinton Ski Cr | `leggings` |
+| `1357128-001 Долна тренерка UA Rival Fleece Joggers - Megasport` | Under Armour Ua Rival Fleece Joggers | `apparel` |
+| `ADIDAS TERREX SKYCHASER AX5 MID GTX ЗА МАЖИ` | Adidas Terrex Skychaser Ax5 Mid Gtx | `boots` (from the URL) |
+
+The article code is removed by **exact match on the known MPN**, never by
+pattern: anything loose enough to catch `7312-200` also eats "Caven 2.0",
+"Galaxy 7" and "Air Max 90". The shop suffix is anchored to the end of the
+string. The English word "sock" survives because it is part of the real model
+name, while the shop's Cyrillic category word does not.
+
+Measured over the live catalogue after the fix: **0 of 29 product names
+contain an article code, and 0 contain a shop name.**
+
+## The storefront
+
+Next.js 16 (App Router) + TypeScript, Tailwind and shadcn/ui, Lucide icons.
+Layout follows the references: filter rail on the left, product grid on the
+right, flat minimal cards.
+
+**Everything renders on the server.** Filtering is driven by URL search params
+rather than client state, so the browser never calls the Spring API: no CORS
+surface, no API origin exposed, and a filtered view is a real URL that can be
+shared, bookmarked and hit with the back button.
+
+### The size picker is the whole design
+
+A grid of chips, not a dropdown. A shopper knows their size and should be able
+to hit it in one click; a select would add two interactions to the single
+filter that changes what every price on the page *means*. Sizes render as
+`44 ⅔`, not `44.667` — the pipeline's number is for comparing, the fraction is
+what is printed on the box.
+
+Pick EU 44 on the Stan Smith and the page says so outright:
+
+> The **4.072 ден.** headline is from Buzz Sneakers, which does not have EU 44.
+> In your size the cheapest is **6.799 ден.** at Sport-M.
+
+### Rules the offer table enforces
+
+1. **One row per shop, not per size.** Buzz carries that shoe in 30 sizes at
+   one price; a row each buried every other shop under thirty near-identical
+   lines.
+2. **The row's price must be buyable.** Each shop is represented by its
+   cheapest variant that is *not* sold out. Sorting purely on price first
+   produced a top row reading "Best total price — EU 35.5 — Sold out": true,
+   useless, and exactly the bait this site exists to prevent.
+3. **Ties go to the shop that confirms stock.** Sizeer and Sport-M quote an
+   identical 6.799 ден. and Sizeer publishes no availability, so crowning it
+   "best" would send shoppers to the weaker of two identical offers.
+4. **Totals, never stickers**, and the check time sits beside the price rather
+   than in a footnote.
+
+Buy buttons always point at `/out/{variantId}` with `rel="sponsored nofollow"`.
+
+## Product images
+
+All seven platforms now yield a real product photo (32 of 32 products, up
+from 5). Three separate causes, none of which announced itself:
+
+**JSON-LD `image` is rarely a string.** schema.org allows four shapes and
+these stores use three: sportvision sends a *list of strings*, megasport a
+*list of `ImageObject` dicts*, buzz nothing at all. Reading it with a scalar
+text helper returned `None` for both list forms, silently.
+
+**`og:image` is sometimes the company logo.** sport-m advertises
+`Content/FacebookLogo.png` and sizeer `Content/Logo.png`. Trusting that tag
+would have put a Facebook logo on every one of their product cards — working
+code, wrong picture. Their real photos sit at
+`/ProductImages/{ProductID}.webp`, matched against *this* product's id so the
+carousel's neighbours and the brand-logo directory cannot be picked up
+instead. `looks_like_product_image()` rejects the known chrome either way.
+
+**A product took its image once, at creation.** A product first seen through
+a shop with no photo stayed blank for good, even after three other shops
+listed it. Promotion now backfills `product.image_url` from the first offer
+that has one, and reports the count.
+
 ## Known gaps
 
 - `sizeer.com.mk` has no `robots.txt` and no sitemap; neither does the Sport
@@ -395,4 +614,16 @@ offer, so sizes do not multiply requests.
   versions exist and are interface-compatible; switch when more than one
   worker runs, or the per-domain budget is silently multiplied by the worker
   count.
-- No serving API and no frontend, so nothing reads the catalogue yet.
+- Images are hotlinked from the shops. They load, but it is their bandwidth
+  and a referer rule on any one of them would blank that shop's photos
+  overnight. Re-hosting into the raw-snapshot bucket is the durable fix.
+- The storefront serves every category, so the two apparel rows appear among
+  the sneakers. Scoping the listing to `category_kind = 'footwear'` is one
+  clause in the listing query — a product decision rather than a bug.
+- **Categories are NULL for 11 of 29 products.** Correct, not broken: those
+  titles ("Adidas Handball Spezial", "Hoka Clifton UTL") simply do not name a
+  category, so none is claimed. Discovery *does* know — it reached them
+  through footwear facets and footwear sitemaps — so passing that context into
+  the loader as a category hint is the obvious next improvement.
+- No live price verification in front of `/out/{id}` yet. It belongs there
+  with a hard sub-second budget and must never delay the redirect.

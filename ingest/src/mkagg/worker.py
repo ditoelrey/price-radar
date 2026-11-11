@@ -54,6 +54,7 @@ class WorkerReport:
     skipped: dict[str, int] = field(default_factory=lambda: defaultdict(int))
     http_errors: int = 0
     parse_failures: int = 0
+    offers_unpriced: int = 0
     probes_applied: int = 0
     probes_changed: int = 0
     probes_rejected: int = 0
@@ -73,6 +74,8 @@ class WorkerReport:
                         f",rejected={self.probes_rejected})")
         if self.offers_parsed:
             bits.append(f"offers={self.offers_parsed}")
+        if self.offers_unpriced:
+            bits.append(f"unpriced={self.offers_unpriced}")
         bits.append(f"{self.duration_s:.1f}s")
         return "  ".join(bits)
 
@@ -297,6 +300,29 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
             if job.offer_variant_id:
                 unanswered.append(job.offer_variant_id)
             continue
+
+        # An offer with no price is not an offer: there is nothing to compare,
+        # so it cannot appear on a comparison page. Shops do publish these --
+        # megasport lists discontinued stock with
+        # `data-product_variations="[]"`, `out-of-stock` and a JSON-LD price of
+        # 0 -- and letting them through dragged a whole merchant's price fill
+        # rate to 80% and had the gate reject the entire run, blocking four
+        # perfectly good offers along with the dud.
+        #
+        # Counted rather than silently dropped: a sudden rise here means a
+        # parser stopped finding prices, which is the same symptom with a very
+        # different cause.
+        # Catalogue offers only. A stock probe is legitimately price-less:
+        # sport-m's and sizeer's GetVelicini returns sizes and stock and no
+        # price at all, so applying this filter to probes dropped every one of
+        # them -- caught immediately by the probe test, which is the whole
+        # reason that test asserts a count rather than just "no error".
+        if job.kind != "stock_probe":
+            priced = [o for o in offers if o.min_price_minor]
+            report.offers_unpriced += len(offers) - len(priced)
+            offers = priced
+            if not offers:
+                continue
 
         report.offers_parsed += len(offers)
 

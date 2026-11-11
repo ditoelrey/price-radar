@@ -1,0 +1,3 @@
+/app/src/test/java/mk/priceradar/api/catalog/CatalogServiceTest.java
+/app/src/test/java/mk/priceradar/api/outbound/ClickContextFactoryTest.java
+/app/src/test/java/mk/priceradar/api/outbound/OutboundControllerTest.java

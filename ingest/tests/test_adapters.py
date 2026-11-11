@@ -440,3 +440,113 @@ class TestProductTitleSource:
         offer = adapter.parse_product(load_bytes(fixture), url, "sportvision")
         assert offer.raw_title == "Puma Caven 2.0"
         assert offer.extractors["title"] == "jsonld"
+
+
+class TestProductImages:
+    """Every platform must yield a product photo, and never site chrome.
+
+    The storefront exposed this: 27 of 32 products rendered a grey
+    placeholder. Three separate causes, one per platform family.
+    """
+
+    CASES = [
+        # (merchant, adapter, fixture, url, sizes fixture, expected substring)
+        ("sportvision", "sportvision", "sportvision_caven20.html",
+         "https://www.sportvision.mk/mk/patiki/8550245-x", None, "392290-02"),
+        ("buzz", "sportvision", "buzz_stansmith.html",
+         "https://www.buzzsneakers.mk/mk/patiki/2011-x", None, "M20325"),
+        ("megasport", "woocommerce_html", "megasport_product_caven20.html",
+         "https://megasportonlineshop.com/p/x/", None, "392290-02"),
+        ("dsport", "magento_html", "dsport_product_kj8942.html",
+         "https://www.dsport.mk/muskarci/obuca/cizme/adidas-terrex-kj8942",
+         None, "KJ8942"),
+        ("sportm", "aspnet_mk", "sportm_stansmith.html",
+         "https://www.sport-m.com.mk/ProductCatalog/ProductDetails?ProductID=M20325",
+         "sportm_getvelicini_M20325.json", "/ProductImages/M20325"),
+        ("sizeer", "aspnet_mk", "sizeer_stansmith.html",
+         "https://sizeer.com.mk/ProductCatalog/ProductDetails?ProductID=M20325",
+         "sizeer_getvelicini_M20325.json", "/ProductImages/M20325"),
+    ]
+
+    def _offer(self, merchant, adapter_slug, fixture, url, sizes):
+        adapter = get_adapter(adapter_slug)
+        if adapter_slug == "aspnet_mk":
+            return adapter.parse_product(
+                load_bytes(fixture), url, merchant,
+                sizes_payload=load_json(sizes),
+                publishes_stock=(merchant == "sportm"))
+        return adapter.parse_product(load_bytes(fixture), url, merchant)
+
+    @pytest.mark.parametrize(
+        "merchant,adapter_slug,fixture,url,sizes,expected",
+        CASES, ids=[c[0] for c in CASES])
+    def test_every_platform_yields_an_image(self, merchant, adapter_slug,
+                                            fixture, url, sizes, expected):
+        offer = self._offer(merchant, adapter_slug, fixture, url, sizes)
+        assert offer.image_url, f"{merchant} produced no image"
+        assert offer.image_url.startswith("http")
+        assert expected.lower() in offer.image_url.lower()
+
+    def test_site_logos_are_never_used_as_product_images(self):
+        """sport-m and sizeer advertise their own logo as og:image.
+
+        `Content/FacebookLogo.png` and `Content/Logo.png`. Trusting that tag
+        would put a logo on every card — code that looks like it works.
+        """
+        for merchant, sizes in (("sportm", "sportm_getvelicini_M20325.json"),
+                                ("sizeer", "sizeer_getvelicini_M20325.json")):
+            fixture = f"{merchant}_stansmith.html"
+            host = ("www.sport-m.com.mk" if merchant == "sportm"
+                    else "sizeer.com.mk")
+            offer = self._offer(
+                merchant, "aspnet_mk", fixture,
+                f"https://{host}/ProductCatalog/ProductDetails?ProductID=M20325",
+                sizes)
+            lowered = offer.image_url.lower()
+            assert "logo" not in lowered
+            assert "/content/" not in lowered
+
+    def test_chrome_guard_rejects_known_furniture(self):
+        from mkagg.adapters.base import looks_like_product_image
+
+        for bad in ("https://www.sport-m.com.mk/Content/FacebookLogo.png",
+                    "https://sizeer.com.mk/Content/Logo.png",
+                    "https://x.mk/BrandsImages/Adidas.png",
+                    "https://x.mk/MenuImages/banner.jpg",
+                    "https://x.mk/img/placeholder.png",
+                    "https://x.mk/no-image.jpg", "", None):
+            assert not looks_like_product_image(bad), bad
+        for good in ("https://x.mk/ProductImages/M20325.webp",
+                     "https://x.mk/media/catalog/product/cache/a/1790606725KJ8942.jpg"):
+            assert looks_like_product_image(good), good
+
+    def test_jsonld_image_handles_every_shape(self):
+        """schema.org allows four shapes; these stores use three of them."""
+        from mkagg.adapters.base import ld_image
+
+        assert ld_image({"image": "https://x.mk/a.jpg"}) == "https://x.mk/a.jpg"
+        # sportvision: a list of strings — the shape a scalar helper dropped.
+        assert ld_image({"image": ["https://x.mk/a.jpg", "https://x.mk/b.jpg"]}) \
+            == "https://x.mk/a.jpg"
+        # megasport: a list of ImageObjects.
+        assert ld_image({"image": [{"@type": "ImageObject",
+                                    "url": "https://x.mk/c.jpg"}]}) \
+            == "https://x.mk/c.jpg"
+        assert ld_image({"image": {"url": "https://x.mk/d.jpg"}}) == "https://x.mk/d.jpg"
+        # A logo in the list is skipped in favour of the next candidate.
+        assert ld_image({"image": ["https://x.mk/Content/Logo.png",
+                                   "https://x.mk/real.jpg"]}) == "https://x.mk/real.jpg"
+        assert ld_image({"image": []}) is None
+        assert ld_image(None) is None
+
+    def test_aspnet_image_belongs_to_this_product(self):
+        """The page also carries the carousel's images and brand logos."""
+        from mkagg.adapters.aspnet_mk import product_image
+
+        html = load_bytes("sportm_stansmith.html").decode("utf-8", "replace")
+        url = product_image(html, "M20325", "https://www.sport-m.com.mk")
+        assert url == "https://www.sport-m.com.mk/ProductImages/M20325.webp"
+        # A neighbour's id must not borrow this product's photo.
+        assert "M20325" not in (product_image(html, "GX6394",
+                                              "https://www.sport-m.com.mk") or "")
+        assert product_image(html, "", "https://x.mk") is None

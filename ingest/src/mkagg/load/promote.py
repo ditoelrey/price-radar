@@ -32,6 +32,7 @@ class PromotionReport:
     products_touched: set[int] = field(default_factory=set)
     candidates_queued: int = 0
     offers_delisted: int = 0
+    images_backfilled: int = 0
 
 
 # -----------------------------------------------------------------------------
@@ -216,15 +217,32 @@ def create_product(conn, offer: RawOffer, brand_id: int,
     article code. No manual data entry at any point.
     """
     from ..normalize import clean_model_name
+    from ..taxonomy import classify
 
     with conn.cursor() as cur:
         cur.execute("SELECT name FROM brand WHERE id = %s", (brand_id,))
         brand_name = cur.fetchone()[0]
-        cur.execute("SELECT id FROM category WHERE slug = 'sneakers'")
-        row = cur.fetchone()
-        category_id = row[0] if row else None
 
-        model = clean_model_name(offer.raw_title, brand_name) or offer.raw_title
+        # The shop's display name, so a "- Megasport" suffix can be stripped
+        # from the title instead of becoming part of the product name.
+        cur.execute("SELECT name FROM merchant WHERE slug = %s",
+                    (offer.merchant_slug,))
+        row = cur.fetchone()
+        merchant_name = row[0] if row else None
+
+        # Classify, and accept NULL when the title does not say. Defaulting to
+        # 'sneakers' here is what filed a pack of socks as footwear.
+        category_slug = classify(offer.raw_title, url=offer.product_url)
+        category_id = None
+        if category_slug:
+            cur.execute("SELECT id FROM category WHERE slug = %s",
+                        (category_slug,))
+            row = cur.fetchone()
+            category_id = row[0] if row else None
+
+        model = clean_model_name(offer.raw_title, brand_name,
+                                 mpn=offer.raw_mpn,
+                                 merchant=merchant_name) or offer.raw_title
         # clean_model_name lowercases for comparison; the catalogue name is
         # read by people, so title-case it ("caven 2.0" -> "Caven 2.0").
         model = " ".join(w.capitalize() if w[:1].isalpha() else w
@@ -471,6 +489,21 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
             if product_id:
                 report.offers_promoted += 1
                 report.products_touched.add(product_id)
+
+                # Backfill the catalogue image from whichever shop supplies
+                # one. The product takes its image at creation time, so a
+                # product first seen through a shop with no photo stayed
+                # blank for good, even once three other shops listed it.
+                # COALESCE means the first real image wins and later crawls
+                # do not churn it.
+                if offer.image_url:
+                    cur.execute(
+                        """UPDATE product
+                              SET image_url = %s, updated_at = now()
+                            WHERE id = %s AND image_url IS NULL""",
+                        (offer.image_url, product_id))
+                    if cur.rowcount:
+                        report.images_backfilled += 1
             else:
                 report.offers_unmatched += 1
 

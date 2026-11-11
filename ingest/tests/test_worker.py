@@ -486,3 +486,57 @@ class TestStockOnlyProbes:
         with conn.cursor() as cur:
             cur.execute("SELECT price_minor FROM offer_variant ORDER BY size_eu")
             assert [r[0] for r in cur.fetchall()] == [2863, 2863]
+
+
+class TestUnpricedOffers:
+    """A listing with no price is not an offer.
+
+    megasport publishes discontinued stock with `data-product_variations="[]"`,
+    an `out-of-stock` marker and a JSON-LD price of 0. Staging those dropped
+    the merchant's price fill rate to 80%, which made the gate reject the whole
+    run -- so one dud listing blocked four good offers.
+    """
+
+    def test_unpriced_offers_are_dropped_and_counted(self):
+        from mkagg.worker import run_once
+
+        priced = RawOffer(
+            merchant_slug="sportvision", merchant_sku="1", raw_mpn="392290-02",
+            raw_title="Puma Caven 2.0", product_url="https://x.mk/p/1",
+            variants=[RawVariant(size_label="42", price_minor=2863)])
+        unpriced = RawOffer(
+            merchant_slug="sportvision", merchant_sku="2", raw_mpn="XX1",
+            raw_title="Discontinued thing", product_url="https://x.mk/p/2",
+            variants=[])
+
+        captured = {}
+
+        def fake_ingest(conn, slug, offers, **kwargs):
+            captured[slug] = offers
+            return None
+
+        fetcher = make_fetcher({"/p": (200, HTML, b"<html></html>")})
+        queue = MemoryFetchQueue()
+        # kind matters: FetchJob defaults to "stock_probe", and the filter
+        # deliberately does not apply to probes.
+        queue.push(FetchJob(merchant_slug="sportvision", url="https://x.mk/p",
+                            kind="catalog_parse"))
+
+        import mkagg.worker as worker
+        original = worker.parse_result
+        worker.parse_result = lambda f, r, m: [priced, unpriced]
+        try:
+            report = run_once(FakeConn(), fetcher, queue, ingest_fn=fake_ingest)
+        finally:
+            worker.parse_result = original
+
+        assert report.offers_unpriced == 1
+        assert report.offers_parsed == 1
+        assert [o.merchant_sku for o in captured["sportvision"]] == ["1"]
+
+    def test_a_rise_in_unpriced_is_visible_in_the_summary(self):
+        report = WorkerReport(jobs_processed=5, fetched=5, offers_parsed=1,
+                              offers_unpriced=4, duration_s=1.0)
+        # The same symptom as a parser that stopped finding prices, so it has
+        # to be legible rather than silent.
+        assert "unpriced=4" in report.summary()

@@ -54,6 +54,8 @@ class IngestOutcome:
             bits.append(f"unmatched={self.promotion.offers_unmatched}")
             bits.append(f"new_products={self.promotion.products_created}")
             bits.append(f"price_points={self.promotion.price_points_written}")
+            if self.promotion.images_backfilled:
+                bits.append(f"images={self.promotion.images_backfilled}")
         if self.reason:
             bits.append(f"reason={self.reason}")
         return "  ".join(bits)

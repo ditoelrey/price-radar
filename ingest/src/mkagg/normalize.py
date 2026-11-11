@@ -255,6 +255,19 @@ _NOISE_WORDS = [
     # Macedonian (Cyrillic)
     "патики", "патика", "обувки", "обувка", "кондури", "папучи", "чизми",
     "копачки", "машки", "женски", "детски", "унисекс", "за", "мажи", "жени",
+    # Non-footwear category prefixes megasport puts in front of every title.
+    # Both scripts are listed because clean_model_name transliterates BEFORE
+    # applying this list, so a Cyrillic-only entry would never match -- which
+    # is exactly why "chorapi" survived into the product name at first.
+    # The English "sock"/"jacket" are deliberately absent: they are part of
+    # real model names ("ACT CORE MID CREW SOCK 3P"), unlike the shop's own
+    # Cyrillic category word.
+    "чорапи", "чорапа", "хеланки", "хеланка", "тренерки", "тренерка",
+    "маица", "дуксер", "јакна", "капа", "ранец", "торба", "опрема", "топка",
+    "долна", "горна", "комплет",
+    "chorapi", "chorapa", "corapi", "helanki", "helanka", "trenerki",
+    "trenerka", "maica", "majica", "dukser", "jakna", "kapa", "ranec",
+    "torba", "oprema", "topka", "dolna", "gorna", "komplet",
     # Macedonian / Serbian (Latin)
     "patiki", "patika", "obuvki", "konduri", "papuci", "cizme", "kopacki",
     "muski", "zenski", "deciji", "unisex", "za", "mazhi", "zheni", "muske",
@@ -282,15 +295,47 @@ def translit_mk(text: str) -> str:
     return (text or "").lower().translate(_CYR_TO_LAT)
 
 
-def clean_model_name(title: str, brand: str | None = None) -> str:
+def clean_model_name(title: str, brand: str | None = None,
+                     mpn: str | None = None,
+                     merchant: str | None = None) -> str:
     """Reduce a shop title to the comparable model name.
 
     ``"Патики Puma Caven 2.0 за мажи"`` -> ``"caven 2.0"``
 
-    Used only for the fuzzy fallback. SKU matching needs none of this, which
-    is why recon finding "every MK store exposes the MPN" matters so much.
+    ``mpn`` and ``merchant`` are what make the result fit to be a *catalogue*
+    name rather than merely comparable. Megasport titles are shaped
+    ``"{code} {category} {model} - Megasport"``, so without them this produced
+    the product name "Adidas Gh0331 Chorapi Act Core Mid Crew Sock 3p
+    Megasport" -- the article code and the shop's own name baked into the text
+    a shopper reads.
+
+    The article code is removed by **exact match on the known MPN**, never by
+    guessing at code-shaped tokens: "Caven 2.0", "Galaxy 7" and "Air Max 90"
+    are model names, and a pattern loose enough to catch ``7312-200`` would
+    eat them too.
+
+    Punctuation is stripped only *after* those removals, because both the code
+    and the shop suffix are identified by their punctuation.
     """
-    s = translit_mk(title or "")
+    s = title or ""
+
+    # 1. The article code, in the spellings shops actually use for it.
+    if mpn:
+        raw = mpn.strip()
+        variants = {raw, raw.replace("-", " "), raw.replace("-", ""),
+                    raw.replace(" ", "-"), raw.replace(" ", "")}
+        for variant in sorted(variants, key=len, reverse=True):
+            if len(variant) >= 4:
+                s = re.sub(re.escape(variant), " ", s, flags=re.I)
+
+    # 2. A trailing "- Megasport" shop-name suffix. Anchored to the end and
+    #    matched against the known merchant only, so a model name that happens
+    #    to contain the word survives.
+    if merchant:
+        s = re.sub(r"[\s\-|–—]+" + re.escape(merchant.strip()) + r"\s*$",
+                   " ", s, flags=re.I)
+
+    s = translit_mk(s)
     if brand:
         for token in {brand, translit_mk(brand)}:
             if token:

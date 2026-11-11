@@ -26,8 +26,8 @@ import re
 
 from ..models import RawOffer, RawVariant
 from ..normalize import normalize_size, parse_price_minor
-from .base import (Adapter, as_text, jsonld_product, ld_offer, ld_text,
-                   register)
+from .base import (Adapter, as_text, jsonld_product, ld_image, ld_offer,
+                   ld_text, og_image, register)
 
 _VARIATIONS = re.compile(r'data-product_variations=(["\'])(.*?)\1', re.S)
 _PRODUCT_ID = re.compile(r'data-product_id="(\d+)"')
@@ -79,7 +79,8 @@ class WooCommerceHtmlAdapter(Adapter):
             title = ld_text(node.get("name"))
             mpn = ld_text(node.get("sku")) or ld_text(node.get("mpn"))
             brand = ld_text(node.get("brand"))
-            image = ld_text(node.get("image"))
+            # A list of ImageObject dicts on this store.
+            image = ld_image(node)
             extractors.update(title="jsonld", mpn="jsonld")
             parent_price = parse_price_minor(offer.get("price"), minor_unit=0)
         else:
@@ -92,9 +93,7 @@ class WooCommerceHtmlAdapter(Adapter):
                 extractors["mpn"] = "css"
 
         if not image:
-            m = _OG_IMAGE.search(html)
-            if m:
-                image = m.group(1)
+            image = og_image(html)
 
         # The listing id the Store API also reports, so both routes agree on
         # merchant_sku and upsert the same offer.

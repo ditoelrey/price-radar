@@ -130,7 +130,10 @@ def match_offer(offer: RawOffer,
 
     # 5. Fuzzy fallback, blocked by brand (+gender where both sides declare it).
     best, best_score, best_features = None, 0.0, {}
-    offer_name = clean_model_name(offer.raw_title, offer.raw_brand)
+    # Pass the MPN too: a shop that prefixes its titles with the article
+    # code would otherwise have that code dominate the similarity score.
+    offer_name = clean_model_name(offer.raw_title, offer.raw_brand,
+                                  mpn=offer.raw_mpn)
     offer_price = offer.min_price_minor
 
     for cand in candidates:

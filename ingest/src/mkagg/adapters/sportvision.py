@@ -23,7 +23,8 @@ from decimal import Decimal
 from ..models import RawOffer, RawVariant
 from ..normalize import normalize_size, normalize_sku, parse_price_minor
 from .base import (Adapter, as_text, datalayer_product_codes, jsonld_product,
-                   ld_offer, ld_text, register, rescue_field)
+                   ld_image, ld_offer, ld_text, og_image, register,
+                   rescue_field)
 
 _SIZE_CONTAINER = "product-size-tabs-new"
 # The product's own size run lives in exactly one <ul class="product-attributes
@@ -80,7 +81,9 @@ class SportVisionAdapter(Adapter):
             store_id = ld_text(node.get("productID"))
             price_raw = offer.get("price")
             currency = ld_text(offer.get("priceCurrency")) or "MKD"
-            image = ld_text(node.get("image"))
+            # `image` is a LIST of URLs on this platform, which a scalar
+            # text helper silently dropped.
+            image = ld_image(node) or og_image(html)
             for key in ("title", "mpn", "price"):
                 extractors[key] = "jsonld"
         else:
@@ -94,7 +97,9 @@ class SportVisionAdapter(Adapter):
             store_id = rescue_field(html, "productID")
             price_raw = rescue_field(html, "price")
             currency = rescue_field(html, "priceCurrency") or "MKD"
-            image = None
+            # buzz ships no parseable JSON-LD at all; og:image is a real
+            # product photo there, not the site logo.
+            image = og_image(html)
             for key in ("mpn", "price"):
                 extractors[key] = "regex"
             extractors["title"] = "css"

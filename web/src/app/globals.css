@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens.
+ *
+ * HSL triplets, not oklch: this is Tailwind v3, whose config reads them as
+ * `hsl(var(--token))`. The shadcn CLI wrote v4-style oklch values here, which
+ * produce `hsl(oklch(...))` — invalid CSS, and every themed colour silently
+ * falls back. Keep these as `H S% L%` with no wrapper function.
+ *
+ * Two accents beyond the neutral scale, because this is a price comparison
+ * site and those are the two things a shopper looks for:
+ *   --price     the lowest price, the single most important number on a page
+ *   --discount  a reduction against the list price
+ */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 24% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 24% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 24% 12%;
+
+    /* Brand blue: trustworthy rather than loud, so the price can be loud. */
+    --primary: 222 76% 44%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 20% 96%;
+    --secondary-foreground: 222 24% 12%;
+    --muted: 220 20% 96%;
+    --muted-foreground: 220 10% 44%;
+    --accent: 220 20% 96%;
+    --accent-foreground: 222 24% 12%;
+
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 16% 90%;
+    --input: 220 16% 88%;
+    --ring: 222 76% 44%;
+
+    --price: 158 72% 28%;
+    --price-foreground: 0 0% 100%;
+    --price-muted: 158 55% 95%;
+    --discount: 352 76% 46%;
+    --discount-muted: 352 80% 96%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 222 28% 8%;
+    --foreground: 210 20% 96%;
+
+    --card: 222 26% 11%;
+    --card-foreground: 210 20% 96%;
+    --popover: 222 26% 11%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: 217 85% 62%;
+    --primary-foreground: 222 28% 8%;
+
+    --secondary: 222 20% 17%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 222 20% 17%;
+    --muted-foreground: 215 14% 65%;
+    --accent: 222 20% 17%;
+    --accent-foreground: 210 20% 96%;
+
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 222 18% 22%;
+    --input: 222 18% 24%;
+    --ring: 217 85% 62%;
+
+    --price: 158 60% 50%;
+    --price-foreground: 222 28% 8%;
+    --price-muted: 158 40% 16%;
+    --discount: 352 72% 62%;
+    --discount-muted: 352 40% 18%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /*
+   * Prices sit in columns and are compared down the page, so their digits
+   * must line up. Proportional figures make a 4-digit and a 3-digit price
+   * look like different lengths at a glance, which is exactly the comparison
+   * the reader is trying to make.
+   */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}

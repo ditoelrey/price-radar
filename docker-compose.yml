@@ -49,6 +49,40 @@ services:
     volumes:
       - ./db/migrations:/flyway/sql:ro
 
+  # Serving layer. Reads the catalogue and records outbound clicks; it never
+  # writes to the catalogue and never migrates the schema.
+  #   docker compose up -d --build api
+  #   docker compose run --rm api-test      # unit tests, no JDK needed
+  api:
+    build:
+      context: ./api
+    container_name: price-radar-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL_JDBC: jdbc:postgresql://postgres:5432/mkagg
+      POSTGRES_USER: mkagg
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mkagg_dev_only}
+      PRICE_RADAR_COUNTRY: MK
+      # Must be a real secret outside local development: an unsalted hash of
+      # an IPv4 address is reversible by brute force.
+      CLICK_IP_HASH_SALT: ${CLICK_IP_HASH_SALT:-dev-only-change-me}
+      TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-false}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  # One-shot test runner, so `mvn test` works without a local toolchain.
+  api-test:
+    image: maven:3.9-eclipse-temurin-21
+    profiles: ["tools"]
+    working_dir: /app
+    volumes:
+      - ./api:/app
+      - maven-cache:/root/.m2
+    command: ["mvn", "-B", "test"]
+
   redis:
     image: redis:7.4-alpine
     container_name: mkagg-redis
@@ -64,3 +98,4 @@ services:
 
 volumes:
   pgdata:
+  maven-cache:

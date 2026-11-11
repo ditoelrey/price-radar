@@ -81,6 +81,67 @@ def ld_text(value: Any) -> str | None:
     return None
 
 
+# -----------------------------------------------------------------------------
+# Images
+# -----------------------------------------------------------------------------
+
+_OG_IMAGE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\']'
+    r'[^>]+content=["\']([^"\']+)["\']', re.I)
+
+#: Substrings that mark a URL as site furniture rather than a product photo.
+#: This guard is not optional: sport-m and sizeer both advertise their own
+#: logo as og:image, so trusting that tag blindly puts a Facebook logo on
+#: every single product card -- a failure that looks like working code.
+_NOT_A_PRODUCT_IMAGE = (
+    "/content/logo", "facebooklogo", "/brandsimages/", "/menuimages/",
+    "logo.png", "logo.svg", "placeholder", "no-image", "noimage",
+    "default.jpg", "default.png", "sprite", "/icons/", "favicon",
+)
+
+
+def looks_like_product_image(url: str | None) -> bool:
+    """Reject site chrome masquerading as a product photo."""
+    if not url or len(url) < 8:
+        return False
+    lowered = url.lower()
+    return not any(marker in lowered for marker in _NOT_A_PRODUCT_IMAGE)
+
+
+def ld_image(node: dict[str, Any] | None) -> str | None:
+    """First usable image URL from a JSON-LD node.
+
+    schema.org allows ``image`` to be a string, a list of strings, an
+    ``ImageObject``, or a list of ImageObjects, and the target stores use
+    three of those four: sportvision sends a list of strings, megasport a
+    list of ImageObjects, buzz nothing at all. Passing the raw value through
+    a scalar text helper quietly returned None for the list forms, which is
+    why most products had no picture.
+    """
+    if not node:
+        return None
+    value = node.get("image")
+    candidates: list[Any] = value if isinstance(value, list) else [value]
+    for candidate in candidates:
+        url = None
+        if isinstance(candidate, str):
+            url = candidate
+        elif isinstance(candidate, dict):
+            url = candidate.get("url") or candidate.get("contentUrl")
+        if isinstance(url, str) and looks_like_product_image(url.strip()):
+            return url.strip()
+    return None
+
+
+def og_image(html: str) -> str | None:
+    """``og:image`` / ``twitter:image``, filtered through the chrome guard."""
+    for match in _OG_IMAGE.finditer(html):
+        url = match.group(1).strip()
+        if looks_like_product_image(url):
+            return url
+    return None
+
+
 def rescue_field(html: str, key: str) -> str | None:
     """Pull one JSON field out of malformed JSON-LD by regex.
 

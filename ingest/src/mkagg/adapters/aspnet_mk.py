@@ -48,6 +48,15 @@ _URL_PRODUCT_ID = re.compile(r"[?&]ProductID=([A-Za-z0-9\-_.]+)", re.I)
 _PRICE_BY_ID = re.compile(
     r"""id=['"]([A-Za-z0-9\-_.]+)\s+Price['"][^>]*>\s*([^<]+?)\s*<""")
 _H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S | re.I)
+#: Product photos live at /ProductImages/{ProductID}.webp on this platform.
+#: Matched against *this* product's id on purpose: the page also carries the
+#: carousel's images (GX6394, ID2045) and a brand-logo directory, so a generic
+#: "first image on the page" would attach a neighbour's photo or a logo.
+#:
+#: og:image is useless here and actively harmful -- sport-m advertises
+#: Content/FacebookLogo.png and sizeer Content/Logo.png, so trusting that tag
+#: would put a logo on every single product card.
+_PRODUCT_IMAGE = r'["\']([^"\']*?/ProductImages/{pid}(?:_\d+)?\.(?:webp|jpg|jpeg|png))["\']'
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 _TAGS = re.compile(r"<[^>]+>")
 
@@ -119,6 +128,22 @@ def parse_sizes(payload, *, price_minor: int, currency: str = "MKD",
     return variants
 
 
+def product_image(html: str, product_id: str, base_url: str = "") -> str | None:
+    """The product's own photo, keyed to its id rather than page order."""
+    if not product_id:
+        return None
+    pattern = _PRODUCT_IMAGE.format(pid=re.escape(product_id))
+    match = re.search(pattern, html, re.I)
+    if not match:
+        return None
+    url = match.group(1)
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/") and base_url:
+        return base_url.rstrip("/") + url
+    return url
+
+
 def _brand_from_title(title: str | None) -> str | None:
     """First token of the title, which is the brand on this platform."""
     if not title:
@@ -138,6 +163,8 @@ class AspNetMkAdapter(Adapter):
                       sizes_payload=None, publishes_stock: bool = True
                       ) -> RawOffer | None:
         html = as_text(payload)
+        origin = re.match(r"https?://[^/]+", url or "")
+        base_url = origin.group(0) if origin else ""
 
         product_id = product_id_from_url(url)
         price_minor, price_sku = None, None
@@ -178,6 +205,7 @@ class AspNetMkAdapter(Adapter):
             merchant_sku=product_id,
             # The URL's ProductID is the manufacturer code on this platform.
             raw_mpn=product_id,
+            image_url=product_image(html, product_id, base_url),
             raw_title=title or product_id,
             # Titles on this platform lead with the brand ("Hoka Clifton 11").
             # Without it the matcher cannot block, and the offer stays
@@ -211,4 +239,4 @@ class AspNetMkAdapter(Adapter):
 adapter = register(AspNetMkAdapter())
 
 __all__ = ["AspNetMkAdapter", "adapter", "parse_sizes", "sizes_request",
-           "product_id_from_url", "SIZES_PATH"]
+           "product_id_from_url", "product_image", "SIZES_PATH"]

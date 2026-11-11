@@ -24,7 +24,7 @@ import re
 
 from ..models import RawOffer, RawVariant
 from ..normalize import normalize_size, parse_price_minor
-from .base import Adapter, as_text, register
+from .base import Adapter, as_text, og_image, register
 
 _PRODUCT_SKU = re.compile(r'data-product-sku="([^"]+)"')
 _H1 = re.compile(r'<h1[^>]*class="[^"]*page-title[^"]*"[^>]*>(.*?)</h1>', re.S | re.I)
@@ -124,10 +124,7 @@ class MagentoHtmlAdapter(Adapter):
                     title = candidate
                     break
 
-        image = None
-        m = _OG_IMAGE.search(html)
-        if m:
-            image = m.group(1)
+        image = og_image(html)
 
         # Parent price: the first data-price-amount on the page belongs to the
         # product; later ones are recommendation tiles.
