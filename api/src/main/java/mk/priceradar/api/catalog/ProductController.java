@@ -32,14 +32,36 @@ public class ProductController {
         this.catalog = catalog;
     }
 
+    /**
+     * @param kind which category kinds to list. Defaults to footwear, since
+     *        this is a sneaker comparison site and the pipeline crawls shops
+     *        that also sell socks and ski leggings. Pass {@code kind=all} to
+     *        list everything; any other value is taken as a single kind
+     *        ({@code apparel}, {@code accessory}, {@code equipment}).
+     *        Products with no category are always included — their titles
+     *        simply never said, and most of them are shoes.
+     */
     @GetMapping("/products")
     public Dtos.ProductPage search(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String brand,
             @RequestParam(required = false) Double sizeEu,
+            @RequestParam(required = false) String kind,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
-        return catalog.search(q, brand, sizeEu, page, Math.min(pageSize, MAX_PAGE_SIZE));
+        boolean isDefaultScope = kind == null || kind.isBlank();
+        return catalog.search(q, brand, sizeEu, kindsFor(kind), isDefaultScope,
+                page, Math.min(pageSize, MAX_PAGE_SIZE));
+    }
+
+    static String[] kindsFor(String kind) {
+        if (kind == null || kind.isBlank()) {
+            return CatalogRepository.FOOTWEAR_KINDS;
+        }
+        if ("all".equalsIgnoreCase(kind.trim())) {
+            return null;
+        }
+        return new String[] {kind.trim().toLowerCase()};
     }
 
     @GetMapping("/products/{slug}")

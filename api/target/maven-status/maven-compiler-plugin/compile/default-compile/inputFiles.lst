@@ -1,9 +1,0 @@
-/app/src/main/java/mk/priceradar/api/PriceRadarApiApplication.java
-/app/src/main/java/mk/priceradar/api/catalog/CatalogRepository.java
-/app/src/main/java/mk/priceradar/api/catalog/CatalogService.java
-/app/src/main/java/mk/priceradar/api/catalog/Dtos.java
-/app/src/main/java/mk/priceradar/api/catalog/ProductController.java
-/app/src/main/java/mk/priceradar/api/common/PriceRadarProperties.java
-/app/src/main/java/mk/priceradar/api/outbound/ClickContextFactory.java
-/app/src/main/java/mk/priceradar/api/outbound/OutboundController.java
-/app/src/main/java/mk/priceradar/api/outbound/OutboundRepository.java

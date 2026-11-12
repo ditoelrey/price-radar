@@ -24,3 +24,14 @@ raw_snapshots/
 *.swp
 Thumbs.db
 desktop.ini
+
+# Java build output. These were committed by accident and make every diff
+# unreadable; the rule below only stops NEW ones being added, so the already
+# tracked files need one `git rm -r --cached api/target` to drop.
+api/target/
+*.class
+
+# Next.js
+web/.next/
+web/node_modules/
+web/out/

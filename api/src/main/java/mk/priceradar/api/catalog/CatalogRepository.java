@@ -31,6 +31,21 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class CatalogRepository {
 
+    /**
+     * The storefront's categories.
+     *
+     * Note what the SQL does with this: it excludes products whose category
+     * is a *known* non-footwear kind, and keeps products with no category at
+     * all. That asymmetry is deliberate. Eleven of the catalogue's products
+     * have no category because their titles never named one ("Adidas
+     * Handball Spezial", "Hoka Clifton UTL") — and they are shoes, reached
+     * through footwear facets and footwear sitemaps. Admitting only
+     * confirmed footwear would hide them; excluding confirmed apparel
+     * removes the socks and t-shirts we positively identified. Unknown is
+     * not the same as wrong, here as everywhere else in this codebase.
+     */
+    public static final String[] FOOTWEAR_KINDS = {"footwear"};
+
     private final JdbcClient db;
 
     public CatalogRepository(JdbcClient db) {
@@ -56,8 +71,12 @@ public class CatalogRepository {
               JOIN product  p ON p.id = s.product_id
               JOIN brand    b ON b.id = p.brand_id
               JOIN currency c ON c.code = s.currency_code
+              LEFT JOIN category cat ON cat.id = p.category_id
              WHERE s.country_code = CAST(:country AS text)
                AND s.min_price_minor IS NOT NULL
+               AND (CAST(:kinds AS text[]) IS NULL
+                    OR (cat.kind IS NULL AND :includeUnclassified)
+                    OR cat.kind::text = ANY(CAST(:kinds AS text[])))
                AND (CAST(:q AS text) IS NULL
                     OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
@@ -102,7 +121,11 @@ public class CatalogRepository {
               JOIN brand    b ON b.id = p.brand_id
               JOIN currency c ON c.code = z.currency_code
               LEFT JOIN product_price_summary s ON s.product_id = z.product_id
-             WHERE (CAST(:q AS text) IS NULL
+              LEFT JOIN category cat ON cat.id = p.category_id
+             WHERE (CAST(:kinds AS text[]) IS NULL
+                    OR (cat.kind IS NULL AND :includeUnclassified)
+                    OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               AND (CAST(:q AS text) IS NULL
                     OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
                     OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
@@ -111,12 +134,24 @@ public class CatalogRepository {
              LIMIT :limit OFFSET :offset
             """;
 
+    /**
+     * @param kinds category kinds to admit, or null for every category
+     * @param includeUnclassified whether products with no category join them.
+     *        True for the default footwear storefront, where a null category
+     *        means "the title never said" and most of those are shoes. False
+     *        for an explicit kind, where someone asking for apparel plainly
+     *        does not want twelve uncategorised sneakers as well.
+     */
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
-                                       Double sizeEu, int limit, int offset) {
+                                       Double sizeEu, String[] kinds,
+                                       boolean includeUnclassified,
+                                       int limit, int offset) {
         boolean sized = sizeEu != null;
         var spec = db.sql(sized ? LIST_BY_SIZE : LIST_BASE)
                 .param("q", normalizeQuery(query))
                 .param("brand", blankToNull(brandSlug))
+                .param("kinds", kinds)
+                .param("includeUnclassified", includeUnclassified)
                 .param("limit", limit)
                 .param("offset", offset);
         if (sized) {

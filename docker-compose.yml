@@ -68,7 +68,11 @@ services:
       # Must be a real secret outside local development: an unsalted hash of
       # an IPv4 address is reversible by brute force.
       CLICK_IP_HASH_SALT: ${CLICK_IP_HASH_SALT:-dev-only-change-me}
-      TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-false}
+      # The Next.js rewrite proxies /out/{id}, so without this every
+      # click would hash to the proxy's own address and the bot and
+      # deduplication statistics would be meaningless. Safe here
+      # because Next is the only thing in front of the API.
+      TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-true}
     ports:
       - "${API_PORT:-8080}:8080"
     restart: unless-stopped

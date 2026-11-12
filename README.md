@@ -569,6 +569,34 @@ Pick EU 44 on the Stan Smith and the page says so outright:
    than in a footnote.
 
 Buy buttons always point at `/out/{variantId}` with `rel="sponsored nofollow"`.
+That path is **same-origin** and proxied to the API by a rewrite in
+`next.config.ts` — without it the browser asks Next for `/out/368`, finds no
+route, and the one button that must never fail returns a 404. A rewrite
+rather than an absolute `:8080` URL keeps both services behind one domain in
+production and avoids a cross-origin hop on the revenue path. Next passes the
+API's 302, its `no-store` and its `Referrer-Policy: no-referrer` straight
+through.
+
+Because the click is now proxied, the API runs with `TRUST_FORWARDED_FOR=true`
+— otherwise every click would hash to the Next server's own address and the
+bot and deduplication statistics would be worthless. Verified: three distinct
+clients produce three distinct `ip_hash` values through the proxy.
+
+### Category scope
+
+The storefront serves footwear. The pipeline crawls shops that also sell
+socks, ski leggings and helmets, so `GET /api/v1/products` defaults to
+`kind=footwear`; `kind=all` lifts it and any other value selects one kind.
+
+The filter **excludes known non-footwear rather than admitting only known
+footwear**, and that asymmetry is the whole point. Twelve products have no
+category because their titles never named one ("Adidas Handball Spezial",
+"Hoka Clifton UTL") — they are shoes, reached through footwear facets and
+footwear sitemaps. Admitting only confirmed footwear would hide them. So the
+default view is 18 confirmed + 12 unclassified = 30 of 32, with the two
+apparel rows removed. An explicit `kind=apparel` drops the unclassified,
+since someone asking for apparel does not want twelve uncategorised sneakers
+as well.
 
 ## Product images
 
@@ -617,9 +645,6 @@ that has one, and reports the count.
 - Images are hotlinked from the shops. They load, but it is their bandwidth
   and a referer rule on any one of them would blank that shop's photos
   overnight. Re-hosting into the raw-snapshot bucket is the durable fix.
-- The storefront serves every category, so the two apparel rows appear among
-  the sneakers. Scoping the listing to `category_kind = 'footwear'` is one
-  clause in the listing query — a product decision rather than a bug.
 - **Categories are NULL for 11 of 29 products.** Correct, not broken: those
   titles ("Adidas Handball Spezial", "Hoka Clifton UTL") simply do not name a
   category, so none is claimed. Discovery *does* know — it reached them

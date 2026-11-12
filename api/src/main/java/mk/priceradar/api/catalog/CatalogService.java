@@ -37,10 +37,24 @@ public class CatalogService {
 
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    int page, int pageSize) {
+        return search(query, brand, sizeEu, CatalogRepository.FOOTWEAR_KINDS,
+                true, page, pageSize);
+    }
+
+    /**
+     * @param kinds category kinds to admit; null admits every category.
+     *        Defaults to footwear, because this is a sneaker comparison site
+     *        and the ingestion side crawls merchants that also sell socks,
+     *        ski leggings and helmets.
+     */
+    public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+                                   String[] kinds, boolean includeUnclassified,
+                                   int page, int pageSize) {
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
-                country, query, brand, sizeEu, pageSize + 1, page * pageSize);
+                country, query, brand, sizeEu, kinds, includeUnclassified,
+                pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
             rows = rows.subList(0, pageSize);
