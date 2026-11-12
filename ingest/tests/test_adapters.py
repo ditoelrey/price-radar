@@ -84,6 +84,71 @@ class TestSportVisionAdapter:
         assert len(sizes) == len(set(sizes)), sizes
 
 
+class TestSportVisionUnmappedSizes:
+    """Sport Vision's own EU column has holes on some articles.
+
+    Taken from the live page for the Under Armour Hovr Turbulence 2
+    (sportvision.mk/mk/patiki/8580211), where the shop's conversion table runs
+    out: the first rows echo the brand size into the EU column and leave
+    centimetres blank, and the mapping only starts at US 5 -> EU 35.5.
+
+    Storing "EU 4.5" for a men's running shoe is worse than storing nothing --
+    it drops the shoe out of the EU size filter and prints a nonsense number
+    beside a real price. `normalize_size` refuses it on the bound, so the row
+    keeps its label and makes no EU claim.
+    """
+
+    @staticmethod
+    def _page(rows: str) -> str:
+        return (
+            '<div class="product-size-tabs-new">'
+            '<ul class="product-attributes list-inline">' + rows + "</ul></div>"
+        )
+
+    @staticmethod
+    def _row(combid: str, orig: str, eur: str, cm: str) -> str:
+        return (
+            f'<li data-productsize-combid="{combid}">'
+            f'<span class="original-size">{orig}</span>'
+            f'<span class="eur-size">{eur}</span>'
+            f'<span class="cm-size">{cm}</span></li>'
+        )
+
+    def _parse(self, rows):
+        from mkagg.adapters.sportvision import SportVisionAdapter
+        return SportVisionAdapter._parse_sizes(
+            self._page("".join(self._row(*r) for r in rows)), 1000, "MKD")
+
+    def test_unconverted_rows_lose_their_eu_size(self):
+        variants = self._parse([
+            ("1", "4.5", "4.5", ""),      # shop never converted this one
+            ("2", "5", "35.5", "22"),     # mapping starts here
+        ])
+        assert len(variants) == 2
+        unmapped, mapped = variants
+
+        # The row survives -- it is a real, buyable size with a real price.
+        assert unmapped.size_label == "4.5"
+        assert unmapped.price_minor == 1000
+        # ... but it makes no EU claim.
+        assert unmapped.size_eu is None
+
+        assert mapped.size_eu == Decimal("35.5")
+        assert mapped.size_cm == Decimal("22")
+
+    def test_genuine_childrens_sizes_are_kept(self):
+        """A converted children's run is well inside the bound and survives."""
+        variants = self._parse([
+            ("1", "11C", "28", "17"),
+            ("2", "1Y", "32", "20"),
+        ])
+        assert [v.size_eu for v in variants] == [Decimal("28"), Decimal("32")]
+
+    def test_adult_sizes_are_never_touched(self):
+        variants = self._parse([("1", "42", "42", "")])
+        assert variants[0].size_eu == Decimal("42")
+
+
 # ---------------------------------------------------------------------------
 # Adapter 2: Magento (dsport.mk)
 # ---------------------------------------------------------------------------
@@ -396,11 +461,18 @@ class TestWooCommerceHtmlAdapter:
         assert offer.min_price_minor < api_parent
 
     def test_dash_decimal_sizes_normalise(self):
-        """Woo writes "44-5" for 44.5 in variation attributes."""
+        """Woo writes "44-5" for 44.5 in the variation attributes.
+
+        That slug is an internal term name, and the <select> carries the text
+        the shop actually shows for it. Reading the label from there gives the
+        shopper "44.5" rather than "44-5" -- and, more importantly, is what
+        keeps Woo's placeholder option (slug "387", displayed as a dash) from
+        being mistaken for a size.
+        """
         offer = self._offer()
         by_label = {v.size_label: v.size_eu for v in offer.variants}
-        assert "44-5" in by_label
-        assert by_label["44-5"] == Decimal("44.5")
+        assert "44.5" in by_label, by_label
+        assert by_label["44.5"] == Decimal("44.5")
 
     def test_passes_quality_validation(self):
         assert self._offer().quality_issues() == []

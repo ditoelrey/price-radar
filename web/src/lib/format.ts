@@ -50,7 +50,19 @@ export function discountPercent(
  * The pipeline stores 44.667 for "44 2/3"; showing the decimal would be
  * unreadable to a shopper who has only ever seen the fraction on a shoebox.
  */
-export function formatSizeEu(size: number): string {
+export function formatSizeEu(
+  size: number | null | undefined,
+  fallback = "One size",
+): string {
+  // Null-safe because a size genuinely can be absent: dsport lists one-size
+  // articles as "BEZ VELICINA" and the pipeline stores those with size_eu
+  // NULL rather than inventing a number. The crash that exposed this came
+  // from a different direction though -- a `sizeEu!` assertion on the detail
+  // page's empty state, which told TypeScript a value was present when the
+  // branch could be reached with nothing selected at all.
+  if (size === null || size === undefined || Number.isNaN(size)) {
+    return fallback;
+  }
   const whole = Math.floor(size);
   const fraction = size - whole;
   if (fraction < 0.04) return String(whole);

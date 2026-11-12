@@ -94,6 +94,27 @@ _NO_SIZE = {
     "one size", "onesize", "uni", "universal", "u", "no size", "-",
 }
 
+#: The range an EU *footwear* size can plausibly occupy. EU 16 is roughly a
+#: 9-month-old and EU 60 is past the largest shoe any of these shops stock.
+#:
+#: Anything outside it is a number that is not an EU shoe size, and the shops
+#: supply plenty: children's clothing is sized in centimetres of height (116,
+#: 152, 176), and WooCommerce hands out opaque term slugs for its own
+#: placeholder options ("387", whose displayed text is just a dash). Neither
+#: belongs in `size_eu`, and megasport serves both -- a 387 reached the
+#: database and failed the numeric(5,3) column, taking a 500-product run with
+#: it.
+#:
+#: Bounding here rather than in one adapter is deliberate: `size_eu` means the
+#: same thing whichever shop it came from, so the one function that decides
+#: what a size label means is the right place to refuse the ones that cannot
+#: be sizes. The label itself always survives on the variant.
+#: A label that explicitly names a non-EU sizing system.
+_FOREIGN_SYSTEM = re.compile(r"^(?:uk|us)\s*[\d.]", re.I)
+
+_EU_MIN = Decimal("16")
+_EU_MAX = Decimal("60")
+
 _ASCII_FRACTION = re.compile(r"^(\d{1,2})\s+(\d)\s*/\s*(\d)$")
 # dsport's Magento swatch labels, e.g. "41-1/3", "42-2/3": a dash where the
 # other stores put a space. Must be tried before _DASH_DECIMAL.
@@ -104,7 +125,7 @@ _RANGE = re.compile(r"^(\d{1,2})\s*[-/]\s*(\d{2})$")
 _SLASH_FRACTION = re.compile(r"^(\d{1,2})(\d)⁄(\d)$")
 
 
-def normalize_size(raw: str | None) -> Decimal | None:
+def _parse_size_label(raw: str | None) -> Decimal | None:
     """Return a numeric EU size, or None when the label carries no size.
 
     Formats proven to occur on the target stores:
@@ -130,8 +151,15 @@ def normalize_size(raw: str | None) -> Decimal | None:
     if not s or s.lower() in _NO_SIZE:
         return None
 
-    # Drop a leading size-system prefix: "EU 42", "UK 8.5".
-    s = re.sub(r"^(?:eu|uk|us|eur)\s*", "", s, flags=re.I).strip()
+    # A label that names a DIFFERENT system is not an EU size. "UK 8.5" is
+    # EU 42-ish, and returning 8.5 here passed a UK size off as an EU one --
+    # the same confusion the bound in `normalize_size` exists to stop, just
+    # arriving by a shorter route. Converting would need a per-brand table we
+    # do not have, so the label is kept and the EU claim is not made.
+    if _FOREIGN_SYSTEM.match(s):
+        return None
+    # Drop our own leading prefix: "EU 42".
+    s = re.sub(r"^(?:eu|eur)\s*", "", s, flags=re.I).strip()
 
     # Already-decomposed form, in case an upstream layer ran NFKC on it:
     # "411<U+2044>3" is 41 + 1/3.
@@ -177,6 +205,22 @@ def normalize_size(raw: str | None) -> Decimal | None:
         return Decimal(s).quantize(Decimal("0.001"))
     except InvalidOperation:
         return None
+
+
+
+def normalize_size(raw: str | None) -> Decimal | None:
+    """A numeric EU shoe size, or None when the label is not one.
+
+    Thin bound check over `_parse_size_label`, which does the format work.
+    A label that parses to a number outside `_EU_MIN.._EU_MAX` is not an EU
+    shoe size -- it is a centimetre clothing size, a platform term id, or
+    something else entirely -- so it yields None and the caller keeps the
+    label without making an EU claim.
+    """
+    size = _parse_size_label(raw)
+    if size is None or not (_EU_MIN <= size <= _EU_MAX):
+        return None
+    return size
 
 
 # -----------------------------------------------------------------------------

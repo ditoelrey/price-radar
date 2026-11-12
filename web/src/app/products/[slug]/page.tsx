@@ -16,6 +16,10 @@ export const dynamic = "force-dynamic";
 type Params = Promise<{ slug: string }>;
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 function one(value: string | string[] | undefined): string | undefined {
   const v = Array.isArray(value) ? value[0] : value;
   return v && v.length > 0 ? v : undefined;
@@ -29,10 +33,14 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProduct(slug);
   if (!product) return { title: "Product not found" };
-  const from = product.lowestPrice ? ` from ${formatMoney(product.lowestPrice)}` : "";
+  const from = product.lowestPrice
+    ? ` from ${formatMoney(product.lowestPrice)}`
+    : "";
   return {
     title: `${product.name}${from}`,
-    description: `Compare ${product.offerCount} offers for the ${product.name} across ${product.merchantCount} shops in North Macedonia. Prices include delivery.`,
+    description: product.lowestPrice
+      ? `Compare ${product.offerCount} offers for the ${product.name} across ${product.merchantCount} shops in North Macedonia. Prices include delivery.`
+      : `${product.name} — no shop we compare is listing this product right now.`,
   };
 }
 
@@ -198,22 +206,37 @@ export default async function ProductDetailPage({
               )}
               <span className="inline-flex items-center gap-1">
                 <Store className="size-3.5" />
-                {product.merchantCount} shops · {product.offerCount} offers
+                {/* Counts come from the summary, which a product with no
+                    purchasable offer no longer has — so fall back to what is
+                    actually on the page rather than printing "0 shops". */}
+                {plural(product.merchantCount || rows.length, "shop")} ·{" "}
+                {plural(product.offerCount || rows.length, "offer")}
               </span>
             </p>
 
             <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-2">
               <div>
                 <p className="text-xs text-muted-foreground">
-                  {sizeEu !== undefined
-                    ? `Best total in EU ${formatSizeEu(sizeEu)}`
-                    : "Best total price"}
+                  {!best
+                    ? "Currently unavailable"
+                    : sizeEu !== undefined
+                      ? `Best total in EU ${formatSizeEu(sizeEu)}`
+                      : "Best total price"}
                 </p>
                 <p className="tnum text-3xl font-bold text-price">
-                  {formatMoney(best?.variant.totalPrice ?? product.lowestPrice)}
+                  {/*
+                    best?.totalPrice only -- never falling back to the
+                    summary's lowestPrice. That fallback is what printed
+                    "8 599 ден." on a product whose only shop had been
+                    deactivated: the summary row outlived the offers it was
+                    computed from.
+                  */}
+                  {best ? formatMoney(best.variant.totalPrice) : "No price"}
                 </p>
               </div>
-              {product.highestPrice && product.lowestPrice && (
+              {best && product.highestPrice && product.lowestPrice
+                && product.highestPrice.amountMinor
+                   > product.lowestPrice.amountMinor && (
                 <p className="tnum pb-1 text-sm text-muted-foreground">
                   up to {formatMoney(product.highestPrice)}
                 </p>
@@ -267,16 +290,41 @@ export default async function ProductDetailPage({
 
           {rows.length === 0 ? (
             <div className="border-t p-8 text-center">
-              <p className="font-medium">No offers in this size</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                No shop currently lists EU {formatSizeEu(sizeEu!)}.
-              </p>
-              <Link
-                href={`/products/${product.slug}`}
-                className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
-              >
-                Show every size
-              </Link>
+              {sizeEu !== undefined ? (
+                <>
+                  <p className="font-medium">No offers in this size</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    No shop currently lists EU {formatSizeEu(sizeEu)}.
+                  </p>
+                  <Link
+                    href={`/products/${product.slug}`}
+                    className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+                  >
+                    Show every size
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {/*
+                    Reachable by direct link: every shop that listed this
+                    product is currently unavailable to us, so we have no
+                    live price for it. Saying nothing is the honest answer --
+                    the alternative is quoting a figure nobody can buy at.
+                  */}
+                  <p className="font-medium">No current offers</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    None of the shops we compare is listing this product right
+                    now. We would rather show nothing than a price you cannot
+                    buy at.
+                  </p>
+                  <Link
+                    href="/products"
+                    className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+                  >
+                    Browse everything else
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
             rows.map((row, index) => (

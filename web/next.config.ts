@@ -25,6 +25,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       { source: "/out/:variantId", destination: `${API_BASE}/out/:variantId` },
+      // Self-hosted product photos, served by the API from the shared media
+      // volume. Same-origin keeps the storefront on one host and lets the
+      // immutable cache headers do their job.
+      { source: "/media/:path*", destination: `${API_BASE}/media/:path*` },
     ];
   },
 

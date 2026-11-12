@@ -55,6 +55,11 @@ class FetchJob:
     offer_variant_id: int | None = None
     offer_id: int | None = None
 
+    #: Category implied by WHERE discovery found this product -- a footwear
+    #: facet, a sneakers category page. Used by the loader only when the
+    #: product's own title names no category.
+    category_hint: str | None = None
+
     attempt: int = 0
     enqueued_at: float = field(default_factory=time.time)
 
@@ -82,6 +87,7 @@ class FetchJob:
             "body": self.body.decode("utf-8", "replace") if self.body else None,
             "headers": self.headers, "offer_variant_id": self.offer_variant_id,
             "offer_id": self.offer_id, "attempt": self.attempt,
+            "category_hint": self.category_hint,
             "enqueued_at": self.enqueued_at,
         })
 

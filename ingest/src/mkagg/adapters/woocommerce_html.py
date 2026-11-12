@@ -34,8 +34,46 @@ _PRODUCT_ID = re.compile(r'data-product_id="(\d+)"')
 _SKU_CSS = re.compile(r'class="sku"[^>]*>([^<]+)<', re.I)
 _OG_IMAGE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]*)"', re.I)
 
+_TAGS = re.compile(r"<[^>]+>")
+
+#: Option texts that are placeholders rather than sizes. Woo renders its
+#: "pick one" entry as a dash on this shop; storing it would put a variant
+#: labelled "-" in the comparison table next to a real price.
+_NOT_A_SIZE = {"-", "–", "—", "", "Изберете опција"}
+
 #: Variation attribute keys that carry a shoe size on this store.
 _SIZE_KEYS = ("golemina", "size", "velicina", "velicina")
+
+#: The size dropdown, whose <option> elements map each attribute slug to the
+#: text the shop actually displays.
+_SIZE_SELECT = re.compile(
+    r'<select[^>]*name="attribute_[^"]*"[^>]*>(.*?)</select>', re.S | re.I)
+_OPTION = re.compile(
+    r'<option[^>]*value="([^"]*)"[^>]*>(.*?)</option>', re.S | re.I)
+
+
+def size_slug_labels(html: str) -> dict[str, str]:
+    """Map each size attribute slug to the label the shop shows for it.
+
+    The variations JSON carries slugs, not labels. Usually they are the same
+    string ("44" -> "44") and the distinction does not matter, but Woo also
+    emits placeholder options whose slug is an opaque term id:
+
+        <option value="387">-</option>
+        <option value="44">44</option>
+
+    Read literally, that 387 became a size. It is not one -- the shop renders
+    it as a dash -- and it reached the database as an EU size, where it
+    overflowed `numeric(5,3)` and brought down a 500-product run. The select
+    is the only place the two are related, so the label has to come from here.
+    """
+    labels: dict[str, str] = {}
+    for select in _SIZE_SELECT.finditer(html):
+        for value, text in _OPTION.findall(select.group(1)):
+            value = value.strip()
+            if value:
+                labels[value] = _TAGS.sub("", html_mod.unescape(text)).strip()
+    return labels
 
 
 def _size_from_attributes(attributes: dict) -> str | None:
@@ -105,9 +143,13 @@ class WooCommerceHtmlAdapter(Adapter):
 
         variants: list[RawVariant] = []
         seen: set[str] = set()
+        # Slug -> displayed text, so a placeholder option cannot become a size.
+        slug_labels = size_slug_labels(html)
         for variation in parse_variations(html):
             label = _size_from_attributes(variation.get("attributes") or {})
-            if not label:
+            if label:
+                label = slug_labels.get(label, label)
+            if not label or label in _NOT_A_SIZE:
                 continue
             size_eu = normalize_size(label)
             key = str(size_eu) if size_eu is not None else label

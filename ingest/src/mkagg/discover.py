@@ -136,7 +136,8 @@ class SitemapPlan:
 
 @dataclass(frozen=True)
 class PaginatedPlan:
-    categories: tuple[str, ...]
+    #: (path, category slug implied by that path).
+    categories: tuple[tuple[str, str | None], ...]
     page_suffix: str = "/page-{page}"
     max_pages: int = 200
     strategy: str = "paginated"
@@ -146,7 +147,8 @@ class PaginatedPlan:
 class SampledPlan:
     """Repeated sampling of a facet until it stops producing new URLs."""
 
-    facets: tuple[str, ...]
+    #: (facet path, category slug implied by that facet).
+    facets: tuple[tuple[str, str | None], ...]
     #: Consecutive empty rounds that count as saturated. Measured: a facet
     #: yields nothing new for 3 straight requests once exhausted.
     saturation_rounds: int = 3
@@ -161,23 +163,32 @@ DISCOVERY_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
     "woocommerce_html": SitemapPlan(index_path="/sitemap_index.xml",
                                     child_contains="product-sitemap"),
     # Footwear only for the MVP. Adding apparel is adding strings here.
-    "sportvision": PaginatedPlan(categories=("/mk/patiki", "/mk/obuvki")),
+    # Each entry records what the shop's own category page implies.
+    # That is strong evidence and costs nothing to carry.
+    "sportvision": PaginatedPlan(categories=(
+        ("/mk/patiki", "sneakers"),
+        ("/mk/obuvki", "footwear"),
+    )),
+    # Segment=03 / Grupa=01 is this platform's footwear branch, which is
+    # exactly the context its titles omit: "Adidas Handball Spezial" names no
+    # category at all, and discovery knew it was a shoe before it was fetched.
     "aspnet_mk": SampledPlan(facets=(
-        "/ProductCatalog?Segment=03&Grupa=01",
-        "/ProductCatalog?Segment=03&Grupa=01&PodGrupa=500",
-        "/ProductCatalog?Segment=03&Grupa=01&PodGrupa=502",
-        "/ProductCatalog?Segment=03&Grupa=01&PodGrupa=503",
+        ("/ProductCatalog?Segment=03&Grupa=01", "footwear"),
+        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=500", "footwear"),
+        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=502", "footwear"),
+        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=503", "footwear"),
         # Brand facets double as the brand-term sweep: narrower pools
-        # saturate faster and reach products the group facets miss.
-        "/ProductCatalog?Segment=03&Brend=01",
-        "/ProductCatalog?Segment=03&Brend=02",
-        "/ProductCatalog?Segment=03&Brend=04",
-        "/ProductCatalog?Segment=03&Brend=25",
-        "/ProductCatalog?Segment=03&Brend=52",
-        "/ProductCatalog?Segment=03&Brend=69",
-        "/ProductCatalog?Segment=03&Brend=70",
-        "/ProductCatalog?Segment=03&Brend=81",
-        "/ProductCatalog?Segment=03&Brend=00050",
+        # saturate faster and reach products the group facets miss. They say
+        # nothing about category, so they carry no hint.
+        ("/ProductCatalog?Segment=03&Brend=01", None),
+        ("/ProductCatalog?Segment=03&Brend=02", None),
+        ("/ProductCatalog?Segment=03&Brend=04", None),
+        ("/ProductCatalog?Segment=03&Brend=25", None),
+        ("/ProductCatalog?Segment=03&Brend=52", None),
+        ("/ProductCatalog?Segment=03&Brend=69", None),
+        ("/ProductCatalog?Segment=03&Brend=70", None),
+        ("/ProductCatalog?Segment=03&Brend=81", None),
+        ("/ProductCatalog?Segment=03&Brend=00050", None),
     )),
     # The API adapters discover through their own paginated endpoints and do
     # not need URL enumeration; they are robots-blocked today in any case.
@@ -203,6 +214,8 @@ class DiscoveryReport:
     requests: int = 0
     listings_seen: int = 0
     product_urls: list[str] = field(default_factory=list)
+    #: product URL -> category slug implied by where it was found.
+    category_hints: dict = field(default_factory=dict)
     saturated_facets: int = 0
     exhausted_facets: int = 0
     errors: int = 0
@@ -242,6 +255,7 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
         return report
 
     found: dict[str, None] = {}
+    hints: dict[str, str] = {}
 
     def fetch(url: str) -> str | None:
         if report.requests >= max_requests:
@@ -257,14 +271,18 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
         report.listings_seen += 1
         return result.body.decode("utf-8", "replace")
 
-    def harvest(text: str) -> int:
+    def harvest(text: str, hint: str | None = None) -> int:
         before = len(found)
         for url in extract_links(text, pattern, base_url):
             found.setdefault(url, None)
+            if hint:
+                hints.setdefault(url, hint)
         # Sitemaps carry <loc> rather than href.
         for loc, _lastmod in parse_sitemap_urls(text):
             if pattern.search(loc):
                 found.setdefault(loc, None)
+                if hint:
+                    hints.setdefault(loc, hint)
         return len(found) - before
 
     def done() -> bool:
@@ -289,13 +307,13 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
 
     # --- paginated categories --------------------------------------------
     elif isinstance(plan, PaginatedPlan):
-        for category in plan.categories:
+        for category, hint in plan.categories:
             if done():
                 break
             first = fetch(urljoin(base_url, category))
             if not first:
                 continue
-            harvest(first)
+            harvest(first, hint)
             total = parse_total_pages(first) or 1
             total = min(total, plan.max_pages)
             report.notes.append(f"{category}: {total} pages")
@@ -306,11 +324,11 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                                      f"{plan.page_suffix.format(page=page)}"))
                 if body is None:
                     break
-                harvest(body)
+                harvest(body, hint)
 
     # --- sampled facets ---------------------------------------------------
     else:
-        for facet in plan.facets:
+        for facet, hint in plan.facets:
             if done():
                 break
             url = urljoin(base_url, facet)
@@ -319,7 +337,7 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                 body = fetch(url)
                 if body is None:
                     break
-                new = harvest(body)
+                new = harvest(body, hint)
                 if new == 0:
                     empty_rounds += 1
                     if empty_rounds >= plan.saturation_rounds:
@@ -352,6 +370,8 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                     empty_rounds = 0
 
     report.product_urls = list(found)[:limit] if limit else list(found)
+    report.category_hints = {u: hints[u] for u in report.product_urls
+                             if u in hints}
     return report
 
 
@@ -359,5 +379,6 @@ def product_jobs(report: DiscoveryReport, kind: str = "catalog_parse",
                  priority: Priority = Priority.COLD) -> list[FetchJob]:
     """Turn discovered URLs into fetch jobs for the worker."""
     return [FetchJob(merchant_slug=report.merchant_slug, url=url, kind=kind,
-                     priority=priority)
+                     priority=priority,
+                     category_hint=report.category_hints.get(url))
             for url in report.product_urls]

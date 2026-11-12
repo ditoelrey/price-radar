@@ -59,10 +59,36 @@ class TestNormalizeSize:
         ("46½", "46.5"),    # U+00BD one half
         ("37-5", "37.5"),        # megasport variation value
         ("EU 42", "42"),
-        ("UK 8.5", "8.5"),
         ("41-42", "41"),         # range -> lower bound
     ])
     def test_parses(self, raw, expected):
+        assert normalize_size(raw) == Decimal(expected)
+
+    @pytest.mark.parametrize("raw", [
+        "UK 8.5", "US 10", "uk 7",   # another system's number, not an EU size
+        "387",                       # WooCommerce placeholder term id
+        "116", "152", "176",         # children's clothing, sized in cm
+        "1", "4.5", "13.5",          # a shop's unconverted US/UK column
+        "61", "100",
+    ])
+    def test_refuses_numbers_that_are_not_eu_shoe_sizes(self, raw):
+        """`size_eu` means one thing, so a number that cannot be it is dropped.
+
+        Every one of these reached the database at some point. The 387 is the
+        expensive one: it is a Woo term id whose displayed text is a dash, and
+        taken as a size it overflowed `numeric(5,3)` and killed a 500-product
+        megasport run outright. The label always survives on the variant; it
+        is only the EU claim that is refused.
+        """
+        assert normalize_size(raw) is None
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("16", "16"),      # the floor -- roughly a 9-month-old
+        ("17", "17"),      # the real low end of the catalogue
+        ("60", "60"),      # the ceiling
+        ("52.5", "52.5"),  # Sport Vision's own label for US 18; odd, but theirs
+    ])
+    def test_keeps_sizes_at_the_edges_of_the_range(self, raw, expected):
         assert normalize_size(raw) == Decimal(expected)
 
     @pytest.mark.parametrize("raw", [

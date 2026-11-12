@@ -9,10 +9,15 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
+        // A transparent border on the borderless variants, so every variant
+        // has the same box width. Without it an `outline` button is 2px wider
+        // than a `buy` one, and in a right-aligned column that is enough to
+        // visibly stagger the buttons down the offer table.
+        default:
+          "border border-transparent bg-primary text-primary-foreground hover:bg-primary/90",
         // The outbound CTA. Deliberately the only green button in the app, so
         // "this is the one that takes you to the shop" needs no explaining.
-        buy: "bg-price text-price-foreground hover:bg-price/90 shadow-sm",
+        buy: "border border-transparent bg-price text-price-foreground hover:bg-price/90 shadow-sm",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:

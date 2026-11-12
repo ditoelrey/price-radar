@@ -324,6 +324,12 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
             if not offers:
                 continue
 
+        # The hint belongs to the job, not the page: it records where
+        # discovery found the product, which is the context its title omits.
+        if job.category_hint:
+            for parsed in offers:
+                parsed.category_hint = job.category_hint
+
         report.offers_parsed += len(offers)
 
         if job.kind == "stock_probe" and job.offer_id:

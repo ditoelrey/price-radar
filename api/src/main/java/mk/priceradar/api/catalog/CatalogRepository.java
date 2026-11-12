@@ -63,7 +63,11 @@ public class CatalogRepository {
     // The cast is load-bearing, not decoration.
     private static final String LIST_BASE = """
             SELECT p.slug, p.canonical_name, b.name AS brand, p.colorway,
-                   p.image_url, p.primary_mpn,
+       -- Our own copy when we hold one, the shop's URL only while the
+       -- image pipeline catches up. Resolved in SQL so every caller gets
+       -- the same answer and no one can forget the fallback.
+       coalesce('/media/' || ia.path, p.image_url) AS image_url,
+                   p.primary_mpn,
                    s.min_price_minor, s.currency_code, s.offer_count,
                    s.merchant_count, s.available_sizes_eu, s.updated_at,
                    c.minor_unit
@@ -72,6 +76,7 @@ public class CatalogRepository {
               JOIN brand    b ON b.id = p.brand_id
               JOIN currency c ON c.code = s.currency_code
               LEFT JOIN category cat ON cat.id = p.category_id
+              LEFT JOIN image_asset ia ON ia.id = p.image_asset_id
              WHERE s.country_code = CAST(:country AS text)
                AND s.min_price_minor IS NOT NULL
                AND (CAST(:kinds AS text[]) IS NULL
@@ -112,7 +117,11 @@ public class CatalogRepository {
                  GROUP BY mo.product_id
             )
             SELECT p.slug, p.canonical_name, b.name AS brand, p.colorway,
-                   p.image_url, p.primary_mpn,
+       -- Our own copy when we hold one, the shop's URL only while the
+       -- image pipeline catches up. Resolved in SQL so every caller gets
+       -- the same answer and no one can forget the fallback.
+       coalesce('/media/' || ia.path, p.image_url) AS image_url,
+                   p.primary_mpn,
                    z.from_price_minor AS min_price_minor, z.currency_code,
                    z.offer_count, z.merchant_count,
                    s.available_sizes_eu, s.updated_at, c.minor_unit
@@ -122,6 +131,7 @@ public class CatalogRepository {
               JOIN currency c ON c.code = z.currency_code
               LEFT JOIN product_price_summary s ON s.product_id = z.product_id
               LEFT JOIN category cat ON cat.id = p.category_id
+              LEFT JOIN image_asset ia ON ia.id = p.image_asset_id
              WHERE (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
@@ -186,7 +196,11 @@ public class CatalogRepository {
 
     private static final String PRODUCT_BY_SLUG = """
             SELECT p.id, p.slug, p.canonical_name, b.name AS brand, p.colorway,
-                   p.gender::text AS gender, p.primary_mpn, p.image_url,
+                   p.gender::text AS gender, p.primary_mpn,
+       -- Our own copy when we hold one, the shop's URL only while the
+       -- image pipeline catches up. Resolved in SQL so every caller gets
+       -- the same answer and no one can forget the fallback.
+       coalesce('/media/' || ia.path, p.image_url) AS image_url,
                    s.min_price_minor, s.max_price_minor, s.currency_code,
                    s.offer_count, s.merchant_count, s.available_sizes_eu,
                    s.updated_at, c.minor_unit
@@ -194,6 +208,7 @@ public class CatalogRepository {
               JOIN brand b ON b.id = p.brand_id
               LEFT JOIN product_price_summary s ON s.product_id = p.id
               LEFT JOIN currency c ON c.code = s.currency_code
+              LEFT JOIN image_asset ia ON ia.id = p.image_asset_id
              WHERE p.slug = :slug
             """;
 

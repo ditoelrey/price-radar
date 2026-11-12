@@ -59,6 +59,10 @@ class RawOffer:
     variants: list[RawVariant] = field(default_factory=list)
     extractors: dict[str, ExtractorTier] = field(default_factory=dict)
 
+    #: Set by the worker from the discovery job, not by the adapter: it is
+    #: context about where the product was found, not something the page said.
+    category_hint: str | None = None
+
     @property
     def min_price_minor(self) -> int | None:
         prices = [v.price_minor for v in self.variants if v.price_minor is not None]

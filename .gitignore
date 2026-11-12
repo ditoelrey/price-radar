@@ -35,3 +35,8 @@ api/target/
 web/.next/
 web/node_modules/
 web/out/
+media/
+
+# AI & Logs
+.claude/
+*.log

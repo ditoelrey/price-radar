@@ -41,7 +41,8 @@ class PromotionReport:
 
 STAGED_SQL = """
 SELECT so.id, so.merchant_sku, so.raw_mpn, so.raw_title, so.raw_brand,
-       so.product_url, so.image_url, so.currency_code, so.extractors
+       so.product_url, so.image_url, so.currency_code, so.extractors,
+       so.category_hint
   FROM stage_offer so
  WHERE so.ingest_run_id = %(run)s
  ORDER BY so.id
@@ -62,7 +63,7 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
         cur.execute(STAGED_SQL, {"run": run_id})
         rows = cur.fetchall()
         for (stage_id, sku, mpn, title, brand, url, image, currency,
-             extractors) in rows:
+             extractors, category_hint) in rows:
             cur.execute(STAGED_VARIANTS_SQL, {"offer": stage_id})
             variants = [
                 RawVariant(
@@ -76,7 +77,7 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
                 merchant_slug=merchant_slug, merchant_sku=sku, raw_mpn=mpn,
                 raw_title=title, raw_brand=brand, product_url=url,
                 image_url=image, currency_code=currency, variants=variants,
-                extractors=extractors or {})
+                extractors=extractors or {}, category_hint=category_hint)
 
 
 # -----------------------------------------------------------------------------
@@ -230,9 +231,13 @@ def create_product(conn, offer: RawOffer, brand_id: int,
         row = cur.fetchone()
         merchant_name = row[0] if row else None
 
-        # Classify, and accept NULL when the title does not say. Defaulting to
-        # 'sneakers' here is what filed a pack of socks as footwear.
-        category_slug = classify(offer.raw_title, url=offer.product_url)
+        # Classify from the product's own words first; fall back to where
+        # discovery found it. The order matters: a hint is context, not
+        # evidence, so a title that says "Чорапи" still wins over a footwear
+        # facet. Only silence defers to the hint -- which is most of the
+        # ASP.NET catalogue, whose titles are bare "Brand Model".
+        category_slug = (classify(offer.raw_title, url=offer.product_url)
+                         or offer.category_hint)
         category_id = None
         if category_slug:
             cur.execute("SELECT id FROM category WHERE slug = %s",
@@ -416,7 +421,16 @@ WITH v AS (
     SELECT ov.*, mo.merchant_id
       FROM offer_variant ov
       JOIN merchant_offer mo ON mo.id = ov.offer_id
-     WHERE mo.product_id = %(pid)s AND mo.status = 'active'
+      JOIN merchant m        ON m.id = mo.merchant_id
+     -- m.is_active matters as much as mo.status, and leaving it out was a
+     -- real bug. Deactivating dsport (its edge blocks our crawler) left its
+     -- products advertising "from 8 599 ден." on the listing while the
+     -- serving query -- which does filter m.is_active -- returned no offers
+     -- at all. The site was quoting a price nobody could buy, which is the
+     -- one failure this whole project exists to prevent.
+     WHERE mo.product_id = %(pid)s
+       AND mo.status = 'active'
+       AND m.is_active
 )
 INSERT INTO product_price_summary (
         product_id, country_code, min_price_minor, min_price_variant_id,

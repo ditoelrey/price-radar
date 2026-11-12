@@ -379,3 +379,61 @@ class TestIngestAgainstPostgres:
         baseline = baseline_for(conn, merchant_id, "catalog_parse")
         assert baseline.runs == 3
         assert baseline.median_price_fill == 1.0
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestCategoryHint:
+    """A hint is context, not evidence: it fills silence, never overrides."""
+
+    def _offer(self, title, hint, sku="HQ7261", mpn="HQ7261"):
+        return RawOffer(
+            merchant_slug="sportm", merchant_sku=sku, raw_mpn=mpn,
+            raw_title=title, raw_brand="Adidas",
+            product_url=f"https://www.sport-m.com.mk/p?ProductID={sku}",
+            category_hint=hint,
+            variants=[RawVariant(size_label="44", size_eu=Decimal("44"),
+                                 price_minor=6799, in_stock=True)],
+            extractors={"mpn": "url"})
+
+    def _category(self, conn):
+        with conn.cursor() as cur:
+            cur.execute("""SELECT c.slug FROM product p
+                             LEFT JOIN category c ON c.id = p.category_id""")
+            return cur.fetchone()[0]
+
+    def test_hint_fills_a_silent_title(self, conn):
+        """The whole point: these titles are bare "Brand Model"."""
+        from mkagg.load import ingest
+
+        ingest(conn, "sportm",
+               [self._offer("Adidas HANDBALL SPEZIAL", "footwear")],
+               requests=1)
+        assert self._category(conn) == "footwear"
+
+    def test_title_beats_the_hint(self, conn):
+        """A sock found through a footwear facet is still a sock."""
+        from mkagg.load import ingest
+
+        ingest(conn, "sportm",
+               [self._offer("Чорапи Adidas 3P", "footwear")], requests=1)
+        assert self._category(conn) == "socks"
+
+    def test_no_hint_and_no_title_stays_null(self, conn):
+        """Still refusing to guess when nothing says anything."""
+        from mkagg.load import ingest
+
+        ingest(conn, "sportm",
+               [self._offer("Adidas HANDBALL SPEZIAL", None)], requests=1)
+        assert self._category(conn) is None
+
+    def test_hint_persists_through_staging(self, conn):
+        """It has to survive the stage table to reach promotion at all."""
+        from mkagg.load import ingest
+
+        outcome = ingest(conn, "sportm",
+                         [self._offer("Adidas HANDBALL SPEZIAL", "footwear")],
+                         requests=1, keep_stage=True)
+        with conn.cursor() as cur:
+            cur.execute("SELECT category_hint FROM stage_offer WHERE ingest_run_id = %s",
+                        (outcome.run_id,))
+            assert cur.fetchone()[0] == "footwear"

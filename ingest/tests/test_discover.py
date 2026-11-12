@@ -296,3 +296,68 @@ def test_every_live_adapter_has_a_discovery_plan():
     live = {"sportvision", "magento_html", "woocommerce_html", "aspnet_mk"}
     assert live <= set(DISCOVERY_PLANS)
     assert live <= set(PRODUCT_URL_PATTERNS)
+
+
+class TestCategoryHints:
+    """Discovery knows the category even when the title does not.
+
+    Twelve of thirty-two products had no category because their titles never
+    named one ("Adidas Handball Spezial", "Hoka Clifton UTL"). They were all
+    reached through a footwear facet or a footwear category page, so the
+    context existed — it was simply thrown away at the door.
+    """
+
+    def test_plans_carry_a_hint_per_entry(self):
+        sv = DISCOVERY_PLANS["sportvision"]
+        assert isinstance(sv, PaginatedPlan)
+        assert ("/mk/patiki", "sneakers") in sv.categories
+
+        asp = DISCOVERY_PLANS["aspnet_mk"]
+        assert isinstance(asp, SampledPlan)
+        footwear = [f for f, hint in asp.facets if hint == "footwear"]
+        assert footwear, "the Grupa=01 footwear facets should carry a hint"
+
+    def test_brand_facets_carry_no_hint(self):
+        """A brand facet says nothing about category, so it claims nothing."""
+        asp = DISCOVERY_PLANS["aspnet_mk"]
+        brand_facets = [(f, h) for f, h in asp.facets if "Brend=" in f]
+        assert brand_facets
+        assert all(hint is None for _f, hint in brand_facets)
+
+    def test_hints_reach_the_fetch_jobs(self):
+        first = ('<div data-total-pages="1"></div>'
+                 '<a href="/mk/patiki/51378-a">a</a>')
+        fetcher = make_fetcher({
+            "/mk/patiki": (200, HTML, first.encode()),
+            "/mk/obuvki": (200, HTML, b'<div data-total-pages="1"></div>'
+                                      b'<a href="/mk/obuvki/51400-b">b</a>'),
+        })
+        report = discover(fetcher, "sportvision", "sportvision",
+                          "https://www.sportvision.mk")
+
+        hints = {url.rsplit("/", 1)[-1]: hint
+                 for url, hint in report.category_hints.items()}
+        assert hints == {"51378-a": "sneakers", "51400-b": "footwear"}
+
+        jobs = {j.url.rsplit("/", 1)[-1]: j.category_hint
+                for j in product_jobs(report)}
+        assert jobs == {"51378-a": "sneakers", "51400-b": "footwear"}
+
+    def test_a_product_found_without_a_hint_gets_none(self):
+        fetcher = make_fetcher({
+            "/media/sitemap/dsport.xml": (200, XML, SITEMAP_INDEX.encode()),
+            "dsport-1-1.xml": (200, XML, URLSET.encode()),
+            "dsport-1-2.xml": (200, XML, b"<urlset></urlset>"),
+        })
+        report = discover(fetcher, "dsport", "magento_html",
+                          "https://www.dsport.mk")
+        # A sitemap says nothing about category; the URL path still might,
+        # and that is the classifier's job, not discovery's.
+        assert report.category_hints == {}
+        assert all(j.category_hint is None for j in product_jobs(report))
+
+    def test_hint_survives_a_job_round_trip(self):
+        from mkagg.fetch import FetchJob
+        job = FetchJob(merchant_slug="sportm", url="https://x.mk/p",
+                       kind="catalog_parse", category_hint="footwear")
+        assert FetchJob.from_json(job.to_json()).category_hint == "footwear"

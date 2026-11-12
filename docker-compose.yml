@@ -73,6 +73,12 @@ services:
       # deduplication statistics would be meaningless. Safe here
       # because Next is the only thing in front of the API.
       TRUST_FORWARDED_FOR: ${TRUST_FORWARDED_FOR:-true}
+      PRICE_RADAR_MEDIA_ROOT: /srv/media
+    volumes:
+      # Self-hosted product photos. The ingestion side writes here, the API
+      # only reads: a bind mount in development, a shared volume or an
+      # object store behind a CDN in production.
+      - ./media:/srv/media:ro
     ports:
       - "${API_PORT:-8080}:8080"
     restart: unless-stopped

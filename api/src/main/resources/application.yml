@@ -53,6 +53,10 @@ price-radar:
     # Honour X-Forwarded-For only when a proxy we control sets it.
     trust-forwarded-for: ${TRUST_FORWARDED_FOR:false}
 
+  media:
+    # Where the ingestion side writes content-addressed product photos.
+    root: ${PRICE_RADAR_MEDIA_ROOT:./media}
+
   freshness:
     # Above this, the UI must soften "in stock" to "listed". Matches the
     # honest-UI rule: never assert availability we cannot currently support.

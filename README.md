@@ -582,6 +582,39 @@ Because the click is now proxied, the API runs with `TRUST_FORWARDED_FOR=true`
 bot and deduplication statistics would be worthless. Verified: three distinct
 clients produce three distinct `ip_hash` values through the proxy.
 
+### Merchant logos
+
+Each offer row carries the shop's logo in a fixed `h-10 w-28` box with
+`object-contain`, centred. Source files are trimmed to their content by
+`tools/prepare_logos.py` first — without that the box letterboxes each logo
+by its *canvas* rather than its artwork, and Sport Vision (a wide wordmark in
+a 400x400 square, ratio 1.00) renders at a third the size of the others for
+no visible reason. Trimmed, every ratio lands between 3.08 and 5.51, all
+wider than the box, so all six render at exactly 112px wide and centre
+vertically: a tidy column.
+
+Logos of different proportions cannot share both a width and a height.
+Uniform width with varying height reads as a column; uniform height would
+give widths from 111px to 229px and read as a mess.
+
+`mix-blend-multiply` is applied per merchant, from measurement rather than
+appearance: **Buzz** is 28% opaque white and needs it, while Sport-M — the
+one that looks white-matted — is fully transparent already, as are the other
+four. It is scoped to light mode, because multiply against a dark background
+turns a black wordmark invisible.
+
+Two alignment bugs that only showed up under measurement, not on screen:
+
+* each offer row is **its own CSS grid**, so `auto` columns sized to their own
+  content and the logo column drifted 1.6px between rows. Fixed track widths
+  (`minmax(0,1fr)_7rem_19rem`) pin it.
+* the `outline` button variant has a 1px border and `buy` did not, making the
+  best-price button 2px narrower and staggering the right-hand column. All
+  variants now carry a transparent border so their boxes match.
+
+Measured after: zero spread on logo positions, button positions and button
+widths; equal row heights.
+
 ### Category scope
 
 The storefront serves footwear. The pipeline crawls shops that also sell
@@ -621,6 +654,92 @@ a shop with no photo stayed blank for good, even after three other shops
 listed it. Promotion now backfills `product.image_url` from the first offer
 that has one, and reports the count.
 
+## A crash that was hiding a worse bug
+
+`/products/adidas-terrex-skychaser-ax5-mid-gtx-kj8942` threw
+`Cannot read properties of undefined (reading 'toFixed')` in `formatSizeEu`.
+The formatter was the symptom. The chain underneath:
+
+1. V8 deactivated dsport, whose edge 403s our crawler.
+2. `refresh_summary` filtered `merchant_offer.status` but **not**
+   `merchant.is_active`, so that product kept its summary row.
+3. The listing reads summaries, so the site went on advertising
+   **"from 8 599 ден. · 1 shop"**.
+4. The detail page's offer query *does* filter `m.is_active`, so it returned
+   zero offers.
+5. The empty-state branch assumed a size filter must be active and called
+   `formatSizeEu(sizeEu!)` — and that `!` is what stopped TypeScript
+   catching any of it.
+
+Quoting a price nobody can buy is the exact failure this project exists to
+prevent, and nothing in the pipeline flagged it. It took a TypeError in a
+size formatter to make it visible.
+
+Fixed in four places: `refresh_summary` now requires `m.is_active`; V11
+clears the rows it already wrote; the detail page distinguishes "no offers in
+your size" from "no offers at all" and never falls back to the summary's
+price for its headline; and `formatSizeEu` is null-safe, which it needed to
+be anyway for one-size articles (dsport's `BEZ VELICINA`).
+
+## Self-hosted images
+
+Product photos are fetched once and served from our own infrastructure, not
+hotlinked. At catalogue scale hotlinking spends six shops' bandwidth on every
+page view, and one referer rule at any of them blanks that shop's photos with
+no error on our side.
+
+Images go through the same `Fetcher` as everything else — an image request is
+still a request to a merchant, so it belongs under the same rate limiter,
+robots check and circuit breaker, at `COLD` priority.
+
+Storage is **content-addressed by SHA-256 of the bytes**, which buys three
+things at once: deduplication (13 of 29 on the last run, because the shops
+publish the same manufacturer press photo), immutability (so `/media/...` is
+served `max-age=31536000, immutable` and never needs invalidating), and
+idempotent re-fetching.
+
+What gets refused matters as much as what gets stored. A shop returning its
+error page with `Content-Type: image/jpeg` and a 200 is a real occurrence, so
+the bytes are checked for an actual image signature rather than trusting the
+header — otherwise it would be stored and rendered as a broken photo with
+nothing in the logs. Tracking pixels, spacers and anything over 8 MB are
+rejected too, and `image_checked_at` is stamped even on failure so a dead URL
+is retried on a schedule instead of on every pass.
+
+```bash
+cd ingest && ./.venv/Scripts/python.exe -X utf8 scripts/run_pipeline.py images
+```
+
+The API serves `/media/**` from the shared volume and Next proxies it, so the
+storefront stays same-origin. `product.image_url` is kept as provenance only.
+
+## Category hints from discovery
+
+Classification reads a product's title, and a third of the catalogue had no
+category because their titles never named one — "Adidas Handball Spezial",
+"Hoka Clifton UTL". At 50k products that is thousands of uncategorised rows
+in a storefront that filters by category.
+
+Discovery knew all along: those products were reached through a footwear
+facet or a footwear category page. Each entry in `DISCOVERY_PLANS` now
+carries the category it implies, which travels on the `FetchJob`, through
+`stage_offer.category_hint`, to the loader.
+
+**A hint is context, not evidence.** The loader still prefers what the title
+actually says, and only falls back to the hint when the title is silent — so
+a pack of socks found through a footwear facet is still filed as socks. Brand
+facets carry no hint at all, because a brand says nothing about category.
+
+Measured over the same sweep:
+
+| | before | after |
+|---|---|---|
+| sneakers | 16 | 16 |
+| footwear | 0 | 10 |
+| apparel | 2 | 2 |
+| socks | 1 | 1 |
+| **unclassified** | **12** | **0** |
+
 ## Known gaps
 
 - `sizeer.com.mk` has no `robots.txt` and no sitemap; neither does the Sport
@@ -642,13 +761,5 @@ that has one, and reports the count.
   versions exist and are interface-compatible; switch when more than one
   worker runs, or the per-domain budget is silently multiplied by the worker
   count.
-- Images are hotlinked from the shops. They load, but it is their bandwidth
-  and a referer rule on any one of them would blank that shop's photos
-  overnight. Re-hosting into the raw-snapshot bucket is the durable fix.
-- **Categories are NULL for 11 of 29 products.** Correct, not broken: those
-  titles ("Adidas Handball Spezial", "Hoka Clifton UTL") simply do not name a
-  category, so none is claimed. Discovery *does* know — it reached them
-  through footwear facets and footwear sitemaps — so passing that context into
-  the loader as a category hint is the obvious next improvement.
 - No live price verification in front of `/out/{id}` yet. It belongs there
   with a hard sub-second budget and must never delay the redirect.

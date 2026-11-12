@@ -38,12 +38,14 @@ from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,  # noqa: E402
                          LocalRawStore, MemoryFetchQueue, MemoryRateLimiter,
                          Priority, assign_tiers, enqueue_due)
 from mkagg.fetch.http import DEFAULT_USER_AGENT, HttpxTransport  # noqa: E402
+from mkagg.media import ImageStore, fetch_product_images  # noqa: E402
 from mkagg.worker import run_forever, run_once  # noqa: E402
 
 DSN = os.environ.get(
     "DATABASE_URL",
     "postgresql://mkagg:mkagg_dev_only@localhost:5433/mkagg")
 ARCHIVE = Path(os.environ.get("RAW_ARCHIVE", ROOT.parent / "raw_snapshots"))
+MEDIA = Path(os.environ.get("MEDIA_ROOT", ROOT.parent / "media"))
 USER_AGENT = os.environ.get("CRAWLER_USER_AGENT", DEFAULT_USER_AGENT)
 
 
@@ -125,6 +127,26 @@ def cmd_probe(args) -> int:
     return 0
 
 
+def cmd_images(args) -> int:
+    """Download product photos we do not hold a copy of yet."""
+    fetcher = build_fetcher(args.rps)
+    store = ImageStore(MEDIA)
+    with psycopg.connect(DSN) as conn:
+        report = fetch_product_images(conn, fetcher, store,
+                                      limit=args.limit or 200)
+        print(f"  {report.summary()}")
+        with conn.cursor() as cur:
+            cur.execute("""SELECT count(*) FILTER (WHERE image_asset_id IS NOT NULL),
+                                  count(*) FILTER (WHERE image_url IS NOT NULL),
+                                  count(*) FROM product""")
+            local, remote, total = cur.fetchone()
+            print(f"  {local}/{total} products served locally "
+                  f"({remote} have a remote URL)")
+        print(f"  media on disk: {store.total_bytes() / 1024:.0f} KB in {MEDIA}")
+    fetcher.close()
+    return 0
+
+
 def cmd_serve(args) -> int:
     fetcher = build_fetcher(args.rps)
     queue = MemoryFetchQueue()
@@ -147,7 +169,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     for name, fn in (("discover", cmd_discover), ("probe", cmd_probe),
-                     ("serve", cmd_serve)):
+                     ("images", cmd_images), ("serve", cmd_serve)):
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         p.add_argument("-m", "--merchant", action="append",

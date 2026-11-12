@@ -9,6 +9,7 @@ import {
   stockLabel,
 } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { MerchantLogo } from "@/components/catalog/merchant-logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -45,12 +46,25 @@ export function OfferRow({
   const stock = stockLabel(variant.stock);
   const discount = discountPercent(variant.price, variant.listPrice);
   const shippingMinor = variant.shipping?.amountMinor ?? 0;
+  // Only claim "EU" when the EU size is actually known. Sport Vision ships
+  // some rows with its own conversion missing, and the pipeline now stores
+  // those with a null sizeEu while keeping the shop's printed label. Pasting
+  // "EU" in front of that label would put the wrong number back on the page
+  // after the ingestion side went to the trouble of removing it.
+  const sizeText =
+    variant.sizeEu !== null ? `EU ${variant.sizeLabel}` : variant.sizeLabel;
   const buyable = variant.stock !== "SOLD_OUT";
 
   return (
     <div
       className={cn(
-        "grid grid-cols-1 gap-4 border-t p-4 transition-colors sm:grid-cols-[1fr_auto] sm:items-center",
+        "grid grid-cols-1 gap-4 border-t p-4 transition-colors",
+        // Fixed track widths, not `auto`. Each row is its own grid, so
+        // auto-sized columns measure their own content: a row whose
+        // button reads "View anyway" rather than "Go to shop" shifts its
+        // neighbours, and the logo column stops being a column. Measured
+        // at 1.6px of drift between rows before pinning these.
+        "sm:grid-cols-[minmax(0,1fr)_7rem_20rem] sm:items-center sm:gap-8",
         isBest && "bg-price-muted/50",
       )}
     >
@@ -60,6 +74,11 @@ export function OfferRow({
           <span className="tnum grid size-5 shrink-0 place-items-center rounded bg-muted text-[11px] font-semibold text-muted-foreground">
             {rank}
           </span>
+          <MerchantLogo
+            slug={offer.merchantSlug}
+            name={offer.merchantName}
+            className="h-6 w-20 sm:hidden"
+          />
           <span className="font-semibold">{offer.merchantName}</span>
 
           {offer.merchantRating !== null && (
@@ -97,14 +116,19 @@ export function OfferRow({
               <span className="font-medium text-foreground">
                 {availableSizes} of {totalSizes} sizes
               </span>{" "}
-              available · from EU {variant.sizeLabel}
+              available · from {sizeText}
             </>
           ) : variant.sizeLabel ? (
             <>
-              Size <span className="font-medium text-foreground">EU {variant.sizeLabel}</span>
+              Size{" "}
+              <span className="font-medium text-foreground">
+                {sizeText}
+              </span>
             </>
           ) : (
-            "One size"
+            // dsport lists one-size articles as "BEZ VELICINA"; the pipeline
+            // stores those with no size rather than inventing one.
+            <span className="font-medium text-foreground">One size</span>
           )}
           {" · "}
           <span
@@ -139,19 +163,31 @@ export function OfferRow({
         </p>
       </div>
 
+      {/* --- who sells it ------------------------------------------------- */}
+      <div className="hidden justify-center sm:flex">
+        <MerchantLogo slug={offer.merchantSlug} name={offer.merchantName} />
+      </div>
+
       {/* --- what you pay, and the way out -------------------------------- */}
       <div className="flex items-center justify-between gap-4 sm:justify-end">
         <div className="text-right">
-          <p className="tnum text-xl font-bold leading-tight">
+          <p className="tnum whitespace-nowrap text-xl font-bold leading-tight">
             {formatMoney(variant.totalPrice)}
           </p>
-          <p className="tnum text-xs text-muted-foreground">
+          <p className="whitespace-nowrap text-xs text-muted-foreground">
+            {/*
+              When delivery is free the total IS the price, so repeating the
+              number here said nothing and made this block wide enough to
+              overflow its grid track and crowd the logo. The breakdown is
+              only worth showing when there is actually something to break
+              down.
+            */}
             {shippingMinor === 0 ? (
-              <>{formatMoney(variant.price)} · delivery included</>
+              "delivery included"
             ) : (
-              <>
+              <span className="tnum">
                 {formatMoney(variant.price)} + {formatMoney(variant.shipping)}
-              </>
+              </span>
             )}
           </p>
           {discount !== null && (

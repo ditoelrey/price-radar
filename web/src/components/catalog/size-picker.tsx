@@ -25,7 +25,8 @@ export function SizePicker({
   className,
   unavailable,
 }: {
-  sizes: number[];
+  /** Nulls are filtered out: a one-size article has no chip to offer. */
+  sizes: (number | null | undefined)[];
   selected?: number;
   className?: string;
   /** Sizes to show greyed rather than hide, on a detail page. */
@@ -53,7 +54,7 @@ export function SizePicker({
   return (
     <div className={cn("space-y-2", className)}>
       <div className="flex flex-wrap gap-1.5">
-        {sizes.map((size) => {
+        {sizes.filter((s): s is number => typeof s === "number").map((size) => {
           const isSelected = selected !== undefined && Math.abs(selected - size) < 0.005;
           const isOut = unavailableSet.has(size);
           return (
