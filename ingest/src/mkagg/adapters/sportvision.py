@@ -41,6 +41,14 @@ _OG_TITLE = re.compile(r'<meta[^>]+property="og:title"[^>]+content="([^"]*)"', r
 _TAGS = re.compile(r"<[^>]+>")
 _CM_SIZE = re.compile(r'class="cm-size"[^>]*>([^<]*)', re.I)
 _ORIG_SIZE = re.compile(r'class="original-size"[^>]*>([^<]*)', re.I)
+# The size <li> carries its own pricing, including the pre-discount figure.
+# `show-oldprice` is the authoritative flag and the reason it is read: on a
+# product at full price the shop still fills `oldprice`, with a copy of the
+# CURRENT price. Taking the value on its own would hand every variant in the
+# catalogue a list price equal to its price, and the UI would then render a
+# "-0%" badge on all of them. Only "1" means a discount is actually running.
+_SIZE_OLDPRICE = re.compile(r'data-productsize-oldprice="([^"]*)"', re.I)
+_SIZE_SHOW_OLDPRICE = re.compile(r'data-productsize-show-oldprice="([^"]*)"', re.I)
 # /mk/patiki/8550245-puma-caven-2-0  ->  8550245
 _URL_ID = re.compile(r"/(\d{3,12})-[^/]+/?$")
 
@@ -193,6 +201,19 @@ class SportVisionAdapter(Adapter):
                 continue
             seen.add(key)
 
+            # Pre-discount price, per size, when the shop says one applies.
+            list_price = None
+            show = _SIZE_SHOW_OLDPRICE.search(attrs)
+            old = _SIZE_OLDPRICE.search(attrs)
+            if show and show.group(1).strip() == "1" and old:
+                candidate = parse_price_minor(old.group(1), minor_unit=0)
+                # A "discount" that is not cheaper is not a discount. Guards
+                # against a stale or mis-set attribute putting a crossed-out
+                # number next to an identical one.
+                if (candidate is not None and price_minor is not None
+                        and candidate > price_minor):
+                    list_price = candidate
+
             cm_val = None
             if cm and cm.group(1).strip():
                 try:
@@ -204,6 +225,7 @@ class SportVisionAdapter(Adapter):
                 size_label=label,
                 size_eu=size_eu,
                 size_cm=cm_val,
+                list_price_minor=list_price,
                 merchant_variant_id=combid,
                 price_minor=price_minor if price_minor is not None else 0,
                 currency_code=currency,

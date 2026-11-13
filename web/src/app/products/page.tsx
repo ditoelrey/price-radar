@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 import { searchProducts } from "@/lib/api";
 import { formatSizeEu } from "@/lib/format";
 import { FilterSidebar } from "@/components/catalog/filter-sidebar";
+import { DEFAULT_SORT, isSortKey } from "@/lib/sort";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -29,12 +30,18 @@ export default async function ProductsPage({
   const brand = one(params.brand);
   const sizeRaw = one(params.sizeEu);
   const sizeEu = sizeRaw ? Number(sizeRaw) : undefined;
+  // Validated against the known keys rather than passed through: an unknown
+  // value would otherwise travel to the API to be silently ignored there,
+  // and the control would show a selection the listing is not using.
+  const sortRaw = one(params.sort);
+  const sort = isSortKey(sortRaw) ? sortRaw : DEFAULT_SORT;
   const page = Number(one(params.page) ?? 0) || 0;
 
   const result = await searchProducts({
     q,
     brand,
     sizeEu: Number.isFinite(sizeEu) ? sizeEu : undefined,
+    sort,
     page,
     pageSize: 24,
   });
@@ -50,6 +57,7 @@ export default async function ProductsPage({
     if (q) sp.set("q", q);
     if (brand) sp.set("brand", brand);
     if (sizeEu !== undefined) sp.set("sizeEu", String(sizeEu));
+    if (sort !== DEFAULT_SORT) sp.set("sort", sort);
     if (next > 0) sp.set("page", String(next));
     const qs = sp.toString();
     return `/products${qs ? `?${qs}` : ""}`;
@@ -88,6 +96,7 @@ export default async function ProductsPage({
             sizeEu={sizeEu}
             brand={brand}
             query={q}
+            sort={sort}
           />
 
           <section className="min-w-0 flex-1">

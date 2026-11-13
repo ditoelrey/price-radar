@@ -58,6 +58,24 @@ export function ProductCard({
             EU {formatSizeEu(sizeEu)}
           </Badge>
         )}
+
+        {/*
+          Opposite corner from the size badge on purpose: a size-filtered page
+          shows both at once, and they must never land on top of each other.
+
+          The figure is the best saving any shop advertises on this product,
+          so it is a reason to open the card rather than a promise about the
+          headline price below -- that price is the cheapest offer, which is
+          not always the discounted one.
+        */}
+        {typeof product.discountPct === "number" && (
+          <Badge
+            variant="discount"
+            className="absolute right-2 top-2 tnum font-semibold shadow-sm"
+          >
+            −{product.discountPct}%
+          </Badge>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-1 border-t p-3">

@@ -77,6 +77,24 @@ class RawOffer:
     def stock_is_known(self) -> bool:
         return any(v.in_stock is not None for v in self.variants)
 
+    @property
+    def is_sold_out_unpriced(self) -> bool:
+        """A shop that stocks this and is out of it, publishing no price.
+
+        Some shops take the price down with the stock. megasport does: once
+        every size is gone the page carries no price anywhere, its JSON-LD
+        drops the `offers` key, and `data-product_variations` is `[]`.
+
+        That is worth keeping. "Sold out at megasport" tells a shopper
+        something true and useful, while dropping the offer tells them the
+        shop never had it. But it has to be held apart from a parser that has
+        simply stopped finding prices, which looks identical from the outside
+        and is a failure. The distinction is positive knowledge of stock: we
+        keep the offer only when the page actively said it is unavailable.
+        """
+        return bool(self.variants) and all(
+            v.price_minor is None and v.in_stock is False for v in self.variants)
+
     def quality_issues(self) -> list[str]:
         """Pre-commit validation. The loader rejects a run that trips these."""
         issues: list[str] = []
@@ -84,9 +102,12 @@ class RawOffer:
             issues.append("missing_mpn")
         if not self.variants:
             issues.append("no_variants")
-        if self.min_price_minor in (None, 0):
+        # A sold-out offer with no published price is complete as it is;
+        # anything else without a price is not comparable and is a defect.
+        if self.min_price_minor in (None, 0) and not self.is_sold_out_unpriced:
             issues.append("missing_price")
-        if self.variants and not any(v.size_eu is not None for v in self.variants):
+        if (self.variants and not self.is_sold_out_unpriced
+                and not any(v.size_eu is not None for v in self.variants)):
             issues.append("no_parsable_size")
         return issues
 

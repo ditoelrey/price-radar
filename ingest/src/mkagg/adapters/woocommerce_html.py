@@ -36,6 +36,12 @@ _OG_IMAGE = re.compile(r'<meta[^>]+property="og:image"[^>]+content="([^"]*)"', r
 
 _TAGS = re.compile(r"<[^>]+>")
 
+#: Woo's own sold-out marker on the product wrapper. Checked rather than
+#: inferred from an empty variations list: "[]" on its own could equally mean
+#: the markup changed or the inline blob was suppressed, and inventing a
+#: sold-out offer out of a parser failure is exactly the wrong way round.
+_OUT_OF_STOCK = re.compile(r'class="stock out-of-stock"', re.I)
+
 #: Option texts that are placeholders rather than sizes. Woo renders its
 #: "pick one" entry as a dash on this shop; storing it would put a variant
 #: labelled "-" in the comparison table next to a real price.
@@ -174,6 +180,18 @@ class WooCommerceHtmlAdapter(Adapter):
         if variants:
             extractors["sizes"] = "embedded_json"
             extractors["price"] = "embedded_json"
+        elif parent_price is None and _OUT_OF_STOCK.search(html):
+            # Sold out, and the shop has taken the price down with the stock:
+            # no `offers` node, no price anywhere on the page, an empty
+            # variations list. Recorded as one priceless, out-of-stock variant
+            # so the product page can say "sold out at this shop" instead of
+            # implying the shop never carried it.
+            #
+            # Sizes are gone too -- there is no dropdown left to read -- so
+            # this makes no claim about them either.
+            extractors["stock"] = "css"
+            variants = [RawVariant(size_label="", price_minor=None,
+                                   currency_code="MKD", in_stock=False)]
         elif parent_price is not None:
             extractors["price"] = "jsonld"
             variants = [RawVariant(size_label="", price_minor=parent_price,

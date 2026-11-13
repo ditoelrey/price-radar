@@ -185,6 +185,94 @@ def offer(sku="392290-02", price=2863, merchant="sportvision", sizes=("42", "43"
         extractors={"mpn": "jsonld", "price": "jsonld", "sizes": "css"})
 
 
+def sold_out_offer(sku="H01551", merchant="megasport"):
+    """An offer from a shop that takes the price down with the stock.
+
+    megasport does exactly this: once every size is gone the page carries no
+    price anywhere, the JSON-LD Product node has no `offers` key, and
+    `data-product_variations` is an empty array. One variant, no size claim,
+    no price, positively known to be unavailable.
+    """
+    return RawOffer(
+        merchant_slug=merchant, merchant_sku=sku, raw_mpn=sku,
+        raw_title="Patiki HOOPS 2.0 CMF I", raw_brand="Adidas",
+        product_url=f"https://megasportonlineshop.com/p/{sku}/",
+        currency_code="MKD",
+        variants=[RawVariant(size_label="", price_minor=None,
+                             currency_code="MKD", in_stock=False)],
+        extractors={"mpn": "jsonld", "stock": "css"})
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestSoldOutWithoutAPrice:
+    """A sold-out shop should read as sold out, not as absent.
+
+    Dropping these offers told a shopper the shop never carried the item.
+    Storing 0 instead would print "0 ден.", which reads as free -- the single
+    most damaging thing this site can display. NULL is the only honest answer.
+    """
+
+    def test_it_promotes_and_keeps_the_price_null(self, conn):
+        from mkagg.load import ingest
+
+        outcome = ingest(conn, "megasport", [sold_out_offer()], requests=1)
+        assert outcome.decision is Decision.OK, outcome
+        assert outcome.promoted
+        assert outcome.promotion.offers_promoted == 1
+
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ov.price_minor, ov.in_stock
+                  FROM offer_variant ov
+                  JOIN merchant_offer mo ON mo.id = ov.offer_id
+                  JOIN merchant m ON m.id = mo.merchant_id
+                 WHERE m.slug = 'megasport'""")
+            rows = cur.fetchall()
+        assert rows == [(None, False)]
+
+    def test_no_price_point_is_written_for_it(self, conn):
+        """price_point is the price history.
+
+        "No price was published" is not an observation of a price; a row for
+        it would leave a hole that every later chart has to special-case.
+        """
+        from mkagg.load import ingest
+
+        outcome = ingest(conn, "megasport", [sold_out_offer()], requests=1)
+        assert outcome.promotion.price_points_written == 0
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM price_point")
+            assert cur.fetchone()[0] == 0
+
+    def test_it_does_not_advertise_a_price_on_the_listing(self, conn):
+        """The summary must not claim a "from" price it has not got."""
+        from mkagg.load import ingest
+
+        ingest(conn, "megasport", [sold_out_offer()], requests=1)
+        with conn.cursor() as cur:
+            cur.execute("""SELECT min_price_minor, max_price_minor, offer_count
+                             FROM product_price_summary""")
+            row = cur.fetchone()
+        assert row is not None
+        assert row[0] is None and row[1] is None, row
+
+    def test_the_schema_refuses_an_unpriced_variant_that_is_not_sold_out(self, conn):
+        """The guard against a parser that quietly stopped finding prices.
+
+        That failure looks identical to a sell-out from the outside, and left
+        alone it would empty the comparison tables instead of failing loudly.
+        """
+        import psycopg
+        from mkagg.load import ingest
+
+        ingest(conn, "megasport", [sold_out_offer()], requests=1)
+        with conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.CheckViolation):
+                cur.execute("""UPDATE offer_variant SET in_stock = TRUE
+                                WHERE price_minor IS NULL""")
+        conn.rollback()
+
+
 @pytest.mark.usefixtures("clean_db")
 class TestIngestAgainstPostgres:
     def test_bootstrap_creates_the_product_and_promotes(self, conn):

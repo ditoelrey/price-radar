@@ -48,6 +48,12 @@ export type ProductCard = {
    */
   fromPriceIsSizeSpecific: boolean;
   availableSizesEu: number[];
+  /**
+   * Best advertised saving on this product, as whole percent, or null when
+   * no shop is discounting it. Null rather than 0, so the card can treat
+   * "present" as "worth a badge".
+   */
+  discountPct: number | null;
   updatedAt: string | null;
 };
 
@@ -111,6 +117,8 @@ export type SearchParams = {
   q?: string;
   brand?: string;
   sizeEu?: number;
+  /** One of `SORTS` in `sort-select`; the API falls back to cheapest. */
+  sort?: string;
   page?: number;
   pageSize?: number;
 };
@@ -145,6 +153,7 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       q: params.q,
       brand: params.brand,
       sizeEu: params.sizeEu,
+      sort: params.sort,
       page: params.page ?? 0,
       pageSize: params.pageSize ?? 24,
     })}`,

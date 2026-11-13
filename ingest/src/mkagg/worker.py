@@ -318,7 +318,13 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
         # them -- caught immediately by the probe test, which is the whole
         # reason that test asserts a count rather than just "no error".
         if job.kind != "stock_probe":
-            priced = [o for o in offers if o.min_price_minor]
+            # A sold-out offer whose shop publishes no price is kept on
+            # purpose: "sold out here" is real information, and the offer
+            # carries positive evidence of that from the page rather than an
+            # absence we guessed at. Everything else without a price cannot
+            # appear on a comparison page and is dropped below.
+            priced = [o for o in offers
+                      if o.min_price_minor or o.is_sold_out_unpriced]
             report.offers_unpriced += len(offers) - len(priced)
             offers = priced
             if not offers:

@@ -70,6 +70,15 @@ public final class Dtos {
              */
             boolean fromPriceIsSizeSpecific,
             List<Double> availableSizesEu,
+            /**
+             * Best advertised saving on this product, as whole percent, or
+             * null when no shop is discounting it.
+             *
+             * <p>Null rather than 0 on purpose: the card draws a badge when
+             * this is present, and zero would put a "save nothing" badge on
+             * most of the catalogue.
+             */
+            Integer discountPct,
             Instant updatedAt) {
     }
 

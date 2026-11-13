@@ -1,6 +1,8 @@
 import Link from "next/link";
 
 import { SizePicker } from "@/components/catalog/size-picker";
+import { SortSelect } from "@/components/catalog/sort-select";
+import { DEFAULT_SORT, type SortKey } from "@/lib/sort";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
@@ -41,16 +43,22 @@ export function FilterSidebar({
   sizeEu,
   brand,
   query,
+  sort,
 }: {
   sizes: number[];
   sizeEu?: number;
   brand?: string;
   query?: string;
+  sort?: SortKey;
 }) {
   const brandHref = (slug: string | null) => {
     const params = new URLSearchParams();
     if (query) params.set("q", query);
     if (sizeEu !== undefined) params.set("sizeEu", String(sizeEu));
+    // Carried explicitly, because this href is rebuilt from scratch rather
+    // than edited: without it, picking a brand would silently throw away the
+    // shopper's chosen order.
+    if (sort && sort !== DEFAULT_SORT) params.set("sort", sort);
     if (slug) params.set("brand", slug);
     const qs = params.toString();
     return `/products${qs ? `?${qs}` : ""}`;
@@ -59,6 +67,10 @@ export function FilterSidebar({
   return (
     <aside className="w-full shrink-0 lg:w-64">
       <div className="space-y-5 rounded-lg border bg-card p-4">
+        <SortSelect selected={sort} />
+
+        <Separator />
+
         <section>
           <h2 className="mb-1 text-sm font-semibold">Your size</h2>
           <p className="mb-3 text-xs text-muted-foreground">

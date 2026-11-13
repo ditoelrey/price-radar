@@ -397,6 +397,50 @@ class TestWorkerWithDatabase:
         assert 0.3 <= IMPLAUSIBLE_MOVE <= 0.9
 
 
+class TestUnpricedOfferFilter:
+    """Which price-less offers the worker keeps, and which it drops.
+
+    The filter exists because an offer with no price cannot sit on a
+    comparison page. But "sold out and the shop publishes no price" is a real
+    state some shops expose -- megasport strips the price when stock runs out
+    -- and that offer is worth showing. The two cases have to be told apart
+    on positive evidence, not on the absence of a number.
+    """
+
+    @staticmethod
+    def _offer(price, in_stock, sku="X1"):
+        return RawOffer(
+            merchant_slug="megasport", merchant_sku=sku, raw_mpn=sku,
+            raw_title="Patiki", raw_brand="Adidas",
+            product_url=f"https://megasportonlineshop.com/p/{sku}/",
+            variants=[RawVariant(size_label="", price_minor=price,
+                                 in_stock=in_stock)])
+
+    def test_sold_out_with_no_price_is_a_complete_offer(self):
+        assert self._offer(None, False).is_sold_out_unpriced
+
+    def test_no_price_but_stock_unknown_is_not(self):
+        """The shape a parser regression takes.
+
+        No price and nothing said about stock is an extraction failure, and
+        keeping it would quietly fill the catalogue with price-less rows
+        instead of tripping the gate.
+        """
+        assert not self._offer(None, None).is_sold_out_unpriced
+
+    def test_no_price_but_claimed_in_stock_is_not(self):
+        assert not self._offer(None, True).is_sold_out_unpriced
+
+    def test_a_priced_offer_is_not(self):
+        assert not self._offer(2863, False).is_sold_out_unpriced
+
+    def test_the_gate_accepts_the_sold_out_one_and_rejects_the_others(self):
+        """`quality_issues` is what the loader rejects a run over."""
+        assert self._offer(None, False).quality_issues() == []
+        assert "missing_price" in self._offer(None, None).quality_issues()
+        assert "missing_price" in self._offer(None, True).quality_issues()
+
+
 class TestStockOnlyProbes:
     """GetVelicini returns sizes and stock, never a price.
 

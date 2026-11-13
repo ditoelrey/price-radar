@@ -149,6 +149,116 @@ class TestSportVisionUnmappedSizes:
         assert variants[0].size_eu == Decimal("42")
 
 
+class TestSportVisionListPrice:
+    """The pre-discount price, so the UI can show what the saving is.
+
+    Attribute values are taken verbatim from two live pages for the same
+    article, adidas SL 72 Pro (MPN KK3077): sportvision had it at 50% off,
+    buzz at full price on the same day. That pair is the whole test -- the
+    shop fills `oldprice` either way, and only `show-oldprice` distinguishes
+    a real discount from a copy of the current price.
+    """
+
+    DISCOUNTED = (
+        'data-productsize-price="3.394" data-productsize-dicount="50" '
+        'data-productsize-price-without-discount="3.394" '
+        'data-productsize-show-oldprice="1" data-productsize-oldprice="6.788" '
+        'data-productsize-combid="6415999"')
+    FULL_PRICE = (
+        'data-productsize-price="6.788" data-productsize-dicount="0" '
+        'data-productsize-price-without-discount="6.788" '
+        'data-productsize-show-oldprice="-1" data-productsize-oldprice="6.788" '
+        'data-productsize-combid="6325544"')
+
+    def _parse(self, attrs, price_minor=3394):
+        from mkagg.adapters.sportvision import SportVisionAdapter
+        html = ('<div class="product-size-tabs-new">'
+                '<ul class="product-attributes list-inline">'
+                f'<li {attrs}><span class="original-size">9</span>'
+                '<span class="eur-size">43</span>'
+                '<span class="cm-size">27.5</span></li></ul></div>')
+        return SportVisionAdapter._parse_sizes(html, price_minor, "MKD")
+
+    def test_discounted_size_carries_its_old_price(self):
+        v = self._parse(self.DISCOUNTED, price_minor=3394)[0]
+        assert v.price_minor == 3394
+        assert v.list_price_minor == 6788
+
+    def test_full_price_size_has_no_list_price(self):
+        """The case that makes the flag necessary.
+
+        buzz fills `oldprice` with 6.788 while selling at 6.788. Reading the
+        value without the flag would give every variant in the catalogue a
+        list price equal to its price, and the UI would draw a "-0%" badge on
+        all of them.
+        """
+        v = self._parse(self.FULL_PRICE, price_minor=6788)[0]
+        assert v.price_minor == 6788
+        assert v.list_price_minor is None
+
+    def test_a_list_price_that_is_not_higher_is_refused(self):
+        """A "discount" that is not cheaper is not a discount."""
+        attrs = ('data-productsize-show-oldprice="1" '
+                 'data-productsize-oldprice="3.394" '
+                 'data-productsize-combid="1">')
+        assert self._parse(attrs.rstrip(">"), price_minor=3394)[0].list_price_minor is None
+
+    def test_sold_out_sizes_carry_no_pricing_at_all(self):
+        """Sport Vision strips pricing attributes from sold-out sizes.
+
+        Those rows keep only a combid and `class="disabled"`, which is why a
+        discounted product commonly yields a list price on just one or two of
+        its sizes -- the ones still buyable.
+        """
+        v = self._parse('class="ease disabled" data-productsize-combid="6415978"')[0]
+        assert v.in_stock is False
+        assert v.list_price_minor is None
+
+
+class TestMegasportSoldOut:
+    """A shop that takes the price down with the stock.
+
+    megasport publishes no price at all once every size is gone: no `offers`
+    node in its JSON-LD, nothing on the page, and `data-product_variations`
+    set to an empty array. Dropping those offers told shoppers the shop never
+    carried the item; recording them says it is sold out there, which is true
+    and useful.
+    """
+
+    PAGE = ('<div class="product type-product product-type-variable">'
+            '<form data-product_id="43787" data-product_variations="[]">'
+            '</form>{stock}<span class="sku">H01551</span></div>')
+    OOS = '<p class="stock out-of-stock">Нема залиха</p>'
+
+    def _offer(self, stock):
+        from mkagg.adapters import get_adapter
+        return get_adapter("woocommerce_html").parse_product(
+            self.PAGE.format(stock=stock).encode(),
+            "https://megasportonlineshop.com/p/patiki-hoops-2-0-cmf-i-3/",
+            "megasport")
+
+    def test_sold_out_product_is_recorded_without_a_price(self):
+        offer = self._offer(self.OOS)
+        assert offer is not None
+        assert len(offer.variants) == 1
+        v = offer.variants[0]
+        assert v.price_minor is None, "0 would render as 'free'"
+        assert v.in_stock is False
+        assert offer.is_sold_out_unpriced
+        # Complete as it stands: the gate must not reject the run over it.
+        assert offer.quality_issues() == []
+
+    def test_no_price_and_no_sold_out_marker_invents_nothing(self):
+        """The guard that keeps a parser failure from looking like a sell-out.
+
+        An empty variations list on its own could just as easily mean the
+        markup changed. Without the shop's own out-of-stock marker there is no
+        positive evidence of anything, so no variant is produced.
+        """
+        offer = self._offer("")
+        assert offer is None or offer.variants == []
+
+
 # ---------------------------------------------------------------------------
 # Adapter 2: Magento (dsport.mk)
 # ---------------------------------------------------------------------------

@@ -69,6 +69,10 @@ class RunMetrics:
     offers_with_mpn: int = 0
     offers_with_price: int = 0
     offers_with_size: int = 0
+    #: Offers the shop publishes no price for because they are sold out.
+    #: Held apart so they do not count against the fill rates: they are
+    #: complete offers, not failures to extract anything.
+    offers_sold_out_unpriced: int = 0
 
     #: field -> {tier: count}
     extractor_stats: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -79,12 +83,29 @@ class RunMetrics:
         return self.offers_with_mpn / self.offers_seen if self.offers_seen else None
 
     @property
+    def priceable_offers(self) -> int:
+        """Offers that ought to carry a price.
+
+        A sold-out offer whose shop publishes no price is not one of them.
+        Counting it as a miss is what makes the denominator the right place to
+        fix this: the alternative, counting it as a hit, would put a number in
+        the metric that is not in the data. Before this, 32 sold-out megasport
+        products were enough to pull a 500-offer run's price fill to 94% and
+        put it under the 95% floor -- rejecting 468 good offers over 32 that
+        were never going to have a price.
+        """
+        return self.offers_seen - self.offers_sold_out_unpriced
+
+    @property
     def price_fill_rate(self) -> float | None:
-        return self.offers_with_price / self.offers_seen if self.offers_seen else None
+        """None when nothing in the run could have had a price."""
+        return (self.offers_with_price / self.priceable_offers
+                if self.priceable_offers else None)
 
     @property
     def size_fill_rate(self) -> float | None:
-        return self.offers_with_size / self.offers_seen if self.offers_seen else None
+        return (self.offers_with_size / self.priceable_offers
+                if self.priceable_offers else None)
 
     @property
     def error_rate(self) -> float:
@@ -154,8 +175,15 @@ def validate_run(metrics: RunMetrics, baseline: Baseline,
                "a run that parsed nothing is a failure, not an empty catalogue"):
         fatal.append(f"parsed {metrics.offers_seen} offers")
 
-    if metrics.offers_seen:
-        price_fill = metrics.price_fill_rate or 0.0
+    if metrics.price_fill_rate is None:
+        # Every offer in the run is a sold-out one the shop prices nothing
+        # for, so there is no fill rate to judge. `offers_seen_min` above
+        # already caught the run that parsed nothing at all, which is the
+        # failure this check would otherwise be standing in for.
+        add("price_fill_min", True, None, t.min_price_fill,
+            "no priceable offers in this run: every one is sold out")
+    elif metrics.offers_seen:
+        price_fill = metrics.price_fill_rate
         if not add("price_fill_min", price_fill >= t.min_price_fill,
                    round(price_fill, 4), t.min_price_fill,
                    "an offer without a price cannot be compared"):
@@ -241,6 +269,13 @@ SELECT count(*)                                                   AS offers_seen
        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM stage_variant sv
                                        WHERE sv.stage_offer_id = so.id
                                          AND sv.size_eu IS NOT NULL)) AS with_size,
+       -- Sold out everywhere, with no price published anywhere: a complete
+       -- offer, not a parse failure, and excluded from the fill denominators.
+       count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM stage_variant sv
+                                           WHERE sv.stage_offer_id = so.id
+                                             AND (sv.price_minor IS NOT NULL
+                                                  OR sv.in_stock IS NOT FALSE)))
+                                                             AS sold_out,
        coalesce((SELECT count(*) FROM stage_variant sv
                    JOIN stage_offer so2 ON so2.id = sv.stage_offer_id
                   WHERE so2.ingest_run_id = %(run)s), 0)          AS variants_seen
@@ -279,13 +314,15 @@ def metrics_from_stage(conn, run_id: int, *, requests: int = 0,
     """
     with conn.cursor() as cur:
         cur.execute(METRICS_SQL, {"run": run_id})
-        offers_seen, with_mpn, with_price, with_size, variants_seen = cur.fetchone()
+        (offers_seen, with_mpn, with_price, with_size,
+         sold_out, variants_seen) = cur.fetchone()
 
         metrics = RunMetrics(
             offers_seen=offers_seen, variants_seen=variants_seen,
             requests=requests or offers_seen, http_errors=http_errors,
             offers_with_mpn=with_mpn, offers_with_price=with_price,
-            offers_with_size=with_size)
+            offers_with_size=with_size,
+            offers_sold_out_unpriced=sold_out)
 
         cur.execute(EXTRACTOR_SQL, {"run": run_id})
         for field_name, tier, count in cur.fetchall():

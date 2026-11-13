@@ -38,7 +38,7 @@ public class CatalogService {
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    int page, int pageSize) {
         return search(query, brand, sizeEu, CatalogRepository.FOOTWEAR_KINDS,
-                true, page, pageSize);
+                true, CatalogRepository.Sort.CHEAPEST, page, pageSize);
     }
 
     /**
@@ -49,12 +49,13 @@ public class CatalogService {
      */
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    String[] kinds, boolean includeUnclassified,
+                                   CatalogRepository.Sort sort,
                                    int page, int pageSize) {
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
                 country, query, brand, sizeEu, kinds, includeUnclassified,
-                pageSize + 1, page * pageSize);
+                sort, pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
             rows = rows.subList(0, pageSize);
@@ -112,8 +113,11 @@ public class CatalogService {
         for (var group : byOffer.values()) {
             var head = group.get(0);
             List<Dtos.OfferVariant> variants = new ArrayList<>(group.size());
-            long fromPrice = Long.MAX_VALUE;
-            long fromTotal = Long.MAX_VALUE;
+            // Boxed and left null when nothing in the offer has a price:
+            // a sold-out shop that publishes none must not be reported as
+            // costing zero, and must not claim a "from" price it has not got.
+            Long fromPrice = null;
+            Long fromTotal = null;
 
             for (var row : group) {
                 variants.add(new Dtos.OfferVariant(
@@ -132,8 +136,14 @@ public class CatalogService {
                         row.publishesStock() ? row.stockQty() : null,
                         row.checkedAt(),
                         "/out/" + row.variantId()));
-                fromPrice = Math.min(fromPrice, row.priceMinor());
-                fromTotal = Math.min(fromTotal, row.totalMinor());
+                if (row.priceMinor() != null) {
+                    fromPrice = fromPrice == null ? row.priceMinor()
+                            : Math.min(fromPrice, row.priceMinor());
+                }
+                if (row.totalMinor() != null) {
+                    fromTotal = fromTotal == null ? row.totalMinor()
+                            : Math.min(fromTotal, row.totalMinor());
+                }
             }
 
             String related = head.relatedMerchantSlug();

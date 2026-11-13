@@ -435,7 +435,8 @@ WITH v AS (
 INSERT INTO product_price_summary (
         product_id, country_code, min_price_minor, min_price_variant_id,
         max_price_minor, currency_code, offer_count, merchant_count,
-        in_stock_offer_count, available_sizes_eu, updated_at)
+        in_stock_offer_count, available_sizes_eu, max_discount_pct,
+        updated_at)
 SELECT %(pid)s, 'MK',
        min(price_minor),
        (SELECT id FROM v ORDER BY price_minor LIMIT 1),
@@ -445,6 +446,24 @@ SELECT %(pid)s, 'MK',
        coalesce(array_agg(DISTINCT size_eu)
                 FILTER (WHERE size_eu IS NOT NULL AND in_stock IS NOT FALSE),
                 '{}'),
+       -- The best saving any shop advertises on this product, so the listing
+       -- can sort by discount without joining the variants. A maximum, not an
+       -- average: a shopper asking "where is this most reduced" is asking
+       -- about one shop's offer. NULL when nobody is discounting it, which is
+       -- not the same as zero -- zero would claim a shop advertised a saving
+       -- of nothing.
+       --
+       -- No percent sign anywhere in this string: psycopg reads one as a
+       -- placeholder and refuses the whole statement, which is how this
+       -- comment broke every database test the first time it was written.
+       (SELECT max(round(100.0 * (list_price_minor - price_minor)
+                               / list_price_minor))::smallint
+          FROM v
+         WHERE price_minor IS NOT NULL
+           AND list_price_minor IS NOT NULL
+           AND list_price_minor > price_minor
+           AND round(100.0 * (list_price_minor - price_minor)
+                           / list_price_minor) BETWEEN 1 AND 99),
        now()
   FROM v
 ON CONFLICT (product_id) DO UPDATE SET
@@ -456,6 +475,7 @@ ON CONFLICT (product_id) DO UPDATE SET
         merchant_count       = EXCLUDED.merchant_count,
         in_stock_offer_count = EXCLUDED.in_stock_offer_count,
         available_sizes_eu   = EXCLUDED.available_sizes_eu,
+        max_discount_pct     = EXCLUDED.max_discount_pct,
         updated_at           = now()
 """
 
@@ -538,7 +558,14 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                 # Write-on-change: a fresh insert counts, an identical
                 # re-crawl does not. This is the rule that keeps price_point
                 # at ~2M rows a year instead of ~100M.
-                if changed:
+                #
+                # A variant with no price is skipped entirely. price_point is
+                # the price history, and "this shop published no price" is not
+                # an observation of a price -- writing a row for it would put
+                # a hole in the series that every later chart and trend has to
+                # special-case. The variant itself still records the sold-out
+                # state, which is where that fact belongs.
+                if changed and variant.price_minor is not None:
                     cur.execute(
                         """INSERT INTO price_point (offer_variant_id,
                                                     observed_at, price_minor,

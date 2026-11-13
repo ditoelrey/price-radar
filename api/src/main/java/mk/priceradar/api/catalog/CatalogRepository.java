@@ -61,6 +61,63 @@ public class CatalogRepository {
     // refuses to prepare the statement at all:
     //   ERROR: could not determine data type of parameter $2
     // The cast is load-bearing, not decoration.
+    /**
+     * The listing orders a shopper may ask for.
+     *
+     * <p>An enum, and the SQL fragments live here rather than coming in from
+     * the request, because this text is concatenated into the query: a sort
+     * key taken from a query string and pasted into {@code ORDER BY} is an
+     * injection, and no amount of validating the string afterwards is as
+     * convincing as never accepting one.
+     *
+     * <p>Substituted with {@code String.replace}, never {@code String.format}
+     * -- the queries carry {@code '%'} as ILIKE wildcards and a formatter
+     * reads those as conversion specifiers and throws.
+     *
+     * <p>Every clause ends in {@code p.id}. Without a total order, two
+     * products sharing a price can swap places between page 1 and page 2 and
+     * a shopper sees one of them twice and the other never -- the sort of
+     * bug that looks like a phantom duplicate and is miserable to chase.
+     */
+    public enum Sort {
+        /** Cheapest first: the default, and what the site is for. */
+        CHEAPEST("{PRICE} ASC, p.id"),
+        EXPENSIVE("{PRICE} DESC, p.id"),
+        /**
+         * Biggest advertised saving first.
+         *
+         * <p>{@code NULLS LAST} keeps undiscounted products below every
+         * discounted one instead of letting them lead the page, and the
+         * price tie-break means equal discounts still read cheapest-first.
+         */
+        DISCOUNT("max_discount_pct DESC NULLS LAST, {PRICE} ASC, p.id"),
+        TITLE("p.canonical_name ASC, p.id");
+
+        private final String template;
+
+        Sort(String template) {
+            this.template = template;
+        }
+
+        /** @param priceColumn the price expression of the query being built */
+        String orderBy(String priceColumn) {
+            return template.replace("{PRICE}", priceColumn);
+        }
+
+        public static Sort parse(String raw) {
+            if (raw == null || raw.isBlank()) {
+                return CHEAPEST;
+            }
+            try {
+                return valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException unknown) {
+                // An unreadable sort key is not worth a 400: the shopper
+                // still wants the listing, and cheapest is the honest default.
+                return CHEAPEST;
+            }
+        }
+    }
+
     private static final String LIST_BASE = """
             SELECT p.slug, p.canonical_name, b.name AS brand, p.colorway,
        -- Our own copy when we hold one, the shop's URL only while the
@@ -70,7 +127,7 @@ public class CatalogRepository {
                    p.primary_mpn,
                    s.min_price_minor, s.currency_code, s.offer_count,
                    s.merchant_count, s.available_sizes_eu, s.updated_at,
-                   c.minor_unit
+                   s.max_discount_pct, c.minor_unit
               FROM product_price_summary s
               JOIN product  p ON p.id = s.product_id
               JOIN brand    b ON b.id = p.brand_id
@@ -87,7 +144,7 @@ public class CatalogRepository {
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
                     OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
-             ORDER BY s.min_price_minor ASC, p.id
+             ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
 
@@ -105,7 +162,16 @@ public class CatalogRepository {
                        min(ov.price_minor) AS from_price_minor,
                        count(DISTINCT mo.id)          AS offer_count,
                        count(DISTINCT mo.merchant_id) AS merchant_count,
-                       max(ov.currency_code)          AS currency_code
+                       max(ov.currency_code)          AS currency_code,
+                       -- Computed here rather than read off the summary: the
+                       -- summary's figure covers every size, and on a page
+                       -- filtered to EU 42 the only saving that means
+                       -- anything is one a shopper can buy in 42.
+                       max(round(100.0 * (ov.list_price_minor - ov.price_minor)
+                                       / ov.list_price_minor))
+                           FILTER (WHERE ov.list_price_minor IS NOT NULL
+                                     AND ov.list_price_minor > ov.price_minor)
+                                                      AS max_discount_pct
                   FROM offer_variant ov
                   JOIN merchant_offer mo ON mo.id = ov.offer_id
                   JOIN merchant m        ON m.id = mo.merchant_id
@@ -124,7 +190,8 @@ public class CatalogRepository {
                    p.primary_mpn,
                    z.from_price_minor AS min_price_minor, z.currency_code,
                    z.offer_count, z.merchant_count,
-                   s.available_sizes_eu, s.updated_at, c.minor_unit
+                   s.available_sizes_eu, s.updated_at,
+                   z.max_discount_pct, c.minor_unit
               FROM sized z
               JOIN product  p ON p.id = z.product_id
               JOIN brand    b ON b.id = p.brand_id
@@ -140,7 +207,7 @@ public class CatalogRepository {
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
                     OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
-             ORDER BY z.from_price_minor ASC, p.id
+             ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
 
@@ -155,9 +222,15 @@ public class CatalogRepository {
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
                                        Double sizeEu, String[] kinds,
                                        boolean includeUnclassified,
-                                       int limit, int offset) {
+                                       Sort sort, int limit, int offset) {
         boolean sized = sizeEu != null;
-        var spec = db.sql(sized ? LIST_BY_SIZE : LIST_BASE)
+        // The price column differs between the two queries -- the size-
+        // filtered one prices each product in the requested size -- so the
+        // sort is rendered against whichever is in play.
+        String sql = (sized ? LIST_BY_SIZE : LIST_BASE).replace(
+                "/*{ORDER}*/",
+                sort.orderBy(sized ? "z.from_price_minor" : "s.min_price_minor"));
+        var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
                 .param("brand", blankToNull(brandSlug))
                 .param("kinds", kinds)
@@ -187,6 +260,7 @@ public class CatalogRepository {
                 rs.getInt("merchant_count"),
                 sizeSpecific,
                 readSizes(rs, "available_sizes_eu"),
+                nullableInt(rs, "max_discount_pct"),
                 toInstant(rs, "updated_at"));
     }
 
@@ -255,7 +329,9 @@ public class CatalogRepository {
                    (SELECT r.slug FROM merchant r
                      WHERE r.id = priced.related_merchant_id) AS related_slug
               FROM priced
-             ORDER BY offer_from_total_minor ASC, merchant_name,
+             -- NULLS LAST: an offer with no published price is sold out,
+             -- and it belongs below every offer a shopper can actually buy.
+             ORDER BY offer_from_total_minor ASC NULLS LAST, merchant_name,
                       size_eu NULLS LAST, size_label
             """;
 
@@ -296,12 +372,16 @@ public class CatalogRepository {
                         rs.getLong("variant_id"),
                         rs.getString("size_label"),
                         nullableDouble(rs, "size_eu"),
-                        rs.getLong("price_minor"),
+                        // nullableLong, not getLong: a sold-out offer whose
+                        // shop publishes no price has price_minor NULL, and
+                        // getLong would silently turn that into 0 -- which
+                        // renders as "0 ден." and reads as free.
+                        nullableLong(rs, "price_minor"),
                         nullableLong(rs, "list_price_minor"),
                         rs.getLong("shipping_minor"),
-                        rs.getLong("total_minor"),
-                        rs.getLong("offer_from_price_minor"),
-                        rs.getLong("offer_from_total_minor"),
+                        nullableLong(rs, "total_minor"),
+                        nullableLong(rs, "offer_from_price_minor"),
+                        nullableLong(rs, "offer_from_total_minor"),
                         rs.getString("currency_code"),
                         nullableBoolean(rs, "in_stock"),
                         nullableInt(rs, "stock_qty"),
@@ -329,10 +409,10 @@ public class CatalogRepository {
                                   Integer deliveryDaysMin, Integer deliveryDaysMax,
                                   String relatedMerchantSlug, long variantId,
                                   String sizeLabel, Double sizeEu,
-                                  long priceMinor, Long listPriceMinor,
-                                  long shippingMinor, long totalMinor,
-                                  long offerFromPriceMinor,
-                                  long offerFromTotalMinor, String currency,
+                                  Long priceMinor, Long listPriceMinor,
+                                  long shippingMinor, Long totalMinor,
+                                  Long offerFromPriceMinor,
+                                  Long offerFromTotalMinor, String currency,
                                   Boolean inStock, Integer stockQty,
                                   Instant checkedAt, int minorUnit) {
     }

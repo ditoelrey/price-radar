@@ -54,6 +54,12 @@ export function OfferRow({
   const sizeText =
     variant.sizeEu !== null ? `EU ${variant.sizeLabel}` : variant.sizeLabel;
   const buyable = variant.stock !== "SOLD_OUT";
+  // Some shops take the price down with the stock: megasport publishes none
+  // at all once every size of a product is gone. The offer is still worth
+  // showing -- "sold out here" is real information, and omitting the shop
+  // suggests it never carried the item -- but there is no number to print,
+  // and a dash where the headline price goes looks like a loading bug.
+  const unpriced = !variant.totalPrice;
 
   return (
     <div
@@ -125,6 +131,12 @@ export function OfferRow({
                 {sizeText}
               </span>
             </>
+          ) : unpriced ? (
+            // Not the same as a one-size article. When a shop sells out it
+            // can take the size list down along with the price -- megasport
+            // does -- so we hold no sizes for this offer and must not imply
+            // it was ever sold as a single size.
+            <span className="font-medium text-foreground">Sizes not listed</span>
           ) : (
             // dsport lists one-size articles as "BEZ VELICINA"; the pipeline
             // stores those with no size rather than inventing one.
@@ -171,8 +183,15 @@ export function OfferRow({
       {/* --- what you pay, and the way out -------------------------------- */}
       <div className="flex items-center justify-between gap-4 sm:justify-end">
         <div className="text-right">
-          <p className="tnum whitespace-nowrap text-xl font-bold leading-tight">
-            {formatMoney(variant.totalPrice)}
+          <p
+            className={cn(
+              "tnum whitespace-nowrap font-bold leading-tight",
+              unpriced
+                ? "text-base font-semibold text-muted-foreground"
+                : "text-xl",
+            )}
+          >
+            {unpriced ? "Sold out" : formatMoney(variant.totalPrice)}
           </p>
           <p className="whitespace-nowrap text-xs text-muted-foreground">
             {/*
@@ -182,7 +201,9 @@ export function OfferRow({
               only worth showing when there is actually something to break
               down.
             */}
-            {shippingMinor === 0 ? (
+            {unpriced ? (
+              "no price while out of stock"
+            ) : shippingMinor === 0 ? (
               "delivery included"
             ) : (
               <span className="tnum">
@@ -222,8 +243,13 @@ export function OfferRow({
 }
 
 export function offerVariantsSorted(offer: Offer): OfferVariant[] {
+  // Infinity, not 0: a variant with no price is sold out and belongs at the
+  // bottom. Coalescing to 0 sorted it to the very top, ahead of every offer
+  // a shopper could actually buy.
   return [...offer.variants].sort(
-    (a, b) => (a.totalPrice?.amountMinor ?? 0) - (b.totalPrice?.amountMinor ?? 0),
+    (a, b) =>
+      (a.totalPrice?.amountMinor ?? Number.POSITIVE_INFINITY) -
+      (b.totalPrice?.amountMinor ?? Number.POSITIVE_INFINITY),
   );
 }
 

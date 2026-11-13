@@ -47,10 +47,12 @@ public class ProductController {
             @RequestParam(required = false) String brand,
             @RequestParam(required = false) Double sizeEu,
             @RequestParam(required = false) String kind,
+            @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         boolean isDefaultScope = kind == null || kind.isBlank();
         return catalog.search(q, brand, sizeEu, kindsFor(kind), isDefaultScope,
+                CatalogRepository.Sort.parse(sort),
                 page, Math.min(pageSize, MAX_PAGE_SIZE));
     }
 
