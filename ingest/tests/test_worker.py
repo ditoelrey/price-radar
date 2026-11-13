@@ -16,9 +16,9 @@ from decimal import Decimal
 import pytest
 from conftest import load_bytes
 
-from mkagg.fetch import (CircuitBreaker, FetchJob, Fetcher, FetcherConfig,
-                         MemoryFetchQueue, MemoryRateLimiter, Priority,
-                         StubTransport)
+from mkagg.fetch import (BreakerWait, CircuitBreaker, FetchJob, Fetcher,
+                         FetcherConfig, MemoryFetchQueue, MemoryRateLimiter,
+                         Priority, StubTransport)
 from mkagg.models import RawOffer, RawVariant
 from mkagg.worker import (IMPLAUSIBLE_MOVE, WorkerReport, parse_result,
                           run_once)
@@ -40,6 +40,21 @@ def make_fetcher(routes, **kw):
         limiter=MemoryRateLimiter(rps=1000, capacity=1000, reserve=0),
         breaker=CircuitBreaker(),
         config=FetcherConfig(respect_robots=False, max_attempts=1), **kw)
+
+
+class ManualClock:
+    """A clock whose sleep advances it, so breaker waits cost no real time."""
+
+    def __init__(self, start: float = 1000.0) -> None:
+        self.now = start
+        self.slept = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.slept += seconds
+        self.now += seconds
 
 
 MERCHANTS = {
@@ -203,6 +218,71 @@ class TestLoopResilience:
                           ingest_fn=_no_ingest)
         assert report.jobs_processed == 3
         assert len(queue) == 7
+
+    def _flaky_fetcher(self, clock, page):
+        """Five 503s trip the breaker; every /ok/ page then answers 200."""
+        return Fetcher(
+            StubTransport(routes={"/fail/": (503, HTML, b"busy"),
+                                  "/ok/": (200, HTML, page)}),
+            limiter=MemoryRateLimiter(rps=1000, capacity=1000, reserve=0),
+            breaker=CircuitBreaker(clock=clock),
+            config=FetcherConfig(respect_robots=False, max_attempts=1),
+            clock=clock, sleep=clock.sleep)
+
+    def _tripping_queue(self):
+        base = "https://www.sportvision.mk/mk/patiki"
+        return self._queue(*(
+            [FetchJob(merchant_slug="sportvision", url=f"{base}/fail/{i}")
+             for i in range(5)]
+            + [FetchJob(merchant_slug="sportvision", url=f"{base}/ok/{i}")
+               for i in range(3)]))
+
+    def test_an_open_circuit_no_longer_discards_the_rest_of_the_queue(self):
+        """The regression that cost a two-hour sweep.
+
+        A 20-second outage tripped the breaker 177 pages into a 3 763-page
+        discovery. Every remaining job came back `circuit_open` in
+        microseconds and the loop dropped it, so the sweep "finished" in 23
+        seconds having fetched nothing -- and the 30-second cooldown it was
+        supposed to be waiting out had not even elapsed.
+
+        Here the five 503s open the circuit and the three good pages follow
+        it. All three must still be fetched.
+        """
+        clock = ManualClock()
+        fetcher = self._flaky_fetcher(
+            clock, load_bytes("sportvision_caven20.html"))
+
+        report = run_once(FakeConn(), fetcher, self._tripping_queue(),
+                          ingest_fn=_no_ingest,
+                          breaker_wait=BreakerWait(sleep=clock.sleep))
+
+        assert report.http_errors == 5
+        assert report.offers_parsed == 3          # the whole point
+        assert report.skipped.get("circuit_open", 0) == 0
+        assert report.breaker_waits == 1          # one cooldown, not three
+        assert clock.slept >= 30
+
+    def test_the_old_behaviour_is_what_a_spent_budget_looks_like(self):
+        """Documents the loss, and that a dead merchant still cannot hang us.
+
+        With no budget to wait on, the three jobs behind the open circuit are
+        abandoned exactly as they used to be -- the right outcome once a
+        merchant has proved it is down, and the wrong one after a blip. The
+        difference between the two is now a budget rather than luck.
+        """
+        clock = ManualClock()
+        fetcher = self._flaky_fetcher(
+            clock, load_bytes("sportvision_caven20.html"))
+
+        report = run_once(FakeConn(), fetcher, self._tripping_queue(),
+                          ingest_fn=_no_ingest,
+                          breaker_wait=BreakerWait(max_total_s=0,
+                                                   sleep=clock.sleep))
+
+        assert report.offers_parsed == 0
+        assert report.skipped["circuit_open"] == 3
+        assert clock.slept == 0
 
     def test_report_summary_is_readable(self):
         report = WorkerReport(jobs_processed=5, fetched=4, http_errors=1,
@@ -568,7 +648,9 @@ class TestUnpricedOffers:
 
         import mkagg.worker as worker
         original = worker.parse_result
-        worker.parse_result = lambda f, r, m: [priced, unpriced]
+        # **kw so this double survives parse_result growing a
+        # keyword argument, which is what broke it once already.
+        worker.parse_result = lambda f, r, m, **kw: [priced, unpriced]
         try:
             report = run_once(FakeConn(), fetcher, queue, ingest_fn=fake_ingest)
         finally:

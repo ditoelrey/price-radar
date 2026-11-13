@@ -15,10 +15,11 @@ import time
 
 import pytest
 
-from mkagg.fetch import (BUDGET_MS, CircuitBreaker, FetchJob, Fetcher,
-                         FetcherConfig, LocalRawStore, MemoryFetchQueue,
-                         MemoryRateLimiter, Priority, RobotsCache,
-                         StubTransport, next_ttl, snapshot_key)
+from mkagg.fetch import (BUDGET_MS, MAX_BREAKER_REFETCHES, BreakerWait,
+                         CircuitBreaker, FetchJob, Fetcher, FetcherConfig,
+                         LocalRawStore, MemoryFetchQueue, MemoryRateLimiter,
+                         Priority, RobotsCache, StubTransport, fetch_patiently,
+                         next_ttl, snapshot_key)
 from mkagg.fetch.ratelimit import BreakerState
 
 
@@ -144,6 +145,68 @@ class TestCircuitBreaker:
             breaker.record_failure("megasport")
             cooldowns.append(breaker._entry("megasport").cooldown_s)
         assert cooldowns == [10, 20, 40, 80, 100]   # capped at max
+
+
+class TestBreakerWait:
+    """Waiting out an open circuit instead of discarding the job.
+
+    The bug this closes: `Fetcher.fetch` fails open, so an open circuit comes
+    back as a skip in microseconds. A drain loop that reads that skip as "job
+    finished" empties its queue at memory speed -- 2 974 jobs in 23 seconds
+    during a real 20-second network drop, which cost a two-hour sweep.
+    """
+
+    def _open(self, clock, cooldown=30.0):
+        breaker = CircuitBreaker(failure_threshold=1, base_cooldown_s=cooldown,
+                                 clock=clock)
+        breaker.record_failure("sportvision.mk")
+        return breaker
+
+    def test_retry_after_reports_the_remaining_cooldown(self):
+        clock = FakeClock()
+        breaker = self._open(clock)
+        assert breaker.retry_after("sportvision.mk") == 30.0
+
+        clock.advance(18)
+        assert breaker.retry_after("sportvision.mk") == 12.0
+
+        clock.advance(13)      # past the cooldown: half-open, so no wait
+        assert breaker.retry_after("sportvision.mk") == 0.0
+
+    def test_a_healthy_domain_needs_no_wait(self):
+        assert CircuitBreaker().retry_after("buzz.mk") == 0.0
+
+    def test_waiting_makes_the_domain_fetchable_again(self):
+        clock = FakeClock()
+        breaker = self._open(clock)
+        waiter = BreakerWait(sleep=clock.sleep)
+
+        assert waiter.wait(breaker, "sportvision.mk") is True
+        assert clock.slept >= 30                     # the cooldown, not a guess
+        assert breaker.allow("sportvision.mk", Priority.COLD) is True
+        assert waiter.waits == 1
+
+    def test_the_budget_is_shared_across_the_drain(self):
+        """A merchant that is genuinely down must not hold a sweep open."""
+        clock = FakeClock()
+        breaker = self._open(clock, cooldown=100.0)
+        waiter = BreakerWait(max_total_s=150.0, sleep=clock.sleep)
+
+        assert waiter.wait(breaker, "sportvision.mk") is True
+
+        breaker.record_failure("sportvision.mk")     # down again: 200s now
+        assert waiter.wait(breaker, "sportvision.mk") is False
+        assert waiter.waits == 1                     # the second never slept
+
+    def test_user_facing_work_never_waits(self):
+        """Fail open is the contract at click time; this must not change it."""
+        clock = FakeClock()
+        breaker = self._open(clock)
+        waiter = BreakerWait(sleep=clock.sleep)
+
+        assert waiter.wait(breaker, "sportvision.mk", Priority.CLICK) is False
+        assert waiter.wait(breaker, "sportvision.mk", Priority.HOVER) is False
+        assert clock.slept == 0
 
 
 # ---------------------------------------------------------------------------
@@ -576,3 +639,89 @@ class TestRobotsBlockedRoute:
             except RobotsBlocked:
                 blocked += 1
         assert (pushed, blocked) == (1, 2)
+
+
+# ---------------------------------------------------------------------------
+# Fetching patiently
+# ---------------------------------------------------------------------------
+
+HTML_CT = {"content-type": "text/html"}
+
+
+class TestFetchPatiently:
+    """`fetch_patiently` is `fetch` plus "an open circuit is not an answer"."""
+
+    def _fetcher(self):
+        # Five 503s trip the default breaker; /ok/ then answers normally.
+        return make_fetcher({"/fail/": (503, HTML_CT, b"busy"),
+                             "/ok/": (200, HTML_CT, b"<html>ok</html>")})
+
+    def _trip(self, fetcher):
+        for i in range(5):
+            fetcher.fetch(FetchJob(merchant_slug="sportvision",
+                                   url=f"https://x.mk/fail/{i}"))
+
+    def test_without_a_waiter_it_is_plain_fetch(self):
+        fetcher, _, _ = self._fetcher()
+        self._trip(fetcher)
+
+        result = fetch_patiently(
+            fetcher, FetchJob(merchant_slug="sportvision",
+                              url="https://x.mk/ok/1"))
+        assert result.skipped == "circuit_open"
+
+    def test_with_a_waiter_the_job_is_fetched_after_the_cooldown(self):
+        fetcher, _, clock = self._fetcher()
+        self._trip(fetcher)
+        waiter = BreakerWait(sleep=clock.sleep)
+
+        result = fetch_patiently(
+            fetcher, FetchJob(merchant_slug="sportvision",
+                              url="https://x.mk/ok/1"), waiter)
+
+        assert result.ok
+        assert result.body == b"<html>ok</html>"
+        assert waiter.waits == 1
+        assert clock.slept >= 30
+
+    def test_a_spent_budget_skips_as_before(self):
+        fetcher, _, clock = self._fetcher()
+        self._trip(fetcher)
+        waiter = BreakerWait(max_total_s=0.0, sleep=clock.sleep)
+
+        result = fetch_patiently(
+            fetcher, FetchJob(merchant_slug="sportvision",
+                              url="https://x.mk/ok/1"), waiter)
+
+        assert result.skipped == "circuit_open"
+        assert clock.slept == 0
+
+    def test_it_cannot_spin_on_one_job(self):
+        """The bound exists for a breaker that refuses while promising 0s.
+
+        Single-threaded that cannot happen, but the breaker is shared, and a
+        loop with no bound is a loop that one day does not end.
+        """
+        class AlwaysOpen:
+            def allow(self, key, priority=Priority.COLD):
+                return False
+
+            def retry_after(self, key, priority=Priority.COLD):
+                return 0.0
+
+            def record_success(self, key):
+                pass
+
+            def record_failure(self, key):
+                pass
+
+        fetcher, _, clock = self._fetcher()
+        fetcher.breaker = AlwaysOpen()
+        waiter = BreakerWait(sleep=clock.sleep)
+
+        result = fetch_patiently(
+            fetcher, FetchJob(merchant_slug="sportvision",
+                              url="https://x.mk/ok/1"), waiter)
+
+        assert result.skipped == "circuit_open"
+        assert fetcher.stats["circuit_open"] == MAX_BREAKER_REFETCHES + 1

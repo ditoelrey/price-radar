@@ -301,6 +301,71 @@ class CircuitBreaker:
             entry.opened_at = self.clock()
             entry.failures = 0
 
+    def retry_after(self, key: str, priority: Priority = Priority.COLD) -> float:
+        """Seconds until ``key`` would be let through again; 0.0 when it is.
+
+        The cooldown is knowable, which is the whole point: a long sweep that
+        meets an open circuit can wait exactly long enough instead of
+        throwing the job away.
+        """
+        if self.allow(key, priority):
+            return 0.0
+        entry = self._entry(key)
+        if entry.opened_at is None:        # not open after all
+            return 0.0
+        return max(0.0, entry.cooldown_s - (self.clock() - entry.opened_at))
+
     def is_degraded(self, key: str) -> bool:
         """True when this merchant's data should be flagged as possibly stale."""
         return self.state(key) != BreakerState.CLOSED
+
+
+@dataclass
+class BreakerWait:
+    """One drain's budget for waiting out open circuits.
+
+    :meth:`Fetcher.fetch` fails open: while the breaker is open it returns
+    ``skipped="circuit_open"`` at once. That is right for a user standing at
+    a redirect and wrong for a sweep, because a drain loop that treats the
+    skip as "this job is done" discards its whole queue at memory speed. A
+    20-second network drop during a 3 763-page sweep threw away 2 974 jobs in
+    23 seconds and cost a two-hour pass; the image pass had it worse, since
+    every discarded job also stamped ``image_checked_at`` and so locked that
+    product out of retry for 24 hours.
+
+    So the drain waits out the cooldown and fetches the job. The budget is
+    shared across one drain, which is what keeps that from becoming the
+    opposite failure: a merchant that is genuinely down spends it once, and
+    every later open circuit then skips exactly as before. Sized for a router
+    reboot or a short 503 storm -- roughly four consecutive cooldowns -- not
+    for an outage.
+    """
+
+    max_total_s: float = 600.0
+    #: Added to each wait so we arrive after the cooldown rather than on it.
+    grace_s: float = 1.0
+    sleep: object = field(default=time.sleep)
+    waits: int = 0
+    spent_s: float = 0.0
+
+    def wait(self, breaker: CircuitBreaker, key: str,
+             priority: Priority = Priority.COLD) -> bool:
+        """Sleep out an open circuit. True when the job is worth re-fetching.
+
+        False means give up on this job: the wait would outlast the budget,
+        or the caller is user-facing and must never block for a background
+        failure.
+        """
+        if priority.is_user_facing:
+            return False
+        delay = breaker.retry_after(key, priority)
+        if delay <= 0.0:
+            # Open when we fetched, allowed now. Re-fetch without sleeping.
+            return True
+        total = delay + self.grace_s
+        if self.spent_s + total > self.max_total_s:
+            return False
+        self.sleep(total)
+        self.spent_s += total
+        self.waits += 1
+        return True

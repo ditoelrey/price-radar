@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from mkagg.media import (ALLOWED_TYPES, MAX_BYTES, MIN_BYTES, ImageStore,
-                         is_safe_media_path, is_storable, normalise_type)
+from mkagg.fetch import (BreakerWait, CircuitBreaker, FetchJob, Fetcher,
+                         FetcherConfig, MemoryRateLimiter, StubTransport)
+from mkagg.media import (ALLOWED_TYPES, MAX_BYTES, MIN_BYTES, OUR_FAULT_SKIPS,
+                         ImageStore, fetch_product_images, is_safe_media_path,
+                         is_storable, normalise_type)
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 4000
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 4000
@@ -125,3 +128,169 @@ class TestSafeMediaPath:
     ])
     def test_rejects_anything_else(self, path):
         assert not is_safe_media_path(path)
+
+# ---------------------------------------------------------------------------
+# The 24-hour retry window
+# ---------------------------------------------------------------------------
+
+class RecordingCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self._out = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, query, params=None):
+        self.conn.queries.append((query, params))
+        if "FROM product p" in query:
+            self._out = list(self.conn.pending)
+        elif "INSERT INTO image_asset" in query:
+            self._out = [(1, True)]
+        else:
+            self._out = []
+
+    def fetchall(self):
+        return self._out
+
+    def fetchone(self):
+        return self._out[0] if self._out else None
+
+
+class RecordingConn:
+    """Enough connection to see which UPDATEs the image pass issues."""
+
+    def __init__(self, pending):
+        self.pending = pending
+        self.queries = []
+
+    def cursor(self):
+        return RecordingCursor(self)
+
+    def commit(self):
+        pass
+
+    def stamped(self):
+        # The UPDATE only. The selection query names image_checked_at too,
+        # in its WHERE clause, and matching that made every one of these
+        # tests pass or fail for the wrong reason.
+        return [q for q, _ in self.queries if "image_checked_at = now()" in q]
+
+
+class ManualClock:
+    def __init__(self, start=1000.0):
+        self.now = start
+        self.slept = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept += seconds
+        self.now += seconds
+
+
+PENDING = [(7, "https://www.sportvision.mk/img/a.jpg", "sportvision")]
+JPEG_CT = {"content-type": "image/jpeg"}
+
+
+def image_fetcher(routes, *, clock=None, limiter=None):
+    extra = {"clock": clock, "sleep": clock.sleep} if clock else {}
+    return Fetcher(
+        StubTransport(routes=routes),
+        limiter=limiter or MemoryRateLimiter(rps=1000, capacity=1000, reserve=0),
+        breaker=CircuitBreaker(clock=clock) if clock else CircuitBreaker(),
+        config=FetcherConfig(respect_robots=False, max_attempts=1), **extra)
+
+
+def trip(fetcher, path="/img/fail"):
+    """Five failures: the breaker opens on this domain."""
+    for i in range(5):
+        fetcher.fetch(FetchJob(
+            merchant_slug="sportvision",
+            url=f"https://www.sportvision.mk{path}/{i}"))
+
+
+class TestRetryWindow:
+    """What may and may not spend a product's 24-hour retry window.
+
+    `image_checked_at` exists so a dead URL is retried on a schedule rather
+    than on every pass. The selection query then ignores that product for a
+    day, which makes the stamp the most expensive write in this module: it
+    must only ever record evidence about the URL itself.
+    """
+
+    def test_an_open_circuit_does_not_stamp_the_product(self, tmp_path):
+        """The failure that would have cost a day.
+
+        Every `circuit_open` skip used to stamp. A 20-second drop ten minutes
+        into the sweep would have marked the remaining thousands of products
+        as checked, and no amount of re-running would have looked at them
+        again before tomorrow.
+        """
+        fetcher = image_fetcher({"/img/fail": (503, {}, b"busy"),
+                                 "/img/a.jpg": (200, JPEG_CT, JPEG)})
+        trip(fetcher)
+        conn = RecordingConn(PENDING)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path),
+                                      breaker_wait=BreakerWait(max_total_s=0))
+
+        assert report.skipped["circuit_open"] == 1
+        assert report.stored == 0
+        assert conn.stamped() == []
+
+    def test_a_spent_rate_budget_does_not_stamp_either(self, tmp_path):
+        fetcher = image_fetcher(
+            {"/img/": (200, JPEG_CT, JPEG)},
+            limiter=MemoryRateLimiter(rps=1, capacity=1, reserve=1))
+        conn = RecordingConn(PENDING)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.skipped["rate_limited"] == 1
+        assert conn.stamped() == []
+
+    def test_a_dead_url_still_stamps(self, tmp_path):
+        """The other half of the contract: a 404 IS evidence about the URL."""
+        fetcher = image_fetcher({"/img/": (404, {}, b"gone")})
+        conn = RecordingConn(PENDING)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.errors == 1
+        assert len(conn.stamped()) == 1
+
+    def test_an_html_error_page_still_stamps(self, tmp_path):
+        fetcher = image_fetcher(
+            {"/img/": (200, JPEG_CT, b"<!DOCTYPE html>" + b" " * 4000)})
+        conn = RecordingConn(PENDING)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.skipped["not_an_image"] == 1
+        assert len(conn.stamped()) == 1
+
+    def test_waiting_out_a_cooldown_gets_the_image(self, tmp_path):
+        clock = ManualClock()
+        fetcher = image_fetcher({"/img/fail": (503, {}, b"busy"),
+                                 "/img/a.jpg": (200, JPEG_CT, JPEG)},
+                                clock=clock)
+        trip(fetcher)
+        conn = RecordingConn(PENDING)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path),
+                                      breaker_wait=BreakerWait(sleep=clock.sleep))
+
+        assert report.stored == 1
+        assert report.breaker_waits == 1
+        assert clock.slept >= 30
+        # Stamped by the success path, with an asset to show for it.
+        assert len(conn.stamped()) == 1
+
+    def test_our_faults_are_named_and_nothing_else_is(self):
+        assert OUR_FAULT_SKIPS == {"circuit_open", "rate_limited"}
+        assert "robots_disallowed" not in OUR_FAULT_SKIPS

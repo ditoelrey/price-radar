@@ -29,7 +29,8 @@ from typing import Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 from .queue import FetchJob
-from .ratelimit import BUDGET_MS, CircuitBreaker, MemoryRateLimiter, Priority
+from .ratelimit import (BUDGET_MS, BreakerWait, CircuitBreaker,
+                        MemoryRateLimiter, Priority)
 from .rawstore import NullRawStore
 
 DEFAULT_USER_AGENT = (
@@ -359,6 +360,39 @@ class Fetcher:
         close = getattr(self.transport, "close", None)
         if callable(close):
             close()
+
+
+# -----------------------------------------------------------------------------
+# Draining patiently
+# -----------------------------------------------------------------------------
+
+#: How many times one job may be re-fetched after an open circuit. Bounded so
+#: a breaker that reopens on every attempt cannot spin on a single job.
+MAX_BREAKER_REFETCHES = 4
+
+
+def fetch_patiently(fetcher: "Fetcher", job: FetchJob,
+                    waiter: BreakerWait | None = None) -> FetchResult:
+    """Fetch ``job``, waiting out an open circuit instead of abandoning it.
+
+    The fail-open contract belongs to :meth:`Fetcher.fetch` and stays there:
+    it must never block a waiting user on a merchant that is misbehaving. But
+    a background drain has no user, and for it an immediate ``circuit_open``
+    is not an answer about the job -- it is an answer about the domain, and
+    the job is still owed a fetch.
+
+    With no ``waiter`` this is exactly ``fetcher.fetch(job)``, so callers that
+    genuinely must not wait keep today's behaviour by passing nothing.
+    """
+    result = fetcher.fetch(job)
+    for _ in range(MAX_BREAKER_REFETCHES):
+        if result.skipped != "circuit_open":
+            return result
+        if waiter is None or not waiter.wait(fetcher.breaker, job.domain,
+                                             job.priority):
+            return result
+        result = fetcher.fetch(job)
+    return result
 
 
 # -----------------------------------------------------------------------------

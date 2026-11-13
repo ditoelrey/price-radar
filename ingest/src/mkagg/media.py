@@ -23,8 +23,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .fetch.http import fetch_patiently
 from .fetch.queue import FetchJob
-from .fetch.ratelimit import Priority
+from .fetch.ratelimit import BreakerWait, Priority
 
 #: Content types we will store. Anything else is a shop serving us an error
 #: page, a tracking pixel or an HTML redirect with a 200.
@@ -36,6 +37,18 @@ ALLOWED_TYPES: dict[str, str] = {
     "image/avif": "avif",
     "image/gif": "gif",
 }
+
+#: Skips that are facts about us, not about the image URL.
+#:
+#: Everything else this loop refuses -- a 404, an HTML error page served as a
+#: JPEG, a disallowed path -- is evidence about the URL, and stamping
+#: `image_checked_at` is how that evidence stops us re-requesting it on every
+#: pass. An open circuit or a spent rate budget is not evidence about
+#: anything except our own state, so stamping it would spend the product's
+#: 24-hour retry window on our outage and the next pass would skip the
+#: product believing it had been checked. Found before it cost us a day: a
+#: 20-second drop mid-pass would have stamped thousands of products.
+OUR_FAULT_SKIPS = frozenset({"circuit_open", "rate_limited"})
 
 #: Below this a "photo" is a spacer, a tracking pixel or an error page.
 MIN_BYTES = 1_024
@@ -125,6 +138,8 @@ class ImageReport:
     skipped: dict[str, int] = field(default_factory=dict)
     errors: int = 0
     bytes_written: int = 0
+    breaker_waits: int = 0
+    breaker_wait_s: float = 0.0
 
     def note(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
@@ -136,6 +151,9 @@ class ImageReport:
         if self.skipped:
             bits.append("skipped=" + ",".join(
                 f"{k}:{v}" for k, v in sorted(self.skipped.items())))
+        if self.breaker_waits:
+            bits.append(f"breaker_waits={self.breaker_waits}"
+                        f"({self.breaker_wait_s:.0f}s)")
         return "  ".join(bits)
 
 
@@ -161,7 +179,9 @@ SELECT p.id, p.image_url, m.slug AS merchant_slug
 
 def fetch_product_images(conn, fetcher, store: ImageStore, *,
                          limit: int = 200, retry_hours: int = 24,
-                         priority: Priority = Priority.COLD) -> ImageReport:
+                         priority: Priority = Priority.COLD,
+                         breaker_wait: BreakerWait | None = None
+                         ) -> ImageReport:
     """Download and store photos for products that do not have one yet.
 
     Runs at ``COLD`` priority: an image is the most preemptible request in
@@ -172,6 +192,7 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
     links would be re-requested forever.
     """
     report = ImageReport()
+    waiter = BreakerWait() if breaker_wait is None else breaker_wait
 
     with conn.cursor() as cur:
         cur.execute(PENDING_SQL, {"limit": limit, "retry_hours": retry_hours})
@@ -179,13 +200,16 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
 
     for product_id, image_url, merchant_slug in pending:
         report.considered += 1
-        result = fetcher.fetch(FetchJob(
+        result = fetch_patiently(fetcher, FetchJob(
             merchant_slug=merchant_slug or "unknown",
-            url=image_url, kind="image", priority=priority))
+            url=image_url, kind="image", priority=priority), waiter)
 
         if result.skipped:
             report.note(result.skipped)
-            _stamp(conn, product_id)
+            # See OUR_FAULT_SKIPS: our own outage must not consume this
+            # product's 24-hour retry window.
+            if result.skipped not in OUR_FAULT_SKIPS:
+                _stamp(conn, product_id)
             continue
         if not result.ok:
             report.errors += 1
@@ -232,6 +256,8 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
             # The same press photo already stored under another product.
             report.deduplicated += 1
 
+    report.breaker_waits = waiter.waits
+    report.breaker_wait_s = waiter.spent_s
     return report
 
 

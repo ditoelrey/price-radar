@@ -28,9 +28,9 @@ from dataclasses import dataclass, field
 
 from .adapters import get_adapter
 from .adapters.aspnet_mk import sizes_request
-from .fetch.http import FetchResult
+from .fetch.http import FetchResult, fetch_patiently
 from .fetch.queue import FetchJob
-from .fetch.ratelimit import Priority
+from .fetch.ratelimit import BreakerWait, Priority
 from .fetch.scheduler import mark_checked, record_observation
 from .load import ingest
 from .models import RawOffer
@@ -59,6 +59,8 @@ class WorkerReport:
     probes_changed: int = 0
     probes_rejected: int = 0
     offers_parsed: int = 0
+    breaker_waits: int = 0
+    breaker_wait_s: float = 0.0
     ingests: list = field(default_factory=list)
     duration_s: float = 0.0
 
@@ -76,6 +78,9 @@ class WorkerReport:
             bits.append(f"offers={self.offers_parsed}")
         if self.offers_unpriced:
             bits.append(f"unpriced={self.offers_unpriced}")
+        if self.breaker_waits:
+            bits.append(f"breaker_waits={self.breaker_waits}"
+                        f"({self.breaker_wait_s:.0f}s)")
         bits.append(f"{self.duration_s:.1f}s")
         return "  ".join(bits)
 
@@ -85,17 +90,25 @@ class WorkerReport:
 # -----------------------------------------------------------------------------
 
 def _companion_sizes(fetcher, job: FetchJob, merchant_sku: str,
-                     base_url: str) -> bytes | None:
-    """Fetch the size run for an adapter whose page does not carry it."""
+                     base_url: str, waiter: BreakerWait | None = None
+                     ) -> bytes | None:
+    """Fetch the size run for an adapter whose page does not carry it.
+
+    Patient too, and for a quieter reason than the main loop: losing this
+    request does not lose the offer, it keeps the offer and strips its sizes.
+    A product with no size run is a product nobody can filter to, which is
+    worse than a product that is missing.
+    """
     url, body, headers = sizes_request(base_url, merchant_sku)
-    result = fetcher.fetch(FetchJob(
+    result = fetch_patiently(fetcher, FetchJob(
         merchant_slug=job.merchant_slug, url=url, kind=job.kind,
-        priority=job.priority, method="POST", body=body, headers=headers))
+        priority=job.priority, method="POST", body=body, headers=headers),
+        waiter)
     return result.body if result.ok else None
 
 
-def parse_result(fetcher, result: FetchResult, merchant: dict
-                 ) -> list[RawOffer]:
+def parse_result(fetcher, result: FetchResult, merchant: dict, *,
+                 waiter: BreakerWait | None = None) -> list[RawOffer]:
     """Turn one successful fetch into offers, using the merchant's adapter."""
     adapter_slug = merchant["adapter"]
     adapter = get_adapter(adapter_slug)
@@ -111,7 +124,8 @@ def parse_result(fetcher, result: FetchResult, merchant: dict
         from .adapters.aspnet_mk import product_id_from_url
 
         product_id = product_id_from_url(job.url)
-        sizes = (_companion_sizes(fetcher, job, product_id, merchant["base_url"])
+        sizes = (_companion_sizes(fetcher, job, product_id,
+                                  merchant["base_url"], waiter)
                  if product_id else None)
         offer = adapter.parse_product(
             result.body, job.url, job.merchant_slug, sizes_payload=sizes,
@@ -230,7 +244,8 @@ def merchants_by_slug(conn) -> dict[str, dict]:
 
 
 def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
-             full_sweep: bool = False, ingest_fn=ingest) -> WorkerReport:
+             full_sweep: bool = False, ingest_fn=ingest,
+             breaker_wait: BreakerWait | None = None) -> WorkerReport:
     """Drain the queue once: fetch, parse, then apply.
 
     Catalogue offers are batched per merchant so each merchant's sweep becomes
@@ -243,6 +258,9 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
     report = WorkerReport()
     started = time.monotonic()
     merchants = merchants_by_slug(conn)
+    # One budget for the whole drain. Pass BreakerWait(max_total_s=0) to get
+    # the old behaviour of abandoning a job the moment its circuit is open.
+    waiter = BreakerWait() if breaker_wait is None else breaker_wait
 
     catalog: dict[str, list[RawOffer]] = defaultdict(list)
     requests: dict[str, int] = defaultdict(int)
@@ -260,7 +278,7 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
             # Not our merchant (renamed, deactivated, or a stale queued job).
             continue
 
-        result = fetcher.fetch(job)
+        result = fetch_patiently(fetcher, job, waiter)
         requests[job.merchant_slug] += 1
 
         if result.skipped:
@@ -287,7 +305,8 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
 
         report.fetched += 1
         try:
-            offers = parse_result(fetcher, result, merchant)
+            offers = parse_result(fetcher, result, merchant,
+                                  waiter=waiter)
         except Exception:
             # A parser bug must cost this one job, never the whole cycle.
             report.parse_failures += 1
@@ -348,6 +367,9 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
     # unreachable merchant cannot monopolise the queue -- but their stored
     # values and TTLs are left alone, because a failure is not evidence about
     # the price.
+    report.breaker_waits = waiter.waits
+    report.breaker_wait_s = waiter.spent_s
+
     if unanswered:
         mark_checked(conn, unanswered)
         conn.commit()

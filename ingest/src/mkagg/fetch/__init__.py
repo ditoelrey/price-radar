@@ -9,12 +9,13 @@ must never be able to starve a user waiting at the redirect:
 
     CLICK  >  HOVER  >  SWR  >  HOT  >  WARM  >  COLD
 """
-from .http import (DEFAULT_USER_AGENT, Fetcher, FetcherConfig, FetchResult,
-                   HttpxTransport, MemoryValidatorStore, RobotsCache,
-                   StubTransport, Transport)
+from .http import (DEFAULT_USER_AGENT, MAX_BREAKER_REFETCHES, Fetcher,
+                   FetcherConfig, FetchResult, HttpxTransport,
+                   MemoryValidatorStore, RobotsCache, StubTransport, Transport,
+                   fetch_patiently)
 from .queue import DEDUPE_TTL_S, FetchJob, MemoryFetchQueue, RedisFetchQueue
-from .ratelimit import (BUDGET_MS, CircuitBreaker, MemoryRateLimiter, Priority,
-                        RedisRateLimiter)
+from .ratelimit import (BUDGET_MS, BreakerWait, CircuitBreaker,
+                        MemoryRateLimiter, Priority, RedisRateLimiter)
 from .rawstore import LocalRawStore, NullRawStore, Snapshot, snapshot_key
 from .scheduler import (API_ROUTE_ADAPTERS, HOT_SET_SIZE, TIERS, WARM_SET_SIZE,
                         EnqueueReport, RobotsBlocked, assign_tiers,
@@ -22,7 +23,8 @@ from .scheduler import (API_ROUTE_ADAPTERS, HOT_SET_SIZE, TIERS, WARM_SET_SIZE,
                         mark_checked, next_ttl, record_observation)
 
 __all__ = [
-    "API_ROUTE_ADAPTERS", "BUDGET_MS", "DEDUPE_TTL_S", "DEFAULT_USER_AGENT",
+    "API_ROUTE_ADAPTERS", "BUDGET_MS", "BreakerWait", "DEDUPE_TTL_S",
+    "DEFAULT_USER_AGENT", "MAX_BREAKER_REFETCHES", "fetch_patiently",
     "EnqueueReport", "HOT_SET_SIZE", "RobotsBlocked", "TIERS",
     "WARM_SET_SIZE", "CircuitBreaker", "FetchJob", "FetchResult", "Fetcher",
     "FetcherConfig", "HttpxTransport", "LocalRawStore", "MemoryFetchQueue",
