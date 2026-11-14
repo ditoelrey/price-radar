@@ -11,9 +11,9 @@ import pytest
 
 from mkagg.discover import (DISCOVERY_PLANS, PRODUCT_URL_PATTERNS,
                             PaginatedPlan, SampledPlan, SitemapPlan,
-                            discover, extract_links, parse_sitemap_index,
-                            parse_sitemap_urls, parse_total_pages,
-                            product_jobs)
+                            discover, extract_links, parse_last_page_link,
+                            parse_sitemap_index, parse_sitemap_urls,
+                            parse_total_pages, product_jobs)
 from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,
                          MemoryRateLimiter, StubTransport)
 
@@ -139,8 +139,19 @@ class TestSitemapStrategy:
         assert all("adidas" in u for u in report.product_urls)
         assert "muskarci" not in [u.rsplit("/", 1)[-1] for u in report.product_urls]
 
-    def test_child_filter_skips_non_product_sitemaps(self):
-        """megasport's index also lists a page sitemap we do not want."""
+    def test_child_filter_skips_non_product_sitemaps(self, monkeypatch):
+        """An index that also lists a page sitemap we do not want.
+
+        megasport was this case until it moved to category pagination, so the
+        plan is injected here rather than taken from an adapter. The filter
+        still has to work: the next sitemap shop will need it, and a child
+        sitemap full of non-products is the kind of thing that quietly
+        doubles a sweep.
+        """
+        monkeypatch.setitem(
+            DISCOVERY_PLANS, "woocommerce_html",
+            SitemapPlan(index_path="/sitemap_index.xml",
+                        child_contains="product-sitemap"))
         index = ("<sitemapindex>"
                  "<sitemap><loc>https://m.mk/page-sitemap.xml</loc></sitemap>"
                  "<sitemap><loc>https://m.mk/product-sitemap1.xml</loc></sitemap>"
@@ -361,3 +372,127 @@ class TestCategoryHints:
         job = FetchJob(merchant_slug="sportm", url="https://x.mk/p",
                        kind="catalog_parse", category_hint="footwear")
         assert FetchJob.from_json(job.to_json()).category_hint == "footwear"
+
+
+# ---------------------------------------------------------------------------
+# Paginating a shop that advertises no total
+# ---------------------------------------------------------------------------
+
+class TestLastPageLink:
+    """The page count a WooCommerce paginator gives us as a link.
+
+    Sport Vision prints `data-total-pages`. WooCommerce prints nothing, so
+    without reading its paginator a category collapses to page one and
+    discovery reports a confident, wrong total -- megasport would have come
+    back with 90 products instead of 1 619.
+    """
+
+    def test_reads_the_highest_linked_page(self):
+        paginator = ('<a href="/kategorija/mazhi/obuvki-mazhi/page/2/">2</a>'
+                     '<a href="/kategorija/mazhi/obuvki-mazhi/page/21/">21</a>'
+                     '<a href="/kategorija/mazhi/obuvki-mazhi/page/22/">22</a>')
+        assert parse_last_page_link(paginator) == 22
+
+    def test_reads_the_hyphen_form_too(self):
+        """Both platforms' link shapes, so this is not WooCommerce-only."""
+        assert parse_last_page_link('<a href="/mk/patiki/page-70">70</a>') == 70
+
+    def test_a_single_page_category_has_no_paginator(self):
+        assert parse_last_page_link('<a href="/p/a-shoe/">shoe</a>') is None
+        assert parse_last_page_link("") is None
+        assert parse_last_page_link(None) is None
+
+    def test_absurd_page_counts_are_refused(self):
+        assert parse_last_page_link('<a href="/page/0/">0</a>') is None
+        assert parse_last_page_link('<a href="/page/99999/">x</a>') is None
+
+    def test_one_junk_link_does_not_lose_the_real_count(self):
+        """Dropping the outlier, not the answer.
+
+        Refusing the whole result on one bad number would collapse a 22-page
+        category to a single page -- the exact failure this function exists
+        to prevent, reintroduced by its own validation.
+        """
+        paginator = ('<a href="/page/21/">21</a>'
+                     '<a href="/page/22/">22</a>'
+                     '<a href="/page/99999/">junk</a>')
+        assert parse_last_page_link(paginator) == 22
+
+    def test_the_advertised_total_still_wins(self):
+        """A shop that states its total is believed over a scraped link.
+
+        Both can be present, and the attribute is the shop telling us
+        directly; the paginator is us inferring from what it chose to render.
+        """
+        first = ('<div data-total-pages="2"></div>'
+                 '<a href="/mk/patiki/51378-a">a</a>'
+                 '<a href="/mk/patiki/page-500">500</a>')
+        fetcher = make_fetcher({
+            "/mk/patiki/page-2": (200, HTML, b'<a href="/mk/patiki/51379-b">b</a>'),
+            "/mk/patiki": (200, HTML, first.encode()),
+            "/mk/obuvki": (200, HTML, b'<div data-total-pages="1"></div>'),
+        })
+        report = discover(fetcher, "sportvision", "sportvision",
+                          "https://www.sportvision.mk")
+
+        assert report.count == 2
+        assert not any("page-500" in c["url"] for c in fetcher.transport.calls)
+
+
+class TestMegasportIsScopedToFootwear:
+    """The plan change that stopped a catalogue-wide sweep.
+
+    The sitemap indexed roughly 4 000 products for ~1 600 footwear ones, and
+    the storefront keeps uncategorised products on the reasoning that they
+    were reached through a footwear facet. A whole-shop sitemap breaks that
+    reasoning, and it had already put a waist bag and three pairs of shorts
+    on the footwear storefront.
+    """
+
+    def _pages(self):
+        """Three categories, each two pages, WooCommerce-shaped."""
+        pages = {}
+        for cat, letter in (("mazhi/obuvki-mazhi", "m"),
+                            ("zheni/obuvki-zheni", "z"),
+                            ("deca/obuvki", "d")):
+            pages[f"/kategorija/{cat}/page/2/"] = (
+                200, HTML, f'<a href="/p/shoe-{letter}2/">x</a>'.encode())
+            pages[f"/kategorija/{cat}/"] = (
+                200, HTML,
+                (f'<a href="/p/shoe-{letter}1/">x</a>'
+                 f'<a href="/kategorija/{cat}/page/2/">2</a>').encode())
+        return pages
+
+    def test_it_paginates_every_footwear_category(self):
+        fetcher = make_fetcher(self._pages())
+        report = discover(fetcher, "megasport", "woocommerce_html",
+                          "https://megasportonlineshop.com")
+
+        assert report.strategy == "paginated"
+        assert report.count == 6, report.product_urls
+        # /page/2/, not /page-2 -- the suffix WooCommerce actually serves.
+        assert any("/page/2/" in c["url"] for c in fetcher.transport.calls)
+
+    def test_it_never_asks_for_the_sitemap(self):
+        fetcher = make_fetcher(self._pages())
+        discover(fetcher, "megasport", "woocommerce_html",
+                 "https://megasportonlineshop.com")
+
+        assert not any("sitemap" in c["url"]
+                       for c in fetcher.transport.calls)
+
+    def test_every_product_carries_the_footwear_hint(self):
+        """What keeps an abbreviated title out of the uncategorised bucket.
+
+        This shop writes patiki as "ПАТ" and uses Italian "CALZ.", neither of
+        which the title classifier knows, so these products arrived with no
+        category at all. The hint is the context discovery had all along.
+        """
+        fetcher = make_fetcher(self._pages())
+        report = discover(fetcher, "megasport", "woocommerce_html",
+                          "https://megasportonlineshop.com")
+
+        assert report.count == 6
+        assert set(report.category_hints.values()) == {"footwear"}
+        assert all(j.category_hint == "footwear"
+                   for j in product_jobs(report))

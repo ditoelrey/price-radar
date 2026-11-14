@@ -50,6 +50,25 @@ ALLOWED_TYPES: dict[str, str] = {
 #: 20-second drop mid-pass would have stamped thousands of products.
 OUR_FAULT_SKIPS = frozenset({"circuit_open", "rate_limited"})
 
+#: Hours to wait after a failure that is evidence about the URL itself.
+RETRY_HOURS = 24
+
+#: Hours to wait after a transport error, which is evidence about nothing.
+#:
+#: `OUR_FAULT_SKIPS` above covers the failures we can name before the request
+#: leaves: an open circuit, a spent budget. A connection reset is the same
+#: kind of fact arriving later -- the fetcher raised, so there is no status,
+#: no body and nothing learned about the URL -- but it lands in the
+#: `not result.ok` branch and used to take the full day.
+#:
+#: It cannot simply not stamp. One buzz image advertises 19 960 352 bytes in
+#: Content-Length and closes the connection after 1 247 522, every time; with
+#: no stamp at all that URL would be re-requested on every pass forever. So a
+#: transport error is still recorded, with a window short enough that a blip
+#: heals on the next pass and long enough that a reliably broken URL costs
+#: one request an hour instead of one per pass.
+TRANSPORT_RETRY_HOURS = 1
+
 #: Below this a "photo" is a spacer, a tracking pixel or an error page.
 MIN_BYTES = 1_024
 #: Above this something is wrong; product shots are not 8 MB.
@@ -170,15 +189,15 @@ SELECT p.id, p.image_url, m.slug AS merchant_slug
   ) m ON true
  WHERE p.image_asset_id IS NULL
    AND p.image_url IS NOT NULL
-   AND (p.image_checked_at IS NULL
-        OR p.image_checked_at < now() - make_interval(hours => %(retry_hours)s))
- ORDER BY p.image_checked_at NULLS FIRST, p.id
+   AND (p.image_retry_after IS NULL OR p.image_retry_after <= now())
+ ORDER BY p.image_retry_after NULLS FIRST, p.id
  LIMIT %(limit)s
 """
 
 
 def fetch_product_images(conn, fetcher, store: ImageStore, *,
-                         limit: int = 200, retry_hours: int = 24,
+                         limit: int = 200, retry_hours: int = RETRY_HOURS,
+                         transport_retry_hours: int = TRANSPORT_RETRY_HOURS,
                          priority: Priority = Priority.COLD,
                          breaker_wait: BreakerWait | None = None
                          ) -> ImageReport:
@@ -187,15 +206,16 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
     Runs at ``COLD`` priority: an image is the most preemptible request in
     the system, and must never compete with a click-time verification.
 
-    ``image_checked_at`` is stamped even on failure, so a dead URL is retried
-    on a schedule rather than on every pass -- otherwise a handful of broken
-    links would be re-requested forever.
+    A failed attempt is recorded, so a dead URL is retried on a schedule
+    rather than on every pass. How long it waits depends on what the failure
+    proved: ``retry_hours`` when the URL answered for itself, the shorter
+    ``transport_retry_hours`` when the connection broke and it did not.
     """
     report = ImageReport()
     waiter = BreakerWait() if breaker_wait is None else breaker_wait
 
     with conn.cursor() as cur:
-        cur.execute(PENDING_SQL, {"limit": limit, "retry_hours": retry_hours})
+        cur.execute(PENDING_SQL, {"limit": limit})
         pending = cur.fetchall()
 
     for product_id, image_url, merchant_slug in pending:
@@ -209,18 +229,21 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
             # See OUR_FAULT_SKIPS: our own outage must not consume this
             # product's 24-hour retry window.
             if result.skipped not in OUR_FAULT_SKIPS:
-                _stamp(conn, product_id)
+                _stamp(conn, product_id, retry_hours)
             continue
         if not result.ok:
             report.errors += 1
             report.note(f"http_{result.status}")
-            _stamp(conn, product_id)
+            # Status 0 means the transport raised: no status, no body, and so
+            # no evidence about this URL. See TRANSPORT_RETRY_HOURS.
+            _stamp(conn, product_id,
+                   transport_retry_hours if result.status == 0 else retry_hours)
             continue
 
         ok, reason = is_storable(result.content_type, result.body)
         if not ok:
             report.note(reason)
-            _stamp(conn, product_id)
+            _stamp(conn, product_id, retry_hours)
             continue
 
         try:
@@ -228,7 +251,8 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
         except (OSError, KeyError) as exc:
             report.errors += 1
             report.note(f"store_failed:{type(exc).__name__}")
-            _stamp(conn, product_id)
+            # Our disk, not their URL -- the short window, same as a reset.
+            _stamp(conn, product_id, transport_retry_hours)
             continue
 
         with conn.cursor() as cur:
@@ -244,7 +268,7 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
             cur.execute(
                 """UPDATE product
                       SET image_asset_id = %s, image_checked_at = now(),
-                          updated_at = now()
+                          image_retry_after = NULL, updated_at = now()
                     WHERE id = %s""",
                 (asset_id, product_id))
         conn.commit()
@@ -261,10 +285,21 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
     return report
 
 
-def _stamp(conn, product_id: int) -> None:
+def _stamp(conn, product_id: int, retry_hours: int) -> None:
+    """Record that we tried, and when it is worth trying again.
+
+    The two columns say different things on purpose: ``image_checked_at`` is
+    what happened, ``image_retry_after`` is what we decided about it. Writing
+    the schedule here, where the outcome is known, is what lets a reset and a
+    404 be told apart -- the selection query cannot tell them apart later.
+    """
     with conn.cursor() as cur:
-        cur.execute("UPDATE product SET image_checked_at = now() WHERE id = %s",
-                    (product_id,))
+        cur.execute(
+            """UPDATE product
+                  SET image_checked_at = now(),
+                      image_retry_after = now() + make_interval(hours => %s)
+                WHERE id = %s""",
+            (retry_hours, product_id))
     conn.commit()
 
 

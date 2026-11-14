@@ -95,6 +95,36 @@ def parse_total_pages(html: str) -> int | None:
     return total if 0 < total <= 10_000 else None
 
 
+#: Page numbers as they appear in a paginator link: `/page/22/`, `/page-22`.
+#: Unbounded digits on purpose -- a bounded `\d{1,4}` reads "99999" as 9999
+#: and quietly returns a plausible wrong answer instead of refusing.
+_PAGE_LINK = re.compile(r"/page[/-](\d+)/?", re.I)
+
+#: Same ceiling `parse_total_pages` applies: past this it is not a page count.
+_MAX_PAGES = 10_000
+
+
+def parse_last_page_link(html: str) -> int | None:
+    """Highest page number the paginator links to, or None if it has none.
+
+    The fallback for shops that do not advertise a total. Sport Vision prints
+    ``data-total-pages`` and needs nothing else; WooCommerce prints no total
+    at all, but its paginator does link the last page -- "1 2 3 ... 21 22" --
+    so the number is on the page, just as a link rather than an attribute.
+
+    Reading it matters more than it looks: without it a category collapses to
+    its first page, and discovery reports a confident, wrong total. Megasport
+    would have come back with 90 products instead of 1 619.
+
+    Implausible numbers are dropped rather than allowed to decide the
+    answer: one junk link must not reduce a 22-page category to a single
+    page, which is what rejecting the whole result would do.
+    """
+    pages = [p for p in (int(m) for m in _PAGE_LINK.findall(html or ""))
+             if 0 < p <= _MAX_PAGES]
+    return max(pages) if pages else None
+
+
 def extract_links(html: str, pattern: re.Pattern[str], base_url: str) -> list[str]:
     """Absolute, de-duplicated URLs matching ``pattern``, order preserved."""
     seen: dict[str, None] = {}
@@ -128,8 +158,9 @@ PRODUCT_URL_PATTERNS: dict[str, re.Pattern[str]] = {
 @dataclass(frozen=True)
 class SitemapPlan:
     index_path: str
-    #: Only follow children whose URL contains this (megasport's index also
-    #: lists a page sitemap we do not want).
+    #: Only follow children whose URL contains this, for an index that also
+    #: lists sitemaps we do not want. No active plan needs it since megasport
+    #: moved to category pagination; kept because the next sitemap shop will.
     child_contains: str | None = None
     strategy: str = "sitemap"
 
@@ -160,8 +191,29 @@ class SampledPlan:
 
 DISCOVERY_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
     "magento_html": SitemapPlan(index_path="/media/sitemap/dsport.xml"),
-    "woocommerce_html": SitemapPlan(index_path="/sitemap_index.xml",
-                                    child_contains="product-sitemap"),
+    # megasport. Its sitemap is reachable and was what we used first, but it
+    # indexes the whole shop -- 20 children, roughly 4 000 products, of which
+    # only the ~1 600 below are footwear. That is not merely wasteful. The
+    # storefront's filter excludes *known* non-footwear and keeps products
+    # with no category, on the reasoning that an uncategorised product was
+    # reached through a footwear facet and so is probably a shoe. True of
+    # every plan here; false of a catalogue-wide sitemap. Of the 529 products
+    # the sitemap brought us, 216 are footwear and 73 have no category at
+    # all, and that bucket really is mixed -- shoes this shop abbreviates
+    # "ПАТ" or "CALZ." sitting next to jackets, shorts and a waist bag, the
+    # last of which the storefront was serving as footwear.
+    #
+    # So discovery is scoped to the three footwear trees, which are disjoint
+    # (no unisex facet to double-count) and carry the hint that keeps those
+    # "ПАТ" products out of the uncategorised bucket in the first place.
+    # Verified against a manual count: 641 + 261 + 717 = 1 619.
+    "woocommerce_html": PaginatedPlan(categories=(
+        ("/kategorija/mazhi/obuvki-mazhi/", "footwear"),
+        ("/kategorija/zheni/obuvki-zheni/", "footwear"),
+        ("/kategorija/deca/obuvki/", "footwear"),
+    # WooCommerce paginates as /page/2/, not Sport Vision's /page-2, and
+    # prints no total -- see parse_last_page_link.
+    ), page_suffix="page/{page}/"),
     # Footwear only for the MVP. Adding apparel is adding strings here.
     # Each entry records what the shop's own category page implies.
     # That is strong evidence and costs nothing to carry.
@@ -314,7 +366,10 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
             if not first:
                 continue
             harvest(first, hint)
-            total = parse_total_pages(first) or 1
+            # The advertised total when there is one, the paginator's own last
+            # link when there is not. A category that answers neither is one
+            # page, which is also what a one-page category looks like.
+            total = parse_total_pages(first) or parse_last_page_link(first) or 1
             total = min(total, plan.max_pages)
             report.notes.append(f"{category}: {total} pages")
             for page in range(2, total + 1):

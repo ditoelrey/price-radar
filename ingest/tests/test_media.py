@@ -6,13 +6,16 @@ put a broken picture on a product card with nothing in the logs.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from mkagg.fetch import (BreakerWait, CircuitBreaker, FetchJob, Fetcher,
                          FetcherConfig, MemoryRateLimiter, StubTransport)
 from mkagg.media import (ALLOWED_TYPES, MAX_BYTES, MIN_BYTES, OUR_FAULT_SKIPS,
-                         ImageStore, fetch_product_images, is_safe_media_path,
-                         is_storable, normalise_type)
+                         RETRY_HOURS, TRANSPORT_RETRY_HOURS, ImageStore,
+                         fetch_product_images, is_safe_media_path, is_storable,
+                         normalise_type)
 
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 4000
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 4000
@@ -174,10 +177,19 @@ class RecordingConn:
         pass
 
     def stamped(self):
-        # The UPDATE only. The selection query names image_checked_at too,
-        # in its WHERE clause, and matching that made every one of these
-        # tests pass or fail for the wrong reason.
-        return [q for q, _ in self.queries if "image_checked_at = now()" in q]
+        # The failure UPDATE only. The success path writes image_checked_at
+        # too, and the selection query used to name it in its WHERE clause,
+        # and matching either made these tests pass for the wrong reason.
+        return [(q, p) for q, p in self.queries
+                if "image_retry_after = now()" in q]
+
+    def retry_hours(self):
+        """The window each failed attempt scheduled itself for.
+
+        This is the whole behaviour under test: the same failure path has to
+        choose a different number depending on what the failure proved.
+        """
+        return [p[0] for _, p in self.stamped()]
 
 
 class ManualClock:
@@ -288,9 +300,117 @@ class TestRetryWindow:
         assert report.stored == 1
         assert report.breaker_waits == 1
         assert clock.slept >= 30
-        # Stamped by the success path, with an asset to show for it.
-        assert len(conn.stamped()) == 1
+        # Nothing was scheduled for retry: the success path attaches the
+        # asset and clears the window instead, so this product is simply
+        # done rather than due again later.
+        assert conn.stamped() == []
+        assert any("image_asset_id = %s" in q and "image_retry_after = NULL" in q
+                   for q, _ in conn.queries)
 
     def test_our_faults_are_named_and_nothing_else_is(self):
         assert OUR_FAULT_SKIPS == {"circuit_open", "rate_limited"}
         assert "robots_disallowed" not in OUR_FAULT_SKIPS
+
+
+class TestTransportErrors:
+    """A broken connection is not an answer about the URL.
+
+    `OUR_FAULT_SKIPS` already covers the failures we can name before the
+    request leaves. This is the same fact arriving later: the transport
+    raised, so there is no status and no body, and the only thing proved is
+    that the network misbehaved for a moment.
+
+    The buzz pass is the reason these exist. Three images failed with
+    `http_0`; all three were stamped for a full day; two of them returned 200
+    on a re-fetch minutes later. Two products were locked out over a blip
+    that had already passed.
+    """
+
+    def _raises(self, exc):
+        def route(method, url, headers, body):
+            raise exc
+        return route
+
+    def test_a_reset_connection_schedules_a_short_retry(self):
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher(
+            {"/img/": self._raises(ConnectionResetError("peer hung up"))})
+
+        report = fetch_product_images(conn, fetcher, ImageStore(Path(".")))
+
+        assert report.errors == 1
+        assert report.skipped["http_0"] == 1
+        # Stamped -- it must not spin on this URL every pass ...
+        assert len(conn.stamped()) == 1
+        # ... but for an hour, not the day a 404 would have earned.
+        assert conn.retry_hours() == [TRANSPORT_RETRY_HOURS]
+
+    def test_a_truncated_body_is_a_transport_error_too(self):
+        """The third buzz image, which really is broken at source.
+
+        Their server promises 19 960 352 bytes and closes after 1 247 522,
+        reproducibly. We cannot tell that from a blip at the moment it
+        happens, which is exactly why the short window has to be short
+        rather than absent: this URL costs one request an hour instead of
+        one per pass, and nothing is locked out for a day on a guess.
+        """
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": self._raises(
+            RuntimeError("peer closed connection without sending complete "
+                         "message body (received 1247522, expected 19960352)"))})
+
+        report = fetch_product_images(conn, fetcher, ImageStore(Path(".")))
+
+        assert report.errors == 1
+        assert conn.retry_hours() == [TRANSPORT_RETRY_HOURS]
+
+    def test_a_dead_url_still_earns_the_full_day(self):
+        """The contrast that gives the short window its meaning."""
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": (404, {}, b"gone")})
+
+        fetch_product_images(conn, fetcher, ImageStore(Path(".")))
+
+        assert conn.retry_hours() == [RETRY_HOURS]
+
+    def test_an_html_error_page_also_earns_the_full_day(self, tmp_path):
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher(
+            {"/img/": (200, JPEG_CT, b"<!DOCTYPE html>" + b" " * 4000)})
+
+        fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert conn.retry_hours() == [RETRY_HOURS]
+
+    def test_a_store_failure_is_our_fault_not_the_url_s(self, tmp_path):
+        """A full disk says nothing about the image we just downloaded."""
+        class FullDisk(ImageStore):
+            def put(self, body, content_type):
+                raise OSError("No space left on device")
+
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": (200, JPEG_CT, JPEG)})
+
+        report = fetch_product_images(conn, fetcher, FullDisk(tmp_path))
+
+        assert report.errors == 1
+        assert conn.retry_hours() == [TRANSPORT_RETRY_HOURS]
+
+    def test_the_windows_are_ordered(self):
+        """If these ever cross, the fix has become its own bug."""
+        assert 0 < TRANSPORT_RETRY_HOURS < RETRY_HOURS
+
+    def test_the_selection_query_asks_the_schedule_not_the_stamp(self):
+        """The read side must not re-derive a window it cannot reason about.
+
+        Deriving "due" from `image_checked_at` is what forced one window on
+        every outcome in the first place; the decision now lives where the
+        outcome is known.
+        """
+        conn = RecordingConn([])
+        fetch_product_images(conn, image_fetcher({}), ImageStore(Path(".")))
+
+        select = conn.queries[0][0]
+        assert "image_retry_after IS NULL OR p.image_retry_after <= now()" \
+            in select
+        assert "image_checked_at" not in select
