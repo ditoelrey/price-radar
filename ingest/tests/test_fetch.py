@@ -373,6 +373,45 @@ class TestFetcher:
         assert headers["If-None-Match"] == 'W/"v1"'
         assert headers["If-Modified-Since"] == "Mon, 10 Nov 2026 00:00:00 GMT"
 
+    def test_revalidate_false_suppresses_the_conditional_headers(self):
+        """For a fetch that needs the bytes, "unchanged" is not an answer.
+
+        The fetcher caches an ETag on any 2xx, including one whose body was
+        then refused as unstorable. The image pass then revalidated an image
+        it did not hold and was told 304 -- true, useless, and charged to the
+        product as a failed check.
+        """
+        fetcher, transport, _ = make_fetcher(
+            {"/img/1.jpg": (200, {"content-type": "image/jpeg",
+                                  "etag": 'W/"v1"',
+                                  "last-modified": "Mon, 10 Nov 2026 00:00:00 GMT"},
+                            b"bytes")})
+        fetcher.fetch(FetchJob(merchant_slug="buzz",
+                               url="https://x.mk/img/1.jpg"))
+
+        fetcher.fetch(FetchJob(merchant_slug="buzz",
+                               url="https://x.mk/img/1.jpg",
+                               revalidate=False))
+
+        headers = transport.calls[1]["headers"]
+        assert "If-None-Match" not in headers
+        assert "If-Modified-Since" not in headers
+
+    def test_revalidation_is_still_the_default(self):
+        """The saving is real where we do hold a copy; only images opt out."""
+        assert FetchJob(merchant_slug="buzz", url="https://x.mk/p/1").revalidate
+
+    def test_an_explicit_header_still_wins_over_revalidate(self):
+        """job.headers is applied last, and that order must not drift."""
+        fetcher, transport, _ = make_fetcher(
+            {"/p/1": (200, {"content-type": "text/html"}, b"body")})
+
+        fetcher.fetch(FetchJob(merchant_slug="buzz", url="https://x.mk/p/1",
+                               revalidate=False,
+                               headers={"If-None-Match": 'W/"mine"'}))
+
+        assert transport.calls[0]["headers"]["If-None-Match"] == 'W/"mine"'
+
     def test_304_is_a_real_observation(self):
         fetcher, _, _ = make_fetcher({"/p/1": (304, {}, b"")})
         result = fetcher.fetch(FetchJob(merchant_slug="buzz",

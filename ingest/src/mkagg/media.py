@@ -53,6 +53,17 @@ OUR_FAULT_SKIPS = frozenset({"circuit_open", "rate_limited"})
 #: Hours to wait after a failure that is evidence about the URL itself.
 RETRY_HOURS = 24
 
+#: Statuses that carry no evidence about the image, so they earn the short
+#: window rather than the full day.
+#:
+#: 0 is the fetcher's "the transport raised": no status, no body. 304 is
+#: "unchanged since the validator you sent", which says something about our
+#: cache and nothing about the bytes -- and since this loop only ever runs
+#: for products with no stored asset, there is no copy for "unchanged" to
+#: refer to. :attr:`FetchJob.revalidate` stops us asking, so a 304 here now
+#: means a server volunteered one; it is still not the URL's fault.
+NO_EVIDENCE_STATUSES = frozenset({0, 304})
+
 #: Hours to wait after a transport error, which is evidence about nothing.
 #:
 #: `OUR_FAULT_SKIPS` above covers the failures we can name before the request
@@ -220,9 +231,13 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
 
     for product_id, image_url, merchant_slug in pending:
         report.considered += 1
+        # Unconditional: every product reaching this loop has no stored
+        # asset, so there is nothing to revalidate and a 304 is the one
+        # answer that cannot help. See FetchJob.revalidate.
         result = fetch_patiently(fetcher, FetchJob(
             merchant_slug=merchant_slug or "unknown",
-            url=image_url, kind="image", priority=priority), waiter)
+            url=image_url, kind="image", priority=priority,
+            revalidate=False), waiter)
 
         if result.skipped:
             report.note(result.skipped)
@@ -234,10 +249,11 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
         if not result.ok:
             report.errors += 1
             report.note(f"http_{result.status}")
-            # Status 0 means the transport raised: no status, no body, and so
-            # no evidence about this URL. See TRANSPORT_RETRY_HOURS.
+            # See NO_EVIDENCE_STATUSES: nothing was learned about this URL,
+            # so it must not pay a day for it.
             _stamp(conn, product_id,
-                   transport_retry_hours if result.status == 0 else retry_hours)
+                   transport_retry_hours
+                   if result.status in NO_EVIDENCE_STATUSES else retry_hours)
             continue
 
         ok, reason = is_storable(result.content_type, result.body)

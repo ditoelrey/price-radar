@@ -263,12 +263,15 @@ class Fetcher:
             "Accept-Language": self.config.accept_language,
             "Accept-Encoding": "gzip",
         }
-        # Conditional request: a 304 costs the merchant almost nothing.
-        etag, last_modified = self.validators.get(job.url)
-        if etag:
-            headers["If-None-Match"] = etag
-        if last_modified:
-            headers["If-Modified-Since"] = last_modified
+        # Conditional request: a 304 costs the merchant almost nothing -- but
+        # only when "unchanged" is an answer we can use. See
+        # FetchJob.revalidate for the case where it is not.
+        if job.revalidate:
+            etag, last_modified = self.validators.get(job.url)
+            if etag:
+                headers["If-None-Match"] = etag
+            if last_modified:
+                headers["If-Modified-Since"] = last_modified
         headers.update(job.headers)
         return headers
 

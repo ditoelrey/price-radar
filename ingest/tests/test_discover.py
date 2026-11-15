@@ -9,11 +9,13 @@ import re
 
 import pytest
 
-from mkagg.discover import (DISCOVERY_PLANS, PRODUCT_URL_PATTERNS,
+from mkagg.discover import (DISCOVERY_PLANS, MERCHANT_PLANS,
+                            PRODUCT_URL_PATTERNS,
                             PaginatedPlan, SampledPlan, SitemapPlan,
                             discover, extract_links, parse_last_page_link,
                             parse_sitemap_index, parse_sitemap_urls,
                             parse_total_pages, product_jobs)
+from mkagg.taxonomy import KNOWN_SLUGS
 from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,
                          MemoryRateLimiter, StubTransport)
 
@@ -208,13 +210,32 @@ class TestPaginatedStrategy:
 
 
 class TestSampledStrategy:
-    """sport-m and sizeer return a random ~18-product sample per request.
+    """Re-requesting one facet until it stops yielding anything new.
 
-    The same URL fetched twice shared 1 of 18 results, so there is no stable
-    pagination. The only honest enumeration is to re-request until a facet
-    stops yielding anything new; measured, that saturates at 21 products in
-    about 5 requests.
+    No live adapter uses this any more, and the reason is worth keeping. It
+    was built for sport-m and sizeer on a measurement that the same URL
+    fetched twice shared only 1 of 18 results. Re-measuring found the
+    opposite: three consecutive requests returned an identical 18 on both
+    shops, so the facet saturated after four requests holding a single
+    page's worth -- which is how 331 and 333 products came to be mistaken
+    for two whole catalogues. They now paginate on `&Page=N`.
+
+    The strategy is kept and tested because a shop that genuinely rotates is
+    a thing this codebase may meet again, and because the plan it is tested
+    against is injected rather than real, these tests no longer depend on
+    any shop behaving this way.
     """
+
+    @pytest.fixture(autouse=True)
+    def _sampled_aspnet(self, monkeypatch):
+        # The real shops now carry their own plans, which would win. These
+        # tests are about the strategy, so they reach it through the adapter.
+        for slug in ("sizeer", "sportm"):
+            monkeypatch.delitem(MERCHANT_PLANS, slug, raising=False)
+        monkeypatch.setitem(DISCOVERY_PLANS, "aspnet_mk", SampledPlan(facets=(
+            ("/ProductCatalog?Segment=03&Grupa=01", "footwear"),
+            ("/ProductCatalog?Segment=03&Brend=01", None),
+        )))
 
     def _sampling_route(self, pool, per_request=3):
         """Serve a rotating window of `pool`, imitating the random sample."""
@@ -324,16 +345,25 @@ class TestCategoryHints:
         assert ("/mk/patiki", "sneakers") in sv.categories
 
         asp = DISCOVERY_PLANS["aspnet_mk"]
-        assert isinstance(asp, SampledPlan)
-        footwear = [f for f, hint in asp.facets if hint == "footwear"]
-        assert footwear, "the Grupa=01 footwear facets should carry a hint"
+        assert isinstance(asp, PaginatedPlan)
+        footwear = [c for c, hint in asp.categories if hint == "footwear"]
+        assert footwear, "the Grupa=01 footwear branch should carry a hint"
 
-    def test_brand_facets_carry_no_hint(self):
-        """A brand facet says nothing about category, so it claims nothing."""
-        asp = DISCOVERY_PLANS["aspnet_mk"]
-        brand_facets = [(f, h) for f, h in asp.facets if "Brend=" in f]
-        assert brand_facets
-        assert all(hint is None for _f, hint in brand_facets)
+    def test_no_plan_claims_a_hint_it_cannot_know(self):
+        """A facet that says nothing about category must claim nothing.
+
+        This used to be about aspnet_mk's brand facets, which existed only to
+        help sampling saturate and went when it did. The rule outlives them:
+        a hint is evidence, so an entry carries one only where the shop's own
+        taxonomy supplies it.
+        """
+        for adapter, plan in DISCOVERY_PLANS.items():
+            entries = getattr(plan, "categories", None) or \
+                getattr(plan, "facets", ())
+            for path, hint in entries:
+                if hint is None:
+                    continue
+                assert hint in KNOWN_SLUGS, f"{adapter} {path} -> {hint}"
 
     def test_hints_reach_the_fetch_jobs(self):
         first = ('<div data-total-pages="1"></div>'
@@ -496,3 +526,166 @@ class TestMegasportIsScopedToFootwear:
         assert set(report.category_hints.values()) == {"footwear"}
         assert all(j.category_hint == "footwear"
                    for j in product_jobs(report))
+
+
+class TestWalkUntilEmpty:
+    """Pagination for a shop whose paginator cannot be believed.
+
+    Counts here are per category, so these run against the adapter plan's
+    single entry rather than a real shop's department list -- otherwise every
+    assertion would silently become a statement about how many departments
+    sizeer happens to have.
+
+    sport-m renders a window -- "1 2 3 4" on a facet that runs to 47 -- so
+    both the advertised total and the highest paginator link understate it.
+    Trusting either capped that facet at 72 products instead of 840.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _adapter_plan_only(self, monkeypatch):
+        for slug in ("sizeer", "sportm"):
+            monkeypatch.delitem(MERCHANT_PLANS, slug, raising=False)
+
+    def _paged(self, pages, *, window_link=4):
+        """`pages` pages of one product each, plus a lying paginator.
+
+        A callable rather than a dict of routes: `StubTransport` matches by
+        substring, and "...Grupa=01" is a prefix of every paged URL while
+        "&Page=5" is a prefix of "&Page=50". Parsing the parameter is the
+        only way to serve page N and only page N.
+        """
+        def respond(method, url, headers, body):
+            m = re.search(r"[?&]Page=(\d+)", url)
+            n = int(m.group(1)) if m else 1
+            if n > pages:
+                # A real page that simply has nothing on it.
+                return (200, HTML, b"<p>no results</p>")
+            return (200, HTML, (
+                f'<a href="/ProductCatalog/ProductDetails?ProductID=P{n}">x</a>'
+                f'<a href="/ProductCatalog?Segment=03&Grupa=01'
+                f'&Page={window_link}">{window_link}</a>').encode())
+        return {"/ProductCatalog": respond}
+
+    def test_it_walks_past_the_advertised_last_page(self):
+        fetcher = make_fetcher(self._paged(9, window_link=4))
+        report = discover(fetcher, "sportm", "aspnet_mk",
+                          "https://www.sport-m.com.mk", max_requests=200)
+
+        assert report.strategy == "paginated"
+        assert report.count == 9, report.product_urls
+        assert "9 pages (walked)" in " ".join(report.notes)
+
+    def test_it_stops_on_the_first_page_with_no_products(self):
+        """One wasted request to learn the end, and not one more."""
+        fetcher = make_fetcher(self._paged(3))
+        report = discover(fetcher, "sportm", "aspnet_mk",
+                          "https://www.sport-m.com.mk", max_requests=200)
+
+        assert report.count == 3
+        # 3 pages + the empty 4th that ended it.
+        assert report.requests == 4
+
+    def test_the_page_ceiling_still_bounds_it(self):
+        """A walk with no end must not become an unbounded crawl."""
+        plan = DISCOVERY_PLANS["aspnet_mk"]
+        assert plan.walk_until_empty and plan.max_pages <= 200
+
+        fetcher = make_fetcher(self._paged(400))
+        report = discover(fetcher, "sportm", "aspnet_mk",
+                          "https://www.sport-m.com.mk", max_requests=5000)
+
+        assert report.count == plan.max_pages
+
+    def test_the_suffix_joins_an_existing_query_string(self):
+        """`&Page=2`, not `?Page=2` -- the facet already carries a query."""
+        fetcher = make_fetcher(self._paged(2))
+        discover(fetcher, "sizeer", "aspnet_mk", "https://sizeer.com.mk",
+                 max_requests=200)
+
+        asked = [c["url"] for c in fetcher.transport.calls]
+        assert any(u.endswith("Segment=03&Grupa=01&Page=2") for u in asked), asked
+        assert not any("?Page=" in u for u in asked)
+
+    def test_a_page_of_repeats_does_not_end_the_walk(self):
+        """Emptiness is the stop signal, not "nothing new".
+
+        Facets overlap, so a page whose every product is already known is
+        still a page of products. Stopping there would truncate the facet at
+        its first repeat.
+        """
+        def respond(method, url, headers, body):
+            m = re.search(r"[?&]Page=(\d+)", url)
+            if m and int(m.group(1)) > 3:
+                return (200, HTML, b"<p>no results</p>")
+            # Always the same product, on every one of the first three pages.
+            return (200, HTML,
+                    b'<a href="/ProductCatalog/ProductDetails?ProductID=P1">x</a>')
+
+        fetcher = make_fetcher({"/ProductCatalog": respond})
+        report = discover(fetcher, "sizeer", "aspnet_mk",
+                          "https://sizeer.com.mk", max_requests=200)
+
+        assert report.count == 1              # one product, seen four times
+        assert report.requests == 4           # but the walk did not stop early
+
+
+class TestMerchantPlans:
+    """A shop's taxonomy belongs to the shop, not to its platform.
+
+    sizeer and sport-m run the same ASP.NET software, so they share an
+    adapter -- but `Segment` is each installation's own department
+    numbering. Reading sizeer with sport-m's numbers returned a real,
+    plausible, wrong answer: 418 products, which is `Segment=51` exactly,
+    taken for the whole of a 1 017-product footwear range.
+    """
+
+    def test_a_merchant_plan_wins_over_the_adapter_plan(self):
+        """Same adapter, same base URL, different departments asked for."""
+        seen = []
+
+        def respond(method, url, headers, body):
+            seen.append(url)
+            return (200, HTML, b"<p>no results</p>")
+
+        fetcher = make_fetcher({"/ProductCatalog": respond})
+        discover(fetcher, "sizeer", "aspnet_mk", "https://sizeer.com.mk",
+                 max_requests=50)
+
+        assert any("Segment=51" in u for u in seen), seen
+        assert any("Segment=52" in u for u in seen)
+        assert any("Segment=53" in u for u in seen)
+        assert not any("Segment=03" in u for u in seen), \
+            "Segment=03 is sport-m's numbering and is men-only on sizeer"
+
+    def test_the_two_shops_ask_for_different_departments(self):
+        sizeer = {c for c, _h in MERCHANT_PLANS["sizeer"].categories}
+        sportm = {c for c, _h in MERCHANT_PLANS["sportm"].categories}
+        assert sizeer & sportm == set(), "the numbering is not shared"
+        assert len(sizeer) == 3 and len(sportm) == 3
+
+    def test_no_department_is_a_re_listing_of_the_others(self):
+        """sport-m's Segment=07 is the trap this guards against.
+
+        It presents as the largest department -- 113 pages, 2 030 products --
+        and by ProductID every one of them is already in 03/04/05. Including
+        it doubled discovery for exactly zero extra products. A department
+        earns its place by holding something the others do not.
+        """
+        assert not any("Segment=07" in c
+                       for c, _h in MERCHANT_PLANS["sportm"].categories)
+
+    def test_every_department_is_footwear_and_says_so(self):
+        for slug, plan in MERCHANT_PLANS.items():
+            for path, hint in plan.categories:
+                assert "Grupa=01" in path, f"{slug}: {path} is not footwear"
+                assert hint == "footwear", f"{slug}: {path} -> {hint}"
+
+    def test_an_unlisted_merchant_still_falls_back_to_its_adapter(self):
+        """A new shop on a known platform must not lose discovery entirely."""
+        assert "megasport" not in MERCHANT_PLANS
+        fetcher = make_fetcher({"/kategorija": (200, HTML, b"<p>none</p>")})
+        report = discover(fetcher, "megasport", "woocommerce_html",
+                          "https://megasportonlineshop.com", max_requests=20)
+
+        assert report.strategy == "paginated"
+        assert report.requests > 0

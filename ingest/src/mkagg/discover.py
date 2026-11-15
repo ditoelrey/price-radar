@@ -171,6 +171,15 @@ class PaginatedPlan:
     categories: tuple[tuple[str, str | None], ...]
     page_suffix: str = "/page-{page}"
     max_pages: int = 200
+    #: Ignore any advertised total and walk pages until one comes back with no
+    #: products on it.
+    #:
+    #: For a shop whose paginator renders a *window* rather than the last
+    #: page. sport-m shows "1 2 3 4" on a facet that runs to 47, so both the
+    #: `data-total-pages` attribute and the highest paginator link understate
+    #: it -- believing either caps the facet at 72 products instead of 840.
+    #: Costs one extra request per category, the empty page that ends it.
+    walk_until_empty: bool = False
     strategy: str = "paginated"
 
 
@@ -224,26 +233,75 @@ DISCOVERY_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
     # Segment=03 / Grupa=01 is this platform's footwear branch, which is
     # exactly the context its titles omit: "Adidas Handball Spezial" names no
     # category at all, and discovery knew it was a shoe before it was fetched.
-    "aspnet_mk": SampledPlan(facets=(
+    # sizeer + sport-m. Segment=03 / Grupa=01 is this platform's footwear
+    # branch, which is exactly the context its titles omit: "Adidas Handball
+    # Spezial" names no category at all, and discovery knew it was a shoe
+    # before it was fetched.
+    #
+    # This was a SampledPlan, which re-requested one facet URL until it
+    # stopped yielding new products. That assumed the shop returns a rotating
+    # subset. Measured: it does not. Three consecutive requests returned an
+    # identical 18 products on both shops, so the facet saturated after four
+    # requests holding one page's worth -- which is precisely the 331 and 333
+    # products we held, mistaken for the whole catalogue.
+    #
+    # The real pagination is `&Page=N`, and it reaches 418 on sizeer (24
+    # pages, verified: page 25 is empty) and 840 on sport-m (47 pages). The
+    # brand facets and the search sweep existed to work around sampling --
+    # narrower pools saturate sooner -- and that rationale goes with it: the
+    # group facet now returns its whole pool, and PodGrupa 500/502/503 are
+    # subsets of it (503 is 378 of the 418).
+    "aspnet_mk": PaginatedPlan(categories=(
         ("/ProductCatalog?Segment=03&Grupa=01", "footwear"),
-        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=500", "footwear"),
-        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=502", "footwear"),
-        ("/ProductCatalog?Segment=03&Grupa=01&PodGrupa=503", "footwear"),
-        # Brand facets double as the brand-term sweep: narrower pools
-        # saturate faster and reach products the group facets miss. They say
-        # nothing about category, so they carry no hint.
-        ("/ProductCatalog?Segment=03&Brend=01", None),
-        ("/ProductCatalog?Segment=03&Brend=02", None),
-        ("/ProductCatalog?Segment=03&Brend=04", None),
-        ("/ProductCatalog?Segment=03&Brend=25", None),
-        ("/ProductCatalog?Segment=03&Brend=52", None),
-        ("/ProductCatalog?Segment=03&Brend=69", None),
-        ("/ProductCatalog?Segment=03&Brend=70", None),
-        ("/ProductCatalog?Segment=03&Brend=81", None),
-        ("/ProductCatalog?Segment=03&Brend=00050", None),
-    )),
+    # The suffix joins an existing query string, and sport-m's paginator
+    # shows a window rather than a last page -- hence walking. 120 pages is
+    # roughly double the deepest facet measured.
+    ), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
     # The API adapters discover through their own paginated endpoints and do
     # not need URL enumeration; they are robots-blocked today in any case.
+}
+
+#: Plans that belong to one shop rather than to its platform. Checked before
+#: :data:`DISCOVERY_PLANS`.
+#:
+#: aspnet_mk is white-label: sizeer and sport-m run the same software over
+#: their own taxonomies. `Grupa=01` means footwear in both, but `Segment` is
+#: the shop's own department numbering -- sizeer files footwear under 51, 52
+#: and 53, sport-m under 03, 04, 05 and 07, and the numbers mean nothing in
+#: common. A plan keyed on the adapter cannot express that, and the cost of
+#: pretending it could was a whole catalogue read as one department: sizeer's
+#: `Segment=03` returns exactly the 418 products of `Segment=51`, which we
+#: took for its entire footwear range of 1 017.
+#:
+#: Measured, by ProductID, walking each department to its first empty page:
+#:   sizeer  51=418  52=422  53=209  ->  1 017 distinct (32 filed twice)
+#:   sport-m 03, 04, 05, 07, all distinct on their first pages
+#:
+#: sizeer also exposes `Segment=55` ("БРЕНДОВИ"), 1 418 footwear products of
+#: which 845 appear under no department at all. Left out deliberately: the
+#: shop's own navigation does not reach them, so their status is unknown,
+#: and including them would near-double the shop on a guess.
+MERCHANT_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
+    "sizeer": PaginatedPlan(categories=(
+        ("/ProductCatalog?Segment=51&Grupa=01", "footwear"),
+        ("/ProductCatalog?Segment=52&Grupa=01", "footwear"),
+        ("/ProductCatalog?Segment=53&Grupa=01", "footwear"),
+    ), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+    # 03/04/05 are men, women and kids: 840 + 397 + 832, which is a manual
+    # count of 840/397/832 exactly, and 2 047 distinct once the 22 products
+    # filed under two departments are counted once.
+    #
+    # Segment=07 is deliberately absent. It looks like a fourth department --
+    # 113 pages, 2 030 products, more than any other -- and it is a
+    # re-listing: measured by ProductID, every product in it is already in
+    # 03/04/05 and it contributes exactly zero. Including it doubled
+    # discovery to 4 099 listings for the same 2 047 products, so it bought
+    # 113 wasted category pages and ~2 030 duplicate product fetches.
+    "sportm": PaginatedPlan(categories=(
+        ("/ProductCatalog?Segment=03&Grupa=01", "footwear"),
+        ("/ProductCatalog?Segment=04&Grupa=01", "footwear"),
+        ("/ProductCatalog?Segment=05&Grupa=01", "footwear"),
+    ), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
 }
 
 #: Search-based sweep for the sampled platform, used when the facet taxonomy
@@ -295,7 +353,9 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
     default: it is the most preemptible work in the system.
     """
     report = DiscoveryReport(merchant_slug=merchant_slug, adapter=adapter)
-    plan = DISCOVERY_PLANS.get(adapter)
+    # The shop's own plan first: on a white-label platform the adapter says
+    # how to read a page, not what this installation calls its departments.
+    plan = MERCHANT_PLANS.get(merchant_slug) or DISCOVERY_PLANS.get(adapter)
     if plan is None:
         report.notes.append(f"no discovery plan for adapter {adapter!r}")
         return report
@@ -366,6 +426,23 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
             if not first:
                 continue
             harvest(first, hint)
+            if plan.walk_until_empty:
+                page = 2
+                while page <= plan.max_pages and not done():
+                    body = fetch(urljoin(base_url, f"{category}"
+                                         f"{plan.page_suffix.format(page=page)}"))
+                    if body is None:
+                        break
+                    # Emptiness is the only honest stop signal here. "No new
+                    # products" is not: facets overlap, so a page of entirely
+                    # familiar products is still a page, and stopping on it
+                    # would truncate the facet at the first repeat.
+                    if not extract_links(body, pattern, base_url):
+                        break
+                    harvest(body, hint)
+                    page += 1
+                report.notes.append(f"{category}: {page - 1} pages (walked)")
+                continue
             # The advertised total when there is one, the paginator's own last
             # link when there is not. A category that answers neither is one
             # page, which is also what a one-page category looks like.

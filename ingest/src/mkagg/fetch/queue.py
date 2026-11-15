@@ -60,6 +60,19 @@ class FetchJob:
     #: product's own title names no category.
     category_hint: str | None = None
 
+    #: Whether to send `If-None-Match` / `If-Modified-Since` when we hold
+    #: validators for this URL. True is right for anything we already have a
+    #: copy of: a 304 is the cheapest possible answer for both sides.
+    #:
+    #: False is for a fetch that needs the bytes themselves and cannot use
+    #: "unchanged" as an answer. The image pass is the case that taught us:
+    #: the fetcher caches an ETag on any 2xx, including one whose body it then
+    #: refused as unstorable, so the next pass revalidated an image it did not
+    #: hold, got a 304, and recorded it as a failure of the URL. The URL was
+    #: fine -- 412 141 bytes of valid JPEG -- and the product lost its retry
+    #: window to a question we should never have asked.
+    revalidate: bool = True
+
     attempt: int = 0
     enqueued_at: float = field(default_factory=time.time)
 

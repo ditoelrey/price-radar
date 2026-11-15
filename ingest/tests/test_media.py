@@ -12,8 +12,9 @@ import pytest
 
 from mkagg.fetch import (BreakerWait, CircuitBreaker, FetchJob, Fetcher,
                          FetcherConfig, MemoryRateLimiter, StubTransport)
-from mkagg.media import (ALLOWED_TYPES, MAX_BYTES, MIN_BYTES, OUR_FAULT_SKIPS,
-                         RETRY_HOURS, TRANSPORT_RETRY_HOURS, ImageStore,
+from mkagg.media import (ALLOWED_TYPES, MAX_BYTES, MIN_BYTES,
+                         NO_EVIDENCE_STATUSES, OUR_FAULT_SKIPS, RETRY_HOURS,
+                         TRANSPORT_RETRY_HOURS, ImageStore,
                          fetch_product_images, is_safe_media_path, is_storable,
                          normalise_type)
 
@@ -414,3 +415,69 @@ class TestTransportErrors:
         assert "image_retry_after IS NULL OR p.image_retry_after <= now()" \
             in select
         assert "image_checked_at" not in select
+
+
+class TestNoConditionalRequests:
+    """The image pass must never ask a question it cannot use the answer to.
+
+    Product 8331 is why. An earlier attempt got a 2xx whose body was refused,
+    which cached an ETag; the next pass revalidated an image we did not hold,
+    was told 304, counted it an error and stamped the product for a day. The
+    URL was serving 412 141 bytes of valid JPEG the whole time.
+    """
+
+    def test_the_image_pass_fetches_unconditionally(self, tmp_path):
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": (200, JPEG_CT, JPEG)})
+        # A validator cached from an earlier fetch, exactly as in the incident.
+        fetcher.validators.put(PENDING[0][1], 'W/"v1"', None)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.stored == 1
+        sent = fetcher.transport.calls[0]["headers"]
+        assert "If-None-Match" not in sent
+        assert "If-Modified-Since" not in sent
+
+    def test_a_cached_validator_no_longer_costs_the_image(self, tmp_path):
+        """The regression, end to end: same setup, now it stores.
+
+        Against a transport that answers 304 to a conditional request and 200
+        to an unconditional one -- which is what a correct server does.
+        """
+        def route(method, url, headers, body):
+            if "If-None-Match" in headers:
+                return (304, {}, b"")
+            return (200, JPEG_CT, JPEG)
+
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": route})
+        fetcher.validators.put(PENDING[0][1], 'W/"v1"', None)
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.stored == 1
+        assert report.errors == 0
+        assert "http_304" not in report.skipped
+        assert conn.stamped() == []          # nothing scheduled for retry
+
+    def test_a_volunteered_304_is_still_not_the_url_s_fault(self, tmp_path):
+        """Defence in depth for a server that 304s without being asked.
+
+        We no longer ask, so this should be unreachable. If a shop does it
+        anyway, the honest reading is unchanged: a 304 carries no evidence
+        about the bytes, so it earns the short window, not the day.
+        """
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/": (304, {}, b"")})
+
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path))
+
+        assert report.skipped["http_304"] == 1
+        assert conn.retry_hours() == [TRANSPORT_RETRY_HOURS]
+
+    def test_the_no_evidence_statuses_are_named_and_bounded(self):
+        assert NO_EVIDENCE_STATUSES == {0, 304}
+        # A 404 or a 500 IS evidence about the URL and must not creep in here.
+        assert 404 not in NO_EVIDENCE_STATUSES
+        assert 500 not in NO_EVIDENCE_STATUSES
