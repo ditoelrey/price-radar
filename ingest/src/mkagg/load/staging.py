@@ -65,11 +65,11 @@ def stage_offers(conn, run: StagedRun, offers: list[RawOffer], *,
                         ingest_run_id, merchant_id, merchant_sku, raw_mpn,
                         raw_title, raw_brand, product_url, image_url,
                         currency_code, extractors, quality_issues, snapshot_key,
-                        category_hint)
+                        category_hint, gender_hint)
                      VALUES (%(run)s, %(merchant)s, %(sku)s, %(mpn)s, %(title)s,
                              %(brand)s, %(url)s, %(image)s, %(currency)s,
                              %(extractors)s, %(issues)s, %(snapshot)s,
-                             %(hint)s)
+                             %(hint)s, %(gender)s)
                 ON CONFLICT (ingest_run_id, merchant_id, merchant_sku) DO UPDATE
                         SET raw_mpn        = EXCLUDED.raw_mpn,
                             raw_title      = EXCLUDED.raw_title,
@@ -79,7 +79,9 @@ def stage_offers(conn, run: StagedRun, offers: list[RawOffer], *,
                             extractors     = EXCLUDED.extractors,
                             quality_issues = EXCLUDED.quality_issues,
                             category_hint  = COALESCE(EXCLUDED.category_hint,
-                                                      stage_offer.category_hint)
+                                                      stage_offer.category_hint),
+                            gender_hint    = COALESCE(EXCLUDED.gender_hint,
+                                                      stage_offer.gender_hint)
                   RETURNING id
                 """,
                 {"run": run.run_id, "merchant": run.merchant_id,
@@ -90,7 +92,8 @@ def stage_offers(conn, run: StagedRun, offers: list[RawOffer], *,
                  "extractors": json.dumps(offer.extractors),
                  "issues": offer.quality_issues(),
                  "snapshot": snapshot_keys.get(offer.merchant_sku),
-                 "hint": offer.category_hint})
+                 "hint": offer.category_hint,
+                 "gender": offer.gender_hint})
             stage_offer_id = cur.fetchone()[0]
             run.offers_staged += 1
 

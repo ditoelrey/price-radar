@@ -60,6 +60,10 @@ class FetchJob:
     #: product's own title names no category.
     category_hint: str | None = None
 
+    #: Gender implied by the same facet ("maski+unisex", Segment=52). Carried
+    #: for the same reason and used the same way.
+    gender_hint: str | None = None
+
     #: Whether to send `If-None-Match` / `If-Modified-Since` when we hold
     #: validators for this URL. True is right for anything we already have a
     #: copy of: a 304 is the cheapest possible answer for both sides.
@@ -101,6 +105,7 @@ class FetchJob:
             "headers": self.headers, "offer_variant_id": self.offer_variant_id,
             "offer_id": self.offer_id, "attempt": self.attempt,
             "category_hint": self.category_hint,
+            "gender_hint": self.gender_hint,
             "enqueued_at": self.enqueued_at,
         })
 

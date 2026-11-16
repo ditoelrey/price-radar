@@ -42,7 +42,7 @@ class PromotionReport:
 STAGED_SQL = """
 SELECT so.id, so.merchant_sku, so.raw_mpn, so.raw_title, so.raw_brand,
        so.product_url, so.image_url, so.currency_code, so.extractors,
-       so.category_hint
+       so.category_hint, so.gender_hint
   FROM stage_offer so
  WHERE so.ingest_run_id = %(run)s
  ORDER BY so.id
@@ -63,7 +63,7 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
         cur.execute(STAGED_SQL, {"run": run_id})
         rows = cur.fetchall()
         for (stage_id, sku, mpn, title, brand, url, image, currency,
-             extractors, category_hint) in rows:
+             extractors, category_hint, gender_hint) in rows:
             cur.execute(STAGED_VARIANTS_SQL, {"offer": stage_id})
             variants = [
                 RawVariant(
@@ -77,7 +77,8 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
                 merchant_slug=merchant_slug, merchant_sku=sku, raw_mpn=mpn,
                 raw_title=title, raw_brand=brand, product_url=url,
                 image_url=image, currency_code=currency, variants=variants,
-                extractors=extractors or {}, category_hint=category_hint)
+                extractors=extractors or {}, category_hint=category_hint,
+                gender_hint=gender_hint)
 
 
 # -----------------------------------------------------------------------------
@@ -217,8 +218,8 @@ def create_product(conn, offer: RawOffer, brand_id: int,
     creates the products, and every later store matches into them on the
     article code. No manual data entry at any point.
     """
+    from ..derive import OfferEvidence, derive_category, derive_gender
     from ..normalize import clean_model_name
-    from ..taxonomy import classify
 
     with conn.cursor() as cur:
         cur.execute("SELECT name FROM brand WHERE id = %s", (brand_id,))
@@ -231,19 +232,36 @@ def create_product(conn, offer: RawOffer, brand_id: int,
         row = cur.fetchone()
         merchant_name = row[0] if row else None
 
-        # Classify from the product's own words first; fall back to where
-        # discovery found it. The order matters: a hint is context, not
-        # evidence, so a title that says "Чорапи" still wins over a footwear
-        # facet. Only silence defers to the hint -- which is most of the
-        # ASP.NET catalogue, whose titles are bare "Brand Model".
-        category_slug = (classify(offer.raw_title, url=offer.product_url)
-                         or offer.category_hint)
+        # Creation and re-derivation read the same evidence through the same
+        # functions, so they cannot drift. That drift was the bug: this
+        # function used to stamp a category once and no later sweep could
+        # revise it, which left 2,767 products in the generic footwear bucket
+        # and made the uncategorised count unfixable by re-crawling.
+        #
+        # Only this one offer exists yet -- the product is being created from
+        # it -- so a single-offer derivation is all there is to do here. When
+        # the second shop's offer arrives, `mkagg.derive.rederive` sees both.
+        evidence = [OfferEvidence(
+            merchant_slug=offer.merchant_slug,
+            merchant_category_path=None,
+            merchant_gender=offer.gender_hint,
+            raw_title=offer.raw_title,
+            product_url=offer.product_url)]
+        category_slug, category_source = derive_category(evidence)
+        # The staged hint is facet evidence that has not reached
+        # merchant_offer yet, so it is applied here rather than thrown away.
+        if category_slug is None and offer.category_hint:
+            category_slug, category_source = offer.category_hint, "facet"
+        gender, gender_source = derive_gender(evidence)
+
         category_id = None
         if category_slug:
             cur.execute("SELECT id FROM category WHERE slug = %s",
                         (category_slug,))
             row = cur.fetchone()
             category_id = row[0] if row else None
+        if category_id is None:
+            category_source = None
 
         model = clean_model_name(offer.raw_title, brand_name,
                                  mpn=offer.raw_mpn,
@@ -258,13 +276,15 @@ def create_product(conn, offer: RawOffer, brand_id: int,
         slug = f"{slugify(canonical)}-{slugify(mpn_norm)}"[:200]
 
         cur.execute(
-            """INSERT INTO product (brand_id, category_id, model_name,
-                                    canonical_name, primary_mpn, image_url, slug)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """INSERT INTO product (brand_id, category_id, category_source,
+                                    gender, gender_source, model_name,
+                                    canonical_name, primary_mpn, image_url,
+                                    slug)
+                    VALUES (%s, %s, %s, %s::gender_t, %s, %s, %s, %s, %s, %s)
                ON CONFLICT (slug) DO UPDATE SET updated_at = now()
                  RETURNING id""",
-            (brand_id, category_id, model, canonical, mpn_norm,
-             offer.image_url, slug))
+            (brand_id, category_id, category_source, gender, gender_source,
+             model, canonical, mpn_norm, offer.image_url, slug))
         product_id = cur.fetchone()[0]
 
         cur.execute(

@@ -38,6 +38,22 @@ export type ProductCard = {
   colorway: string | null;
   imageUrl: string | null;
   mpn: string | null;
+  /**
+   * Canonical category leaf, English: `sneakers`, `cleats`, `shoes_boots`,
+   * `slides_sandals`, or the parent `footwear` meaning "a shoe, kind
+   * unspecified". Null when nothing has said yet, which is a real answer and
+   * not a bug: a guessed category is how a pack of socks once reached the
+   * footwear storefront.
+   */
+  category: string | null;
+  /** The same category in Macedonian. Display comes from the API, not here. */
+  categoryMk: string | null;
+  /**
+   * `men`, `women`, `kids`, `unisex`, or null when no shop department or
+   * title said. `unisex` is a finding -- the article is listed in both adult
+   * departments -- not a fallback for silence.
+   */
+  gender: string | null;
   fromPrice: Money | null;
   offerCount: number;
   merchantCount: number;
@@ -117,6 +133,10 @@ export type SearchParams = {
   q?: string;
   brand?: string;
   sizeEu?: number;
+  /** One canonical leaf. Matched exactly, so it never returns the parent. */
+  category?: string;
+  /** `men` and `women` include unisex, as the shops' own departments do. */
+  gender?: string;
   /** One of `SORTS` in `sort-select`; the API falls back to cheapest. */
   sort?: string;
   page?: number;
@@ -153,6 +173,8 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       q: params.q,
       brand: params.brand,
       sizeEu: params.sizeEu,
+      category: params.category,
+      gender: params.gender,
       sort: params.sort,
       page: params.page ?? 0,
       pageSize: params.pageSize ?? 24,

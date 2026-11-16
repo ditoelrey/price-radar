@@ -40,6 +40,13 @@ public class ProductController {
      *        ({@code apparel}, {@code accessory}, {@code equipment}).
      *        Products with no category are always included — their titles
      *        simply never said, and most of them are shoes.
+     * @param category one canonical leaf: {@code sneakers}, {@code cleats},
+     *        {@code shoes_boots} or {@code slides_sandals}. Matched exactly,
+     *        so this never returns the generic {@code footwear} parent.
+     * @param gender {@code men}, {@code women}, {@code kids} or
+     *        {@code unisex}. Men and women include unisex articles, as the
+     *        shops' own departments do; products whose gender is unknown are
+     *        excluded, because unknown is not a department.
      */
     @GetMapping("/products")
     public Dtos.ProductPage search(
@@ -47,13 +54,31 @@ public class ProductController {
             @RequestParam(required = false) String brand,
             @RequestParam(required = false) Double sizeEu,
             @RequestParam(required = false) String kind,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String gender,
             @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         boolean isDefaultScope = kind == null || kind.isBlank();
         return catalog.search(q, brand, sizeEu, kindsFor(kind), isDefaultScope,
+                normalize(category), normalize(gender),
                 CatalogRepository.Sort.parse(sort),
                 page, Math.min(pageSize, MAX_PAGE_SIZE));
+    }
+
+    /**
+     * Lower-cases and trims a filter value, or returns null for a blank one.
+     *
+     * <p>No validation beyond that, deliberately: an unknown category or
+     * gender matches no row and the shopper gets an empty page, which is the
+     * truthful answer. A 400 would be worse -- it turns a mistyped link into
+     * an error page instead of a listing with nothing in it.
+     */
+    static String normalize(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim().toLowerCase(java.util.Locale.ROOT);
     }
 
     static String[] kindsFor(String kind) {

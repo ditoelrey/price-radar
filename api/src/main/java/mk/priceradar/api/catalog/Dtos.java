@@ -59,6 +59,23 @@ public final class Dtos {
             String colorway,
             String imageUrl,
             String mpn,
+            /**
+             * Canonical category leaf, English, or null when nothing has
+             * said yet. Null is a real answer: 489 products reached the
+             * catalogue through a footwear facet with a title that named no
+             * category, and a guess is how a pack of socks once got filed
+             * under sneakers.
+             */
+            String category,
+            /** The same category in Macedonian, for display. */
+            String categoryMk,
+            /**
+             * {@code men}, {@code women}, {@code kids}, {@code unisex}, or
+             * null when no facet or title said. {@code unisex} is a finding
+             * -- the article is listed in both adult departments -- not a
+             * fallback for silence.
+             */
+            String gender,
             Money fromPrice,
             int offerCount,
             int merchantCount,

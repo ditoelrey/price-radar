@@ -62,6 +62,10 @@ class RawOffer:
     #: Set by the worker from the discovery job, not by the adapter: it is
     #: context about where the product was found, not something the page said.
     category_hint: str | None = None
+    #: Likewise: the department discovery found this product in. The strong
+    #: source for product.gender, since titles name a gender in a few percent
+    #: of cases and EU sizes cannot tell men from women at all.
+    gender_hint: str | None = None
 
     @property
     def min_price_minor(self) -> int | None:

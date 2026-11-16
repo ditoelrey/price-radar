@@ -9,12 +9,13 @@ import re
 
 import pytest
 
-from mkagg.discover import (DISCOVERY_PLANS, MERCHANT_PLANS,
+from mkagg.discover import (DISCOVERY_PLANS, MERCHANT_PLANS, Facet,
                             PRODUCT_URL_PATTERNS,
                             PaginatedPlan, SampledPlan, SitemapPlan,
                             discover, extract_links, parse_last_page_link,
                             parse_sitemap_index, parse_sitemap_urls,
                             parse_total_pages, product_jobs)
+from mkagg.fetch.queue import FetchJob
 from mkagg.taxonomy import KNOWN_SLUGS
 from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,
                          MemoryRateLimiter, StubTransport)
@@ -689,3 +690,96 @@ class TestMerchantPlans:
 
         assert report.strategy == "paginated"
         assert report.requests > 0
+
+
+class TestFacetsCarryGender:
+    """V17: a facet proves a gender as well as a category.
+
+    The plumbing is worth a test of its own because it crosses four modules
+    on the way to the database -- Facet, DiscoveryReport, FetchJob, then
+    stage_offer -- and a hint silently dropped halfway looks exactly like a
+    shop that does not publish departments.
+    """
+
+    def _walk(self, facets):
+        routes = {
+            "/mk/patiki/maski": (200, HTML, (
+                '<a href="/mk/patiki/1001-adidas-samba">a</a>').encode()),
+            "/mk/patiki/zenski": (200, HTML, (
+                '<a href="/mk/patiki/1002-adidas-gazelle">b</a>').encode()),
+        }
+        fetcher = make_fetcher(routes)
+        return discover(fetcher, "sportvision", "sportvision",
+                        "https://www.sportvision.mk",
+                        plan=PaginatedPlan(categories=facets))
+
+    def test_a_facet_records_category_gender_and_the_shops_own_label(self):
+        report = self._walk((
+            Facet("/mk/patiki/maski", "sneakers", "men", "patiki"),
+        ))
+        url = "https://www.sportvision.mk/mk/patiki/1001-adidas-samba"
+        assert report.category_hints[url] == "sneakers"
+        assert report.gender_hints[url] == "men"
+        assert report.merchant_paths[url] == "patiki"
+
+    def test_two_facets_label_their_own_products(self):
+        report = self._walk((
+            Facet("/mk/patiki/maski", "sneakers", "men", "patiki"),
+            Facet("/mk/patiki/zenski", "sneakers", "women", "patiki"),
+        ))
+        men = "https://www.sportvision.mk/mk/patiki/1001-adidas-samba"
+        women = "https://www.sportvision.mk/mk/patiki/1002-adidas-gazelle"
+        assert report.gender_hints[men] == "men"
+        assert report.gender_hints[women] == "women"
+
+    def test_a_product_in_both_adult_departments_is_unisex(self):
+        """Overlapping facets are the finding, not a collision to resolve.
+
+        The men's and women's departments on this platform both contain every
+        unisex article, and membership of both is the only evidence either
+        shop publishes for it. Discovery first kept whichever facet reached a
+        URL first, which cost the signal entirely: the catalogue came back
+        with 19 unisex products when buzz alone has 279, and the real unisex
+        ones had been split arbitrarily between men and women by whichever
+        page happened to be fetched first.
+        """
+        report = self._walk((
+            Facet("/mk/patiki/maski", "sneakers", "men", "patiki"),
+            Facet("/mk/patiki/maski", "sneakers", "women", "patiki"),
+        ))
+        url = "https://www.sportvision.mk/mk/patiki/1001-adidas-samba"
+        assert report.gender_hints[url] == "unisex"
+
+    def test_a_kids_facet_overlapping_an_adult_one_resolves_to_nothing(self):
+        """One shop listing an article in both is a shelving error, not a
+        product that is somehow both. Unresolved is the honest record."""
+        report = self._walk((
+            Facet("/mk/patiki/maski", "sneakers", "kids", "patiki"),
+            Facet("/mk/patiki/maski", "sneakers", "men", "patiki"),
+        ))
+        url = "https://www.sportvision.mk/mk/patiki/1001-adidas-samba"
+        assert url not in report.gender_hints
+
+    def test_hints_reach_the_fetch_jobs(self):
+        report = self._walk((
+            Facet("/mk/patiki/maski", "sneakers", "men", "patiki"),
+        ))
+        job = product_jobs(report)[0]
+        assert job.category_hint == "sneakers"
+        assert job.gender_hint == "men"
+
+    def test_a_plain_pair_still_works(self):
+        """Most plans know only a category, and must keep working untouched."""
+        report = self._walk((("/mk/patiki/maski", "sneakers"),))
+        url = "https://www.sportvision.mk/mk/patiki/1001-adidas-samba"
+        assert report.category_hints[url] == "sneakers"
+        assert report.gender_hints == {}
+
+    def test_a_job_survives_a_round_trip_through_json(self):
+        """The queue serialises jobs, so a new field has to be in both halves."""
+        job = FetchJob(merchant_slug="sportvision", url="https://x/p",
+                       kind="catalog_parse", category_hint="cleats",
+                       gender_hint="kids")
+        back = FetchJob.from_json(job.to_json())
+        assert back.category_hint == "cleats"
+        assert back.gender_hint == "kids"

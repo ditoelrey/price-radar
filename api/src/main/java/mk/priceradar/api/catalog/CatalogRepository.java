@@ -124,7 +124,8 @@ public class CatalogRepository {
        -- image pipeline catches up. Resolved in SQL so every caller gets
        -- the same answer and no one can forget the fallback.
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
-                   p.primary_mpn,
+                   p.primary_mpn, cat.slug AS category, cat.name_mk AS category_mk,
+                   p.gender::text AS gender,
                    s.min_price_minor, s.currency_code, s.offer_count,
                    s.merchant_count, s.available_sizes_eu, s.updated_at,
                    s.max_discount_pct, c.minor_unit
@@ -144,6 +145,23 @@ public class CatalogRepository {
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
                     OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
+               -- An exact leaf match, so asking for Копачки returns cleats
+               -- and nothing else -- not the generic `footwear` parent, which
+               -- means "a shoe, kind unspecified".
+               AND (CAST(:category AS text) IS NULL
+                    OR cat.slug = CAST(:category AS text))
+               -- The men's and women's departments include unisex articles,
+               -- which is not a convenience we invented: it is how every one
+               -- of these shops publishes its own facets ("maski+unisex").
+               -- Kids' does not, and an explicit `unisex` asks for only
+               -- those. A NULL gender is excluded from every gender filter --
+               -- unknown is not a department -- unlike the `kind` scope,
+               -- where unknown products are admitted because the default
+               -- storefront would otherwise hide most of the catalogue.
+               AND (CAST(:gender AS text) IS NULL
+                    OR p.gender::text = CAST(:gender AS text)
+                    OR (CAST(:gender AS text) IN ('men', 'women')
+                        AND p.gender = 'unisex'))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -187,7 +205,8 @@ public class CatalogRepository {
        -- image pipeline catches up. Resolved in SQL so every caller gets
        -- the same answer and no one can forget the fallback.
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
-                   p.primary_mpn,
+                   p.primary_mpn, cat.slug AS category, cat.name_mk AS category_mk,
+                   p.gender::text AS gender,
                    z.from_price_minor AS min_price_minor, z.currency_code,
                    z.offer_count, z.merchant_count,
                    s.available_sizes_eu, s.updated_at,
@@ -207,6 +226,23 @@ public class CatalogRepository {
                     OR p.primary_mpn    ILIKE CAST(:q AS text)
                     OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
+               -- An exact leaf match, so asking for Копачки returns cleats
+               -- and nothing else -- not the generic `footwear` parent, which
+               -- means "a shoe, kind unspecified".
+               AND (CAST(:category AS text) IS NULL
+                    OR cat.slug = CAST(:category AS text))
+               -- The men's and women's departments include unisex articles,
+               -- which is not a convenience we invented: it is how every one
+               -- of these shops publishes its own facets ("maski+unisex").
+               -- Kids' does not, and an explicit `unisex` asks for only
+               -- those. A NULL gender is excluded from every gender filter --
+               -- unknown is not a department -- unlike the `kind` scope,
+               -- where unknown products are admitted because the default
+               -- storefront would otherwise hide most of the catalogue.
+               AND (CAST(:gender AS text) IS NULL
+                    OR p.gender::text = CAST(:gender AS text)
+                    OR (CAST(:gender AS text) IN ('men', 'women')
+                        AND p.gender = 'unisex'))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -222,6 +258,7 @@ public class CatalogRepository {
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
                                        Double sizeEu, String[] kinds,
                                        boolean includeUnclassified,
+                                       String categorySlug, String gender,
                                        Sort sort, int limit, int offset) {
         boolean sized = sizeEu != null;
         // The price column differs between the two queries -- the size-
@@ -235,6 +272,8 @@ public class CatalogRepository {
                 .param("brand", blankToNull(brandSlug))
                 .param("kinds", kinds)
                 .param("includeUnclassified", includeUnclassified)
+                .param("category", blankToNull(categorySlug))
+                .param("gender", blankToNull(gender))
                 .param("limit", limit)
                 .param("offset", offset);
         if (sized) {
@@ -255,6 +294,9 @@ public class CatalogRepository {
                 rs.getString("colorway"),
                 rs.getString("image_url"),
                 rs.getString("primary_mpn"),
+                rs.getString("category"),
+                rs.getString("category_mk"),
+                rs.getString("gender"),
                 Dtos.Money.of(rs.getLong("min_price_minor"), currency, minorUnit),
                 rs.getInt("offer_count"),
                 rs.getInt("merchant_count"),

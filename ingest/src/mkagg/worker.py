@@ -354,6 +354,9 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
         if job.category_hint:
             for parsed in offers:
                 parsed.category_hint = job.category_hint
+        if job.gender_hint:
+            for parsed in offers:
+                parsed.gender_hint = job.gender_hint
 
         report.offers_parsed += len(offers)
 

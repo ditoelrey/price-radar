@@ -34,10 +34,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import NamedTuple
 from urllib.parse import urljoin
 
 from .fetch.queue import FetchJob
 from .fetch.ratelimit import Priority
+from .taxonomy import resolve_departments
 
 # -----------------------------------------------------------------------------
 # Pure parsers
@@ -167,7 +169,8 @@ class SitemapPlan:
 
 @dataclass(frozen=True)
 class PaginatedPlan:
-    #: (path, category slug implied by that path).
+    #: (path, category slug implied by that path), or a :class:`Facet`, which
+    #: carries a gender and the shop's own label as well.
     categories: tuple[tuple[str, str | None], ...]
     page_suffix: str = "/page-{page}"
     max_pages: int = 200
@@ -196,6 +199,39 @@ class SampledPlan:
     #: into an unbounded crawl of one store.
     max_requests: int = 15
     strategy: str = "sampled"
+
+
+class Facet(NamedTuple):
+    """One listing URL, and what finding a product there proves about it.
+
+    A plain ``(path, category)`` pair still works wherever a plan takes
+    facets -- :func:`as_facets` widens it -- because most plans only ever knew
+    the category. V17 added the other two fields:
+
+    ``gender``
+        Who the shop sells this department to. The strong source for
+        ``product.gender``: title words reach 4.9 percent of men's titles, and
+        EU sizes cannot separate men from women at all, since 36-46 is shared.
+
+    ``label``
+        The shop's own name for the facet, kept verbatim for
+        ``merchant_offer.merchant_category_path``. sportm's "Патики-ниски" is
+        not a canonical category -- it is that shop's merchandising, and two
+        shops can file one article differently and both be right -- so it is
+        recorded next to the offer rather than resolved into the product.
+    """
+    path: str
+    category: str | None = None
+    gender: str | None = None
+    label: str | None = None
+
+
+def as_facets(entries) -> list[Facet]:
+    """Widen plan entries to :class:`Facet`, leaving Facets alone."""
+    out = []
+    for entry in entries:
+        out.append(entry if isinstance(entry, Facet) else Facet(*entry))
+    return out
 
 
 DISCOVERY_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
@@ -304,6 +340,186 @@ MERCHANT_PLANS: dict[str, SitemapPlan | PaginatedPlan | SampledPlan] = {
     ), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
 }
 
+# -----------------------------------------------------------------------------
+# Facet plans -- the gender x category walk (V17)
+# -----------------------------------------------------------------------------
+#: Per-merchant plans whose facets carry a gender and a leaf category, used by
+#: the ``facets`` command rather than by a sweep.
+#:
+#: Why these exist at all: category and gender are properties of *where* a
+#: product was found, not of its title. Four of the six shops write "adidas
+#: Supernova Rise" and nothing else, so pooling every merchant's title for a
+#: product still leaves 2,580 of the 2,767 generic-footwear rows silent. The
+#: facet is the evidence, and until V17 it was discarded after
+#: ``create_product`` read it once.
+#:
+#: Why a separate plan from the sweep above: a sweep's job is to find products
+#: to fetch, and it only needs enough facets to cover the catalogue. This walk
+#: needs the *finest* department that still maps to a canonical bucket, and it
+#: needs no product fetches at all -- the listing page is what carries the
+#: facet. Gender x category partitions each shop, so the page count is set by
+#: the product count and does not change; the overhead is one partial last
+#: page per facet.
+#:
+#: Every URL here was fetched and confirmed to return products of its own.
+#: Constructed is not the same as real: the shops' navigation links only some
+#: combinations, and sportreality's women's Копачки facet and buzz's Копачки
+#: facets came back empty, which is why they are absent rather than assumed.
+
+#: The Sport Vision platform reads /mk/<category>/<gender>/<age>. The men's
+#: and women's facets both include `unisex` -- that is the shops' own
+#: construction, and it is the only evidence either publishes for a unisex
+#: article: appearing in both adult departments is what unisex means here.
+_SV_GENDERS = (
+    ("men",   "maski+unisex/vozrasni"),
+    ("women", "unisex+zenski/vozrasni"),
+    ("kids",  "deca-momcinja+deca-devojcinja+kids+unisex/"
+              "tinejdzeri+deca-malecki+bebe+kids-vozrast"),
+)
+
+#: buzz runs the same adapter over its own paths: `za-mazi` not `maski`, and
+#: "Папучи и апостолки" where the others have "Папучи и сандали". Confirmed
+#: by fetching: the sportvision spelling 404s on buzz, every one of them.
+_BUZZ_GENDERS = (
+    ("men",   "za-mazi+unisex/za-vozrasni"),
+    ("women", "za-zeni+unisex/za-vozrasni"),
+    ("kids",  "za-tinejdzeri+mali-deca+za-bebe"),
+)
+
+
+def _sv_facets(categories, genders) -> tuple[Facet, ...]:
+    # No trailing slash: this platform's page suffix is "/page-2", and a
+    # trailing slash would build ".../vozrasni//page-2".
+    return tuple(
+        Facet(path=f"/mk/{cat}/{suffix}", category=canonical, gender=gender,
+              label=cat)
+        for cat, canonical in categories
+        for gender, suffix in genders)
+
+
+#: Shared by sportvision and sportreality. Measured page counts on
+#: sportvision: patiki 49/50/34, kopacki 4/1/3, konduri-i-cizmi 3/2/4,
+#: papuci-i-sandali 7/7/8 -- against obuvki (the umbrella) at 61/58/48, so the
+#: four leaves account for the shop and the umbrella is not walked.
+_SV_CATEGORIES = (
+    ("patiki", "sneakers"),
+    ("kopacki", "cleats"),
+    ("konduri-i-cizmi", "shoes_boots"),
+    ("papuci-i-sandali", "slides_sandals"),
+)
+
+#: megasport's WooCommerce slugs are per-gender and inconsistent -- `konduri`
+#: for men, `konduri-obuvki-zheni` for women, `konduri-obuvki` for kids -- so
+#: they are listed rather than generated. Women's has no Копачки facet and
+#: kids' Чизми lives at `chizmi-obuvki`; both match the shop's own navigation.
+#: Two subcategories map to `shoes_boots` (Кондури and Чизми), which the
+#: canonical bucket merges and `merchant_category_path` keeps apart.
+_MEGA_FACETS = (
+    ("/kategorija/mazhi/obuvki-mazhi/patiki-obuvki-mazhi/", "sneakers", "men"),
+    ("/kategorija/mazhi/obuvki-mazhi/kopachki-obuvki-mazhi/", "cleats", "men"),
+    ("/kategorija/mazhi/obuvki-mazhi/konduri/", "shoes_boots", "men"),
+    ("/kategorija/mazhi/obuvki-mazhi/chizmi-obuvki-mazhi/", "shoes_boots",
+     "men"),
+    ("/kategorija/mazhi/obuvki-mazhi/papuchi-obuvki-mazhi/", "slides_sandals",
+     "men"),
+    ("/kategorija/zheni/obuvki-zheni/patiki-obuvki-zheni/", "sneakers",
+     "women"),
+    ("/kategorija/zheni/obuvki-zheni/konduri-obuvki-zheni/", "shoes_boots",
+     "women"),
+    ("/kategorija/zheni/obuvki-zheni/chizmi/", "shoes_boots", "women"),
+    ("/kategorija/zheni/obuvki-zheni/papuchi-obuvki-zheni/", "slides_sandals",
+     "women"),
+    ("/kategorija/deca/obuvki/patiki/", "sneakers", "kids"),
+    ("/kategorija/deca/obuvki/kopachki/", "cleats", "kids"),
+    ("/kategorija/deca/obuvki/konduri-obuvki/", "shoes_boots", "kids"),
+    ("/kategorija/deca/obuvki/chizmi-obuvki/", "shoes_boots", "kids"),
+    ("/kategorija/deca/obuvki/papuchi/", "slides_sandals", "kids"),
+)
+
+#: aspnet_mk's `PodGrupa` is the product-group dictionary, and unlike
+#: `Segment` it *is* shared between the two installations: 503 is
+#: "Патики-ниски" on sizeer and on sport-m alike. So the codes are declared
+#: once and the departments differ per shop.
+_PODGRUPA = {
+    "503": ("sneakers", "Патики-ниски"),
+    "502": ("sneakers", "Патики-високи"),
+    "599": ("shoes_boots", "Чизми"),
+    "786": ("shoes_boots", "Балетанки"),
+    "536": ("shoes_boots", "Мокасини"),
+    "515": ("cleats", "Фудбал-сала"),
+    "514": ("cleats", "Фудбал-копачки"),
+    "779": ("cleats", "Патики за вештачка трева"),
+    "500": ("slides_sandals", "Папучи"),
+    "508": ("slides_sandals", "Сандали"),
+    "587": ("slides_sandals", "Обувки за вода"),
+    "537": ("slides_sandals", "Апостолки"),
+}
+
+
+def _aspnet_facets(departments) -> tuple[Facet, ...]:
+    """Build Segment x PodGrupa facets from a shop's own department map."""
+    out = []
+    for segment, gender, codes in departments:
+        for code in codes:
+            canonical, label = _PODGRUPA[code]
+            out.append(Facet(
+                path=f"/ProductCatalog?Segment={segment}&Grupa=01"
+                     f"&PodGrupa={code}",
+                category=canonical, gender=gender, label=label))
+    return tuple(out)
+
+
+#: Which PodGrupa each shop publishes per department, read from their own
+#: navigation. The sub-facets are subsets of the `Grupa=01` facet the sweep
+#: walks, so a product in none of them keeps the generic footwear category it
+#: already has -- the walk can only improve on what is there.
+FACET_PLANS: dict[str, PaginatedPlan] = {
+    "sportvision": PaginatedPlan(
+        categories=_sv_facets(_SV_CATEGORIES, _SV_GENDERS)),
+    "sportreality": PaginatedPlan(
+        categories=_sv_facets(_SV_CATEGORIES, _SV_GENDERS)),
+    # buzz sells no football boots: its three kopacki facets all returned
+    # zero products, which agrees with its titles -- not one of its 1,921
+    # offers carries a cleat word.
+    "buzz": PaginatedPlan(
+        categories=_sv_facets((("patiki", "sneakers"),
+                               ("konduri-i-cizmi", "shoes_boots"),
+                               ("papuci-i-apostolki", "slides_sandals")),
+                              _BUZZ_GENDERS)),
+    "megasport": PaginatedPlan(
+        categories=tuple(Facet(path=p, category=c, gender=g,
+                               label=p.rstrip("/").rsplit("/", 1)[-1])
+                         for p, c, g in _MEGA_FACETS),
+        page_suffix="page/{page}/"),
+    "sizeer": PaginatedPlan(categories=_aspnet_facets((
+        ("51", "men",   ("503", "502", "599", "500")),
+        ("52", "women", ("786", "536", "503", "502", "599", "500", "508")),
+        ("53", "kids",  ("503", "502", "599", "500", "508")),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+    "sportm": PaginatedPlan(categories=_aspnet_facets((
+        ("03", "men",   ("503", "502", "599", "515", "514", "779", "500",
+                         "508", "587", "537")),
+        ("04", "women", ("786", "503", "502", "599", "500", "508", "587",
+                         "537")),
+        ("05", "kids",  ("503", "502", "599", "515", "514", "779", "500",
+                         "508", "587", "537")),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+}
+
+#: Every facet label in :data:`FACET_PLANS`, mapped to the canonical category
+#: it implies. Built from the plans themselves, so a label and its meaning
+#: cannot drift apart: changing one changes the other in the same edit.
+#:
+#: This is what lets ``merchant_offer.merchant_category_path`` hold the shop's
+#: own word -- "Патики-ниски", "papuchi-obuvki-zheni" -- while derivation
+#: still knows what it means. Labels repeat across shops ("patiki" on both
+#: Sport Vision and megasport) and agree where they do; a test asserts it.
+FACET_CATEGORY: dict[str, str] = {}
+for _plan in FACET_PLANS.values():
+    for _facet in as_facets(_plan.categories):
+        if _facet.label and _facet.category:
+            FACET_CATEGORY[_facet.label] = _facet.category
+
 #: Search-based sweep for the sampled platform, used when the facet taxonomy
 #: misses a brand. Verified term-sensitive: "zzzznonsense" returns 0 results
 #: while "adidas" returns matches.
@@ -326,6 +542,10 @@ class DiscoveryReport:
     product_urls: list[str] = field(default_factory=list)
     #: product URL -> category slug implied by where it was found.
     category_hints: dict = field(default_factory=dict)
+    #: product URL -> gender implied by the department it was found in.
+    gender_hints: dict = field(default_factory=dict)
+    #: product URL -> the shop's own name for that facet, verbatim.
+    merchant_paths: dict = field(default_factory=dict)
     saturated_facets: int = 0
     exhausted_facets: int = 0
     errors: int = 0
@@ -345,7 +565,9 @@ def _listing_job(merchant_slug: str, url: str,
 def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
              priority: Priority = Priority.COLD,
              max_requests: int = 400,
-             limit: int | None = None) -> DiscoveryReport:
+             limit: int | None = None,
+             plan: SitemapPlan | PaginatedPlan | SampledPlan | None = None,
+             ) -> DiscoveryReport:
     """Enumerate product URLs for one merchant.
 
     Uses the fetcher, so every request still passes through the rate limiter,
@@ -353,9 +575,12 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
     default: it is the most preemptible work in the system.
     """
     report = DiscoveryReport(merchant_slug=merchant_slug, adapter=adapter)
-    # The shop's own plan first: on a white-label platform the adapter says
-    # how to read a page, not what this installation calls its departments.
-    plan = MERCHANT_PLANS.get(merchant_slug) or DISCOVERY_PLANS.get(adapter)
+    # An explicit plan wins -- that is how the facet walk reuses this driver
+    # without becoming a sweep. Otherwise the shop's own plan, because on a
+    # white-label platform the adapter says how to read a page, not what this
+    # installation calls its departments.
+    plan = (plan or MERCHANT_PLANS.get(merchant_slug)
+            or DISCOVERY_PLANS.get(adapter))
     if plan is None:
         report.notes.append(f"no discovery plan for adapter {adapter!r}")
         return report
@@ -368,6 +593,13 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
 
     found: dict[str, None] = {}
     hints: dict[str, str] = {}
+    # A *set* per URL, not a first-wins value. The men's and women's facets
+    # on the Sport Vision shops both contain every unisex article, and that
+    # membership of both is the only evidence any of them publishes for
+    # unisex. Keeping the first one measured 19 unisex products in a
+    # catalogue where buzz alone has 279.
+    genders: dict[str, set] = {}
+    labels: dict[str, str] = {}
 
     def fetch(url: str) -> str | None:
         if report.requests >= max_requests:
@@ -383,18 +615,30 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
         report.listings_seen += 1
         return result.body.decode("utf-8", "replace")
 
-    def harvest(text: str, hint: str | None = None) -> int:
+    def note(url: str, facet: Facet | None) -> None:
+        if facet is None:
+            return
+        # Category is first-wins: a product in two category facets of one
+        # shop is rare and either reading is defensible. Gender accumulates,
+        # because overlapping departments are not an accident to be resolved
+        # away -- they are the finding.
+        if facet.category:
+            hints.setdefault(url, facet.category)
+        if facet.gender:
+            genders.setdefault(url, set()).add(facet.gender)
+        if facet.label or facet.path:
+            labels.setdefault(url, facet.label or facet.path)
+
+    def harvest(text: str, facet: Facet | None = None) -> int:
         before = len(found)
         for url in extract_links(text, pattern, base_url):
             found.setdefault(url, None)
-            if hint:
-                hints.setdefault(url, hint)
+            note(url, facet)
         # Sitemaps carry <loc> rather than href.
         for loc, _lastmod in parse_sitemap_urls(text):
             if pattern.search(loc):
                 found.setdefault(loc, None)
-                if hint:
-                    hints.setdefault(loc, hint)
+                note(loc, facet)
         return len(found) - before
 
     def done() -> bool:
@@ -419,13 +663,14 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
 
     # --- paginated categories --------------------------------------------
     elif isinstance(plan, PaginatedPlan):
-        for category, hint in plan.categories:
+        for facet in as_facets(plan.categories):
+            category = facet.path
             if done():
                 break
             first = fetch(urljoin(base_url, category))
             if not first:
                 continue
-            harvest(first, hint)
+            harvest(first, facet)
             if plan.walk_until_empty:
                 page = 2
                 while page <= plan.max_pages and not done():
@@ -439,7 +684,7 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                     # would truncate the facet at the first repeat.
                     if not extract_links(body, pattern, base_url):
                         break
-                    harvest(body, hint)
+                    harvest(body, facet)
                     page += 1
                 report.notes.append(f"{category}: {page - 1} pages (walked)")
                 continue
@@ -456,20 +701,20 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                                      f"{plan.page_suffix.format(page=page)}"))
                 if body is None:
                     break
-                harvest(body, hint)
+                harvest(body, facet)
 
     # --- sampled facets ---------------------------------------------------
     else:
-        for facet, hint in plan.facets:
+        for facet in as_facets(plan.facets):
             if done():
                 break
-            url = urljoin(base_url, facet)
+            url = urljoin(base_url, facet.path)
             empty_rounds = 0
             for attempt in range(plan.max_requests):
                 body = fetch(url)
                 if body is None:
                     break
-                new = harvest(body, hint)
+                new = harvest(body, facet)
                 if new == 0:
                     empty_rounds += 1
                     if empty_rounds >= plan.saturation_rounds:
@@ -481,7 +726,7 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
                 # Hit the ceiling without saturating: the pool is larger than
                 # sampling can confirm, so this facet has an unknown tail.
                 report.exhausted_facets += 1
-                report.notes.append(f"facet not saturated: {facet}")
+                report.notes.append(f"facet not saturated: {facet.path}")
 
         # Search sweep for brands the facet taxonomy may miss.
         for term in SWEEP_TERMS:
@@ -504,6 +749,11 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
     report.product_urls = list(found)[:limit] if limit else list(found)
     report.category_hints = {u: hints[u] for u in report.product_urls
                              if u in hints}
+    report.gender_hints = {
+        u: resolve_departments(genders[u]) for u in report.product_urls
+        if u in genders and resolve_departments(genders[u])}
+    report.merchant_paths = {u: labels[u] for u in report.product_urls
+                             if u in labels}
     return report
 
 
@@ -512,5 +762,6 @@ def product_jobs(report: DiscoveryReport, kind: str = "catalog_parse",
     """Turn discovered URLs into fetch jobs for the worker."""
     return [FetchJob(merchant_slug=report.merchant_slug, url=url, kind=kind,
                      priority=priority,
-                     category_hint=report.category_hints.get(url))
+                     category_hint=report.category_hints.get(url),
+                     gender_hint=report.gender_hints.get(url))
             for url in report.product_urls]

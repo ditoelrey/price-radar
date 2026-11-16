@@ -38,7 +38,8 @@ public class CatalogService {
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    int page, int pageSize) {
         return search(query, brand, sizeEu, CatalogRepository.FOOTWEAR_KINDS,
-                true, CatalogRepository.Sort.CHEAPEST, page, pageSize);
+                true, null, null, CatalogRepository.Sort.CHEAPEST,
+                page, pageSize);
     }
 
     /**
@@ -49,13 +50,14 @@ public class CatalogService {
      */
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    String[] kinds, boolean includeUnclassified,
+                                   String category, String gender,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
                 country, query, brand, sizeEu, kinds, includeUnclassified,
-                sort, pageSize + 1, page * pageSize);
+                category, gender, sort, pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
             rows = rows.subList(0, pageSize);

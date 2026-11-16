@@ -38,6 +38,7 @@ from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,  # noqa: E402
                          LocalRawStore, MemoryFetchQueue, MemoryRateLimiter,
                          Priority, assign_tiers, enqueue_due)
 from mkagg.fetch.http import DEFAULT_USER_AGENT, HttpxTransport  # noqa: E402
+from mkagg.derive import rederive, walk_facets  # noqa: E402
 from mkagg.media import ImageStore, fetch_product_images  # noqa: E402
 from mkagg.worker import run_forever, run_once  # noqa: E402
 
@@ -107,6 +108,44 @@ def cmd_discover(args) -> int:
     return 0
 
 
+def cmd_facets(args) -> int:
+    """Record which department each offer was found in. No product fetches.
+
+    What this fixes: a product's category and gender are properties of the
+    facet it was discovered through, and until V17 that context was read once
+    by create_product and then discarded. Re-sweeping could not repair an
+    already-created product, which is why 2,767 products sat in the generic
+    footwear bucket and every one of 10,731 claimed to be unisex.
+    """
+    fetcher = build_fetcher(args.rps)
+    with psycopg.connect(DSN) as conn:
+        for slug, adapter, base_url, _blocked in active_merchants(
+                conn, args.merchant):
+            report = walk_facets(conn, fetcher, slug, adapter, base_url,
+                                 max_requests=args.max_requests,
+                                 limit=args.limit)
+            print(f"  {report.summary()}")
+            for note in report.notes:
+                print(f"      {note[:88]}")
+    fetcher.close()
+    return 0
+
+
+def cmd_derive(args) -> int:
+    """Recompute every product's category and gender from its offers."""
+    with psycopg.connect(DSN) as conn:
+        report = rederive(conn, dry_run=args.dry_run, limit=args.limit)
+        print(f"  {report.summary()}")
+        with conn.cursor() as cur:
+            cur.execute("""SELECT c.slug, p.gender::text, count(*)
+                             FROM product p
+                             LEFT JOIN category c ON c.id = p.category_id
+                            GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 14""")
+            for slug, gender, n in cur.fetchall():
+                print(f"      {str(slug):<16}{str(gender):<8}{n:>6}")
+    return 0
+
+
 def cmd_probe(args) -> int:
     fetcher = build_fetcher(args.rps)
     queue = MemoryFetchQueue()
@@ -169,7 +208,8 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     for name, fn in (("discover", cmd_discover), ("probe", cmd_probe),
-                     ("images", cmd_images), ("serve", cmd_serve)):
+                     ("images", cmd_images), ("serve", cmd_serve),
+                     ("facets", cmd_facets), ("derive", cmd_derive)):
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         p.add_argument("-m", "--merchant", action="append",
@@ -184,6 +224,8 @@ def main() -> int:
                        help="requests per second per merchant domain")
         p.add_argument("--cycles", type=int, default=None)
         p.add_argument("--idle-sleep", type=float, default=5.0)
+        p.add_argument("--dry-run", action="store_true",
+                       help="derive: compute and report, write nothing")
 
     args = ap.parse_args()
     return args.fn(args)
