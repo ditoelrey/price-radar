@@ -11,7 +11,8 @@ is much harder to notice.
 """
 from .promote import (PromotionReport, ensure_brand, promote_run,
                       refresh_summary, resolve_brand, resolve_offer)
-from .run import IngestOutcome, ingest
+from .run import (APPAREL_KIND, CATALOG_KIND, IngestOutcome, ingest,
+                  run_kind_for)
 from .staging import (StagedRun, clear_stage, merchant_id_for, open_run,
                       record_decision, stage_offers)
 from .validate import (Baseline, Check, Decision, RunMetrics, Thresholds,
@@ -19,6 +20,7 @@ from .validate import (Baseline, Check, Decision, RunMetrics, Thresholds,
                        validate_run)
 
 __all__ = [
+    "APPAREL_KIND", "CATALOG_KIND", "run_kind_for",
     "Baseline", "Check", "Decision", "IngestOutcome", "PromotionReport",
     "RunMetrics", "StagedRun", "Thresholds", "ValidationResult",
     "baseline_for", "clear_stage", "ensure_brand", "ingest",

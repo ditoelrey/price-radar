@@ -28,6 +28,13 @@ class RawVariant:
     size_uk: Decimal | None = None
     size_cm: Decimal | None = None
 
+    #: Body height in centimetres, when the shop states it *beside* the size
+    #: rather than as it. sport-m and sizeer do, in the same record:
+    #: `{"Velicina": "86", "EvropskaVelicina": "12-18 мес."}` -- the age
+    #: becomes the label, and this keeps the height that would otherwise be
+    #: dropped. Every other shop leaves it None and the label speaks alone.
+    size_height_cm: int | None = None
+
     merchant_variant_id: str | None = None
     list_price_minor: int | None = None
     shipping_cost_minor: int | None = None

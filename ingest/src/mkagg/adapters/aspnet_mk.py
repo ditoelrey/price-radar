@@ -90,6 +90,16 @@ def parse_sizes(payload, *, price_minor: int, currency: str = "MKD",
         EvropskaVelicina  EU size, with Unicode vulgar fractions ("41⅓")
         VelicinaCM        cm, usually 0.00 and therefore ignored
         Zaliha            remaining quantity, or null on sizeer
+
+    On **apparel** the first two fields mean something else entirely::
+
+        {"Velicina": "86", "EvropskaVelicina": "12-18 мес."}
+
+    `Velicina` is the body height and `EvropskaVelicina` the age the shop
+    pairs it with -- the same two columns carrying a different meaning per
+    vertical. Keeping only the second, as this did, threw away half of the
+    one age-to-height mapping any of these six shops publishes, which is
+    the mapping `kids_size_chart` is built from.
     """
     rows = payload if isinstance(payload, list) else json.loads(as_text(payload))
     variants: list[RawVariant] = []
@@ -113,11 +123,18 @@ def parse_sizes(payload, *, price_minor: int, currency: str = "MKD",
         except Exception:
             cm_val = None
 
+        # A plain 80-200 in `Velicina` is a body height, not a UK shoe size:
+        # no shoe size reaches 80, so the band is unambiguous.
+        height = None
+        if uk_label.isdigit() and 80 <= int(uk_label) <= 200:
+            height = int(uk_label)
+
         variants.append(RawVariant(
             size_label=label,
             size_eu=normalize_size(eu_label) if eu_label else None,
             size_uk=normalize_size(uk_label) if uk_label else None,
             size_cm=cm_val,
+            size_height_cm=height,
             price_minor=price_minor,
             currency_code=currency,
             # publishes_stock=False (sizeer) -> stay None. Unknown stock must

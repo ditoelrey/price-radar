@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass, field
 
 from ..matching import match_offer
+from ..sizing import read_size
+from ..taxonomy import APPAREL_SLUGS
 from ..models import MatchResult, ProductCandidate, RawOffer, RawVariant
 from ..normalize import normalize_sku, slugify, translit_mk
 
@@ -397,16 +399,25 @@ WITH prior AS (
 upserted AS (
     INSERT INTO offer_variant (
             offer_id, size_label, size_eu, size_uk, size_cm,
+            size_system, size_alpha, size_height_cm,
+            size_age_min_months, size_age_max_months,
             merchant_variant_id, price_minor, list_price_minor, currency_code,
             shipping_cost_minor, in_stock, stock_qty,
             last_checked_at, last_changed_at)
-         VALUES (%(offer)s, %(label)s, %(eu)s, %(uk)s, %(cm)s, %(vid)s,
+         VALUES (%(offer)s, %(label)s, %(eu)s, %(uk)s, %(cm)s,
+                 %(system)s::size_system, %(alpha)s, %(height)s,
+                 %(age_lo)s, %(age_hi)s, %(vid)s,
                  %(price)s, %(list)s, %(currency)s, %(ship)s, %(in_stock)s,
                  %(qty)s, now(), now())
     ON CONFLICT (offer_id, size_label) DO UPDATE
             SET size_eu             = EXCLUDED.size_eu,
                 size_uk             = EXCLUDED.size_uk,
                 size_cm             = EXCLUDED.size_cm,
+                size_system         = EXCLUDED.size_system,
+                size_alpha          = EXCLUDED.size_alpha,
+                size_height_cm      = EXCLUDED.size_height_cm,
+                size_age_min_months = EXCLUDED.size_age_min_months,
+                size_age_max_months = EXCLUDED.size_age_max_months,
                 merchant_variant_id = COALESCE(EXCLUDED.merchant_variant_id,
                                                offer_variant.merchant_variant_id),
                 price_minor         = EXCLUDED.price_minor,
@@ -561,11 +572,31 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
             else:
                 report.offers_unmatched += 1
 
+            # The facet is what makes a number readable. An offer found in
+            # an apparel department has clothing sizes, and "38" there is a
+            # dress size however much it looks like a shoe size; one found
+            # in a kids' department writes "7" and means seven years old.
+            # Both facts are already on the offer, carried from discovery.
+            apparel = offer.category_hint in APPAREL_SLUGS
+            kids = offer.gender_hint == "kids"
+
             for variant in offer.variants:
+                size = read_size(variant.size_label, apparel=apparel,
+                                 kids=kids)
                 cur.execute(UPSERT_VARIANT_SQL, {
                     "offer": offer_id, "label": variant.size_label,
-                    "eu": variant.size_eu, "uk": variant.size_uk,
-                    "cm": variant.size_cm,
+                    # An apparel offer has no shoe size, whatever the number
+                    # looks like. The adapter cannot know -- it sees "38" and
+                    # a bound that 38 passes -- so the claim is dropped here,
+                    # where the facet is known. Without this the 176 rows
+                    # V18 repaired would come straight back on the next run.
+                    "eu": None if apparel else variant.size_eu,
+                    "uk": None if apparel else variant.size_uk,
+                    "cm": None if apparel else variant.size_cm,
+                    "system": size.system, "alpha": size.alpha,
+                    "height": size.height_cm or variant.size_height_cm,
+                    "age_lo": size.age_min_months,
+                    "age_hi": size.age_max_months,
                     "vid": variant.merchant_variant_id,
                     "price": variant.price_minor,
                     "list": variant.list_price_minor,

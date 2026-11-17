@@ -299,7 +299,8 @@ class FacetReport:
 
 def walk_facets(conn, fetcher, merchant_slug: str, adapter: str,
                 base_url: str, *, max_requests: int = 400,
-                limit: int | None = None) -> FacetReport:
+                limit: int | None = None,
+                vertical: str = "footwear") -> FacetReport:
     """Record which department each offer was found in, without fetching it.
 
     This is the cheap half of the whole exercise. The facet is carried by the
@@ -313,12 +314,13 @@ def walk_facets(conn, fetcher, merchant_slug: str, adapter: str,
     Nothing here writes a product. It writes what the shop said, next to the
     offer that said it, and leaves the conclusions to :func:`rederive`.
     """
-    from .discover import FACET_PLANS, as_facets, discover
+    from .discover import as_facets, discover, facet_plan
 
     report = FacetReport(merchant_slug=merchant_slug, notes=[])
-    plan = FACET_PLANS.get(merchant_slug)
+    plan = facet_plan(merchant_slug, vertical)
     if plan is None:
-        report.notes.append(f"no facet plan for {merchant_slug!r}")
+        report.notes.append(
+            f"no {vertical} facet plan for {merchant_slug!r}")
         return report
     report.facets = len(as_facets(plan.categories))
 

@@ -32,7 +32,7 @@ from .fetch.http import FetchResult, fetch_patiently
 from .fetch.queue import FetchJob
 from .fetch.ratelimit import BreakerWait, Priority
 from .fetch.scheduler import mark_checked, record_observation
-from .load import ingest
+from .load import ingest, run_kind_for
 from .models import RawOffer
 
 #: A probe whose price moves further than this is treated as suspect rather
@@ -262,7 +262,10 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
     # the old behaviour of abandoning a job the moment its circuit is open.
     waiter = BreakerWait() if breaker_wait is None else breaker_wait
 
-    catalog: dict[str, list[RawOffer]] = defaultdict(list)
+    # Keyed by (merchant, run kind): a drain holding both verticals becomes
+    # two runs for that shop, each judged against its own baseline, rather
+    # than one run filed under whichever vertical was bigger.
+    catalog: dict[tuple[str, str], list[RawOffer]] = defaultdict(list)
     requests: dict[str, int] = defaultdict(int)
     errors: dict[str, int] = defaultdict(int)
     unanswered: list[int] = []
@@ -364,7 +367,11 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
             apply_probe(conn, offers[0], job, report)
             conn.commit()
         else:
-            catalog[job.merchant_slug].extend(offers)
+            # The kind comes from each offer's own facet hint, so a queue
+            # carrying both verticals files each product under the right run.
+            for parsed in offers:
+                catalog[(job.merchant_slug,
+                         run_kind_for(parsed))].append(parsed)
 
     # Failed and skipped probes still move last_checked_at forward, so one
     # unreachable merchant cannot monopolise the queue -- but their stored
@@ -377,10 +384,11 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
         mark_checked(conn, unanswered)
         conn.commit()
 
-    for slug, offers in catalog.items():
-        outcome = ingest_fn(conn, slug, offers, kind="catalog_parse",
-                         requests=requests[slug], http_errors=errors[slug],
-                         full_sweep=full_sweep)
+    for (slug, kind), offers in catalog.items():
+        outcome = ingest_fn(conn, slug, offers, kind=kind,
+                            requests=requests[slug],
+                            http_errors=errors[slug],
+                            full_sweep=full_sweep)
         report.ingests.append(outcome)
 
     report.duration_s = time.monotonic() - started

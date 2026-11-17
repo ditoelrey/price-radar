@@ -136,7 +136,9 @@ class TestFourCanonicalBuckets:
         the bucket gone, a bare model name earns nothing.
         """
         assert classify("Adidas Supernova Runner") is None
-        assert classify("Nike Air Zoom Runner Jacket") == "apparel"
+        # Reads as a jacket since V18 gave apparel its own leaves; before
+        # that the whole vertical was one `apparel` bucket.
+        assert classify("Nike Air Zoom Runner Jacket") == "jackets"
 
     def test_cleats_beat_the_generic_sneaker_word(self):
         """Rule order, same lesson as the socks.
@@ -179,9 +181,20 @@ class TestFourCanonicalBuckets:
             assert gone not in KNOWN_SLUGS
 
     def test_known_slugs_are_exactly_the_seeded_ones(self):
+        """Every slug this module may return, matching V4 + V10 + V17 + V18.
+
+        The apparel leaves joined in V18. No title rule returns one yet --
+        apparel classification is its own piece of work -- but they are
+        declared so the size parser can ask whether an offer came from an
+        apparel facet, which is the only thing that tells a dress size 38
+        from a shoe size 38.
+        """
         assert KNOWN_SLUGS == {
             "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
-            "apparel", "leggings", "accessories", "socks", "equipment",
+            "accessories", "socks", "equipment",
+            "apparel", "tshirts", "hoodies", "jackets", "trousers",
+            "tracksuits", "shorts", "leggings", "sports_bras", "underwear",
+            "dresses_skirts", "swimwear",
         }
 
 
@@ -241,7 +254,7 @@ class TestModelLines:
         ("Adidas PREDATOR голмански ракавици", "accessories"),
         ("Adidas PREDATOR GLOVES", "accessories"),
         ("Штитник PREDATOR SG", "accessories"),
-        ("Adidas TERREX јакна за планинарење", "apparel"),
+        ("Adidas TERREX јакна за планинарење", "jackets"),
         ("Adidas F50 Топка", "equipment"),
     ])
     def test_a_model_line_never_outranks_a_non_footwear_word(self, title,
@@ -258,6 +271,116 @@ class TestModelLines:
         """
         assert classify("Adidas Adilette Comfort") is None
         assert classify("JQ1234 Папучи ADILETTE - Megasport") ==             "slides_sandals"
+
+
+class TestApparelFromTitles:
+    """The eleven V18 leaves, read from a product name.
+
+    The facet decides first -- `derive_category` takes the shop's own
+    department over any keyword -- so these rules matter for the products no
+    apparel facet reached. On the aspnet shops that is a large group: their
+    navigation links only 12 of the 26 subgroups the facet sidebar counts,
+    so Градник, Пододело and Дресови have no facet to be found through and
+    arrive as clothing of unspecified kind.
+    """
+
+    @pytest.mark.parametrize("title,expected", [
+        ("Nike Маица Sportswear Club", "tshirts"),
+        ("Adidas Мајица со долги ракави", "tshirts"),
+        ("Nike Дрес Dri-FIT Academy", "tshirts"),
+        ("Bratot Кошула Overshirt", "tshirts"),
+        ("Puma Дуксер Essentials Logo", "hoodies"),
+        ("Adidas Блузони Tiro 24", "hoodies"),
+        ("4F Полари", "hoodies"),
+        ("Nike Јакна Windrunner", "jackets"),
+        ("Adidas Елек Terrex", "jackets"),
+        ("Софтшел Regatta", "jackets"),
+        ("Шушкавци Adidas Tiro", "jackets"),
+        ("Nike Панталони Club Fleece", "trousers"),
+        ("Adidas Долен дел тренерки Tiro", "trousers"),
+        ("4F Ски панталони", "trousers"),
+        ("Levi Фармерки 501", "trousers"),
+        ("Adidas Тренерка Tiro 24", "tracksuits"),
+        ("Nike Летни комплети за деца", "tracksuits"),
+        ("Nike Шорцеви Dri-FIT", "shorts"),
+        ("Хеланки Nike One", "leggings"),
+        ("Puma Бициклистички", "leggings"),
+        ("Nike Pro Градник", "sports_bras"),
+        ("Adidas Боди", "sports_bras"),
+        ("Nike Фустан Sportswear", "dresses_skirts"),
+        ("Adidas Сукња Tennis", "dresses_skirts"),
+        ("Puma Здолништа", "dresses_skirts"),
+        ("Craft Пододело", "underwear"),
+        ("Nike Долна облека", "underwear"),
+    ])
+    def test_reads_the_leaf(self, title, expected):
+        assert classify(title) == expected
+
+    @pytest.mark.parametrize("title,expected", [
+        # The narrower phrase has to be tried first in each of these pairs,
+        # because one word contains the other.
+        ("Шорцеви за пливање Speedo", "swimwear"),
+        ("Nike Шорцеви Dri-FIT", "shorts"),
+        ("Костим за капење Arena", "swimwear"),
+        ("Adidas Долен дел тренерки", "trousers"),
+        ("Adidas Тренерка Tiro", "tracksuits"),
+        ("4F Ски панталони", "trousers"),
+    ])
+    def test_the_narrower_phrase_wins(self, title, expected):
+        assert classify(title) == expected
+
+    def test_clothing_of_unspecified_kind_is_a_real_answer(self):
+        """The parent, exactly as `footwear` is for shoes."""
+        assert classify("Nike Активна облека") == "apparel"
+
+    def test_a_silent_title_still_says_nothing(self):
+        assert classify("Nike NSW Club 24") is None
+
+
+class TestApparelWordsThatAreAlsoShoes:
+    """Found by running the rules over all 13,044 live titles.
+
+    The apparel block runs before the footwear rules, so an English word
+    that is also a shoe model name files trainers as clothing. Three did,
+    and each is now absent from the rules -- the shops write these
+    categories in Macedonian anyway, so nothing was lost.
+    """
+
+    @pytest.mark.parametrize("title", [
+        "Skechers ILLUMI-BRIGHTS - POLAR STEPPE",   # was hoodies, via polar
+        "Skechers Upper Neo Jogger",                # was trousers, via jogger
+    ])
+    def test_a_shoe_is_not_clothing(self, title):
+        assert classify(title) is None
+
+    def test_a_boot_called_short_is_still_a_boot(self):
+        """UGG's "Чизми CLASSIC SHORT II" read as shorts, beating its own
+        Чизми, because the apparel block runs first."""
+        assert classify("UGG Чизми CLASSIC SHORT II") == "shoes_boots"
+
+    def test_the_macedonian_categories_still_work(self):
+        """The fix was to drop the English singulars, not the categories."""
+        assert classify("4F Полари") == "hoodies"
+        assert classify("Nike Шорцеви") == "shorts"
+
+    def test_a_low_top_trainer_is_not_a_sports_bra(self):
+        """"Топ" transliterates to "top", and this block runs before the
+        footwear rules -- so a bare "top" would file every low-top trainer
+        as a crop top. The shops' own `top` facet still reaches the
+        category; only the title rule declines to."""
+        assert classify("Nike Court Borough Low Top") is None
+        assert classify("NIKE COURT VISION LOW TOP") is None
+        assert classify("Nike Dri-FIT Crop Top") == "sports_bras"
+
+    def test_a_parka_is_not_a_football_boot(self):
+        """A real row: product 2009 was filed as `cleats`.
+
+        "NIKE W NSW TF RPL REVIVAL PARKA" -- the TF is Nike's Therma-FIT,
+        and the cleats rule reads TF as turf studs. Its own URL says
+        PodGrupa=492, sizeer's jackets. With apparel read before footwear
+        the title now lands correctly, and re-deriving fixes the row.
+        """
+        assert classify("NIKE W NSW TF RPL REVIVAL PARKA") == "jackets"
 
 
 class TestGenderFromTitle:

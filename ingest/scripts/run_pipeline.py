@@ -73,6 +73,13 @@ def active_merchants(conn, only: list[str] | None):
 
 
 def cmd_discover(args) -> int:
+    """Sweep one vertical of each merchant: find products, then fetch them.
+
+    `--vertical apparel` walks the apparel facet plans instead of the
+    footwear ones, and because those facets carry a category and a gender,
+    apparel products arrive already labelled -- footwear needed a second
+    pass over finer facets to get the same thing.
+    """
     fetcher = build_fetcher(args.rps)
     queue = MemoryFetchQueue()
     with psycopg.connect(DSN) as conn:
@@ -83,7 +90,8 @@ def cmd_discover(args) -> int:
                 conn, args.merchant):
             report = discover(fetcher, slug, adapter, base_url,
                               limit=args.limit,
-                              max_requests=args.max_requests)
+                              max_requests=args.max_requests,
+                              vertical=args.vertical)
             jobs = product_jobs(report, priority=Priority.COLD)
             queued = sum(1 for j in jobs if queue.push(j))
             total_found += report.count
@@ -123,7 +131,8 @@ def cmd_facets(args) -> int:
                 conn, args.merchant):
             report = walk_facets(conn, fetcher, slug, adapter, base_url,
                                  max_requests=args.max_requests,
-                                 limit=args.limit)
+                                 limit=args.limit,
+                                 vertical=args.vertical)
             print(f"  {report.summary()}")
             for note in report.notes:
                 print(f"      {note[:88]}")
@@ -226,6 +235,12 @@ def main() -> int:
         p.add_argument("--idle-sleep", type=float, default=5.0)
         p.add_argument("--dry-run", action="store_true",
                        help="derive: compute and report, write nothing")
+        p.add_argument("--vertical", default="footwear",
+                       choices=("footwear", "apparel"),
+                       help="discover/facets: which vertical to walk. An "
+                            "apparel sweep opens its run as apparel_parse, "
+                            "so its gate and baseline stay separate from "
+                            "footwear's")
 
     args = ap.parse_args()
     return args.fn(args)

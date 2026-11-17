@@ -290,7 +290,7 @@ class TestDriverRobustness:
         fetcher = make_fetcher({})
         report = discover(fetcher, "x", "no_such_adapter", "https://x.mk")
         assert report.count == 0
-        assert any("no discovery plan" in n for n in report.notes)
+        assert any("discovery plan" in n for n in report.notes), report.notes
 
     def test_errors_are_counted_not_fatal(self):
         fetcher = make_fetcher({"/media/sitemap/dsport.xml": (500, XML, b"")})

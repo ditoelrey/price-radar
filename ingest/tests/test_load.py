@@ -525,3 +525,112 @@ class TestCategoryHint:
             cur.execute("SELECT category_hint FROM stage_offer WHERE ingest_run_id = %s",
                         (outcome.run_id,))
             assert cur.fetchone()[0] == "footwear"
+
+
+def apparel_offer(sku, title, sizes, *, hint, gender, merchant="sportvision"):
+    """An offer whose variants carry only a label, as apparel ones do.
+
+    The footwear `offer()` helper sets size_eu from the label, which is right
+    for shoes and impossible for "S" or "7-8г." -- the distinction this whole
+    class is about.
+    """
+    o = RawOffer(
+        merchant_slug=merchant, merchant_sku=sku, raw_mpn=sku,
+        raw_title=title, raw_brand="Nike",
+        product_url=f"https://www.{merchant}.mk/mk/tekstil/{sku}",
+        currency_code="MKD",
+        variants=[RawVariant(size_label=s, price_minor=1999,
+                             currency_code="MKD", in_stock=True,
+                             merchant_variant_id=f"{sku}-{s}")
+                  for s in sizes],
+        extractors={"mpn": "jsonld", "price": "jsonld", "sizes": "css"})
+    o.category_hint = hint
+    o.gender_hint = gender
+    return o
+
+
+class TestApparelSizesReachTheDatabase:
+    """V18's size columns, filled from the facet the offer was found in.
+
+    The parser is unit-tested in test_sizing.py; what matters here is that
+    the context reaches it. `category_hint` and `gender_hint` travel from
+    discovery through staging to promotion, and they are the only thing that
+    can tell a dress size 38 from a shoe size 38 -- so a break anywhere along
+    that path turns apparel sizes back into the silent mess V18 cleared up.
+    """
+
+    def _sizes(self, conn, merchant="sportvision"):
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT ov.size_label, ov.size_system::text, ov.size_alpha,
+                       ov.size_height_cm, ov.size_age_min_months,
+                       ov.size_age_max_months, ov.size_eu
+                  FROM offer_variant ov
+                  JOIN merchant_offer mo ON mo.id = ov.offer_id
+                  JOIN merchant m ON m.id = mo.merchant_id
+                 WHERE m.slug = %s
+                 ORDER BY ov.size_label""", (merchant,))
+            return cur.fetchall()
+
+    def test_adult_letter_sizes_are_normalised(self, clean_db):
+        from mkagg.load import ingest
+        conn = clean_db
+
+        offer_in = apparel_offer("APP-1", "Nike Дуксер Club", ("S", "2XL"),
+                                 hint="hoodies", gender="men")
+        outcome = ingest(conn, "sportvision", [offer_in], requests=1)
+        assert outcome.decision is Decision.OK, outcome
+
+        rows = self._sizes(conn)
+        assert ("2XL", "alpha", "XXL", None, None, None, None) in rows
+        assert ("S", "alpha", "S", None, None, None, None) in rows
+
+    def test_kids_age_labels_become_months(self, clean_db):
+        from mkagg.load import ingest
+        conn = clean_db
+
+        offer_in = apparel_offer("APP-2", "Nike Дуксер B NSW",
+                                 ("7-8г.", "14-15г."),
+                                 hint="hoodies", gender="kids")
+        outcome = ingest(conn, "sportvision", [offer_in], requests=1)
+        assert outcome.decision is Decision.OK, outcome
+
+        rows = dict((r[0], r[1:]) for r in self._sizes(conn))
+        assert rows["7-8г."][:1] == ("age",)
+        assert rows["7-8г."][3:5] == (84, 96)
+        assert rows["14-15г."][3:5] == (168, 180)
+
+    def test_a_clothing_number_never_becomes_a_shoe_size(self, clean_db):
+        """The defect V18 repaired, prevented at the point of writing.
+
+        '38' on a jumper is a clothing size. Before the facet context
+        reached this code it was stored as size_eu = 38 and a shopper
+        filtering footwear by EU 38 got jumpers.
+        """
+        from mkagg.load import ingest
+        conn = clean_db
+
+        offer_in = apparel_offer("APP-3", "Nike Маица", ("38", "40"),
+                                 hint="tshirts", gender="women")
+        outcome = ingest(conn, "sportvision", [offer_in], requests=1)
+        assert outcome.decision is Decision.OK, outcome
+
+        for label, system, _alpha, _h, _lo, _hi, size_eu in self._sizes(conn):
+            assert system == "numeric", label
+            assert size_eu is None, label
+
+    def test_the_same_number_on_footwear_is_still_a_shoe_size(self, clean_db):
+        """The other half of the rule, so the fix cannot be a blanket null."""
+        from mkagg.load import ingest
+        conn = clean_db
+
+        offer_in = offer(sku="SHOE-1", title="Nike Патики Pegasus",
+                         sizes=("38", "40"))
+        offer_in.category_hint = "sneakers"
+        offer_in.gender_hint = "women"
+        outcome = ingest(conn, "sportvision", [offer_in], requests=1)
+        assert outcome.decision is Decision.OK, outcome
+
+        rows = self._sizes(conn)
+        assert all(r[1] == "eu_shoe" for r in rows), rows
+        assert all(r[6] is not None for r in rows), rows

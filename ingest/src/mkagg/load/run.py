@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..models import RawOffer
+from ..taxonomy import APPAREL_SLUGS
 from .promote import PromotionReport, promote_run
 from .staging import (StagedRun, clear_stage, merchant_id_for, open_run,
                       record_decision, stage_offers)
@@ -61,8 +62,35 @@ class IngestOutcome:
         return "  ".join(bits)
 
 
+#: Run kinds, and the reason there is more than one.
+#:
+#: `ingest_run_baseline` is keyed on (merchant_id, kind), and every gate
+#: check that compares a run to "normal" reads it: the offer-count band, the
+#: fill-rate medians, and the delisting a full sweep would do. One kind for
+#: both verticals would have judged sportvision's first apparel run -- some
+#: 6,500 offers -- against its footwear median of roughly 3,800, which is far
+#: outside the plus-or-minus 20 percent band and enforced, not provisional,
+#: on a shop with that many promoted runs. Guaranteed rejection, and once
+#: promoted the median would have become a blend that means nothing for
+#: either vertical.
+CATALOG_KIND = "catalog_parse"
+APPAREL_KIND = "apparel_parse"
+
+
+def run_kind_for(offer: RawOffer) -> str:
+    """Which run an offer belongs to, from the facet it was found in.
+
+    Taken from the offer rather than passed down from the command, so a
+    drain holding both verticals splits into two runs instead of filing one
+    under the other's name. A product with no hint -- dsport's sitemap, a
+    stock probe -- stays with the catalogue default.
+    """
+    return (APPAREL_KIND if offer.category_hint in APPAREL_SLUGS
+            else CATALOG_KIND)
+
+
 def ingest(conn, merchant_slug: str, offers: list[RawOffer], *,
-           kind: str = "catalog_parse",
+           kind: str = CATALOG_KIND,
            requests: int = 0, http_errors: int = 0,
            snapshot_keys: dict[str, str] | None = None,
            thresholds: Thresholds | None = None,

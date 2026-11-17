@@ -42,14 +42,59 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # --- not footwear, but sold alongside it and easily mistaken for it ----
     ("socks", ("chorapi", "corapi", "sok 3p", "crew sock", "ankle sock",
                "quarter sock", "no show sock", "socks", "sock 3p")),
-    ("leggings", ("helanki", "helanka", "legging", "tajice")),
-    # Singular AND plural: megasport writes "Долна тренерка" (singular) while
-    # other titles use "Тренерки", and a plural-only list missed the first,
-    # leaving "Dolna Trenerka" inside a product name.
-    ("apparel", ("trenerki", "trenerka", "majica", "maica", "duks", "hoodie",
-                 "jakna", "jakni", "jacket", "pantaloni", "shorc", "shorcevi",
-                 "shorts", "dukser", "t shirt", "tshirt", "polo", "fanela",
-                 "vesta", "ski helanki", "komplet")),
+    # --- apparel, the eleven leaves V18 seeded ----------------------------
+    # Order inside this block is doing real work, because several of these
+    # words contain each other. "Шорцеви за пливање" is swimwear and not
+    # shorts; "Долен дел тренерки" is trousers and not a tracksuit; "Ски
+    # панталони" is trousers. The narrower phrase has to be tried first, the
+    # same rule the socks entry above follows for the same reason.
+    ("swimwear", ("kostim za kapenje", "kostimi za kapenje",
+                  "shorcevi za plivanje", "shorc za plivanje", "kupakji",
+                  "bikini", "swimsuit", "swim short", "swim trunk")),
+    # Tracksuit *bottoms* before tracksuits, and jeans and ski pants with
+    # them: all four are the thing you put your legs in.
+    ("trousers", ("dolen del trenerki", "dolni delovi trenerki",
+                  "dolna trenerka", "pantaloni", "farmerki", "ski pantaloni",
+                  # "jogger" is absent: Skechers sells a shoe called the
+                  # "Upper Neo Jogger", and these shops name the category
+                  # in Macedonian anyway.
+                  "trousers", "jeans", "sweatpant")),
+    # Singular AND plural: megasport writes "Долна тренерка" (singular)
+    # while other titles use "Тренерки", and a plural-only list missed the
+    # first, leaving "Dolna Trenerka" inside a product name.
+    ("tracksuits", ("trenerka", "trenerki", "komplet", "kompleti",
+                    "tracksuit", "jumpsuit", "kombinezon")),
+    ("leggings", ("helanki", "helanka", "legging", "tajice",
+                  "biciklistichki", "biciklisticke", "ski helanki")),
+    # "Топ" is deliberately absent. It transliterates to "top", and
+    # "COURT BOROUGH LOW TOP" is a shoe -- this block runs before the
+    # footwear rules, so a bare "top" here would file trainers as sports
+    # bras. The shops' own `top` facet still reaches this category.
+    ("sports_bras", ("gradnik", "gradnici", "sportski gradnik", "bodi",
+                     "crop top", "sports bra", "bralette")),
+    ("dresses_skirts", ("fustan", "fustani", "suknja", "suknji",
+                        "zdolnishte", "zdolnishta", "dress", "skirt")),
+    ("underwear", ("pododelo", "dolna obleka", "bokserici", "bokserki",
+                   "gakji", "underwear", "brief")),
+    # "polar" singular is absent, for the same reason: Skechers'
+    # "ILLUMI-BRIGHTS - POLAR STEPPE" is a shoe. The shops write the
+    # category as "Полари".
+    ("hoodies", ("dukser", "dukseri", "duks", "hoodie", "bluzon", "bluzoni",
+                 "polari", "djemper", "djemperi", "sweatshirt", "fleece")),
+    ("jackets", ("jakna", "jakni", "jacket", "elek", "eleci", "prsluk",
+                 "vetrovka", "vetrovki", "softshel", "softshell",
+                 "shushkavec", "shushkavci", "teksas jakni", "vest",
+                 "windbreaker", "parka", "anorak")),
+    # Plural only. "short" singular matched UGG's "Чизми CLASSIC SHORT II",
+    # a boot -- and this block runs before the footwear rules, so it won.
+    ("shorts", ("shorc", "shorcevi", "shorts")),
+    ("tshirts", ("maica", "maici", "majica", "maici so dolgi rakavi",
+                 "dres", "dresovi", "koshula", "koshuli", "polo", "fanela",
+                 "t shirt", "tshirt", "tee", "jersey", "shirt")),
+    # Clothing whose kind the title does not narrow. Last of the apparel
+    # rules, and still a real answer: the parent category means "clothing,
+    # kind unspecified", exactly as `footwear` does for shoes.
+    ("apparel", ("obleka", "aktivna obleka", "vesta", "apparel")),
     # "Штитник" (shin guard) earns its place by having been misread: the
     # title "Штитник TIRO SG EU CLB" fell through to the footwear rules and
     # the SG there -- soft-ground studs on a football boot -- made a shin
@@ -127,12 +172,24 @@ _GENDER_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("men", ("za mazhi", "mazhi", "mashki", "mashka", "men", "mens")),
 ]
 
-#: Category slugs this module can return. Kept in step with V4 + V10 + V17 so
-#: a typo here fails a test rather than silently nulling a category.
+#: The eleven canonical apparel leaves seeded by V18, plus the parent.
+#:
+#: No title rule returns any of these yet -- apparel classification is its
+#: own piece of work. They are declared here because the size parser needs to
+#: know whether an offer came from an apparel facet: "38" is a dress size on
+#: one and a shoe size on the other, and only this tells them apart.
+APPAREL_SLUGS = frozenset({
+    "apparel", "tshirts", "hoodies", "jackets", "trousers", "tracksuits",
+    "shorts", "leggings", "sports_bras", "underwear", "dresses_skirts",
+    "swimwear",
+})
+
+#: Category slugs this module can return. Kept in step with V4 + V10 + V17 +
+#: V18 so a typo here fails a test rather than silently nulling a category.
 KNOWN_SLUGS = frozenset({
     "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
-    "apparel", "leggings", "accessories", "socks", "equipment",
-})
+    "accessories", "socks", "equipment",
+}) | APPAREL_SLUGS
 
 #: Which of those are footwear, i.e. the MVP's storefront. ``footwear`` itself
 #: is in here: it is the parent row, and means "a shoe, kind unspecified".

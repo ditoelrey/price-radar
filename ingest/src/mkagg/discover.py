@@ -520,6 +520,271 @@ for _plan in FACET_PLANS.values():
         if _facet.label and _facet.category:
             FACET_CATEGORY[_facet.label] = _facet.category
 
+# -----------------------------------------------------------------------------
+# Apparel facets (V18)
+# -----------------------------------------------------------------------------
+#: The same idea as FACET_PLANS, over the clothing trees. 17,035 listings
+#: across the six shops -- more than the whole footwear catalogue -- counted
+#: during recon and checked against a manual audit that matched to the
+#: product on five of the six.
+#:
+#: Three things shape these lists, each found rather than assumed.
+#:
+#: **Only canonical slugs on the Sport Vision shops.** They run legacy and
+#: current categories side by side: `dolen-del-trenerki` and
+#: `dolni-delovi-trenerki-` return the identical 307 products for men, and
+#: `jakni-i-eleci` (362) is `jakna` (290) plus `elek` (51). Walking both
+#: spellings would fetch every page twice for nothing -- so only the
+#: consolidated ones are here, and they happen to be merged exactly the way
+#: V18's eleven buckets are, because the shop reached the same conclusion.
+#:
+#: **A catch-all last, where the tree is clean.** Discovery keeps the first
+#: facet to claim a URL, so the specific facets come before the umbrella and
+#: the umbrella picks up only what none of them covered -- as the parent
+#: `apparel` category, meaning "clothing, kind unspecified".
+#:
+#: **No catch-all on megasport**, because its clothing tree is not clean:
+#: `kapi-obleka`, 60 caps, sits inside it. Enumerating the real children
+#: covers 640 of 671 men, 543 of 545 women and 212 of 228 kids, and keeps
+#: headwear out of the apparel vertical -- the same trap the footwear
+#: umbrella set, which is why those plans name their leaves too.
+
+#: Categories no men's department stocks. Checked rather than assumed: every
+#: one of these returned zero products for men on both shops, while
+#: returning plenty for women. It is the same restriction the storefront nav
+#: applies to `sports_bras` and `dresses_skirts`, arrived at from the shops'
+#: own shelves rather than from the menu design.
+_WOMEN_AND_KIDS = ("women", "kids")
+
+#: (slug, canonical category, departments that stock it).
+#:
+#: Two near-identical slugs are per shop rather than shared: sportvision
+#: writes `maica-dolgi-rakavi` and sportreality `maica-so-dolgi-rakavi`, and
+#: each 404s on the other's spelling. One list carrying both spent three
+#: requests per shop confirming a 404.
+_SV_APPAREL = (
+    ("maici", "tshirts", None),
+    ("polo-maica", "tshirts", None),
+    ("dres", "tshirts", None),
+    ("sorc-i-maica", "tshirts", None),        # shorts-and-tee sets
+    ("dukser", "hoodies", None),
+    ("jakni-i-eleci", "jackets", None),
+    ("dolni-delovi-trenerki-", "trousers", None),  # trailing dash is theirs
+    ("pantaloni", "trousers", None),
+    ("trenerka", "tracksuits", None),
+    ("kombinezon", "tracksuits", None),
+    ("sorcevi", "shorts", None),
+    ("helanki-i-biciklisticki", "leggings", None),
+    ("gradnik-i-top", "sports_bras", _WOMEN_AND_KIDS),
+    ("dolna-obleka-", "underwear", None),
+    ("fustani-i-suknji", "dresses_skirts", _WOMEN_AND_KIDS),
+    ("dolg-fustan", "dresses_skirts", _WOMEN_AND_KIDS),
+    ("kostimi-za-kapenje", "swimwear", None),
+    # Clothing whose kind the shop does not narrow, then the umbrella.
+    ("aktivna-obleka", "apparel", None),
+    ("tekstil", "apparel", None),
+)
+
+#: The long-sleeve tee, spelled each shop's own way.
+_SV_LONG_SLEEVE = {
+    "sportvision": ("maica-dolgi-rakavi", "tshirts", None),
+    "sportreality": ("maica-so-dolgi-rakavi", "tshirts", None),
+}
+
+#: buzz names its own, and during recon its leaves summed to its umbrella
+#: exactly -- 833, 936, 351 -- so its tree is disjoint and complete.
+_BUZZ_APPAREL = (
+    ("maica", "tshirts", None),
+    ("maica-bez-rakavi", "tshirts", None),
+    ("majica-dolgi-rakavi", "tshirts", None),
+    ("polo-maica", "tshirts", None),
+    ("kosula", "tshirts", None),
+    ("dres", "tshirts", None),
+    ("sorcevi-i-maica", "tshirts", None),
+    ("dukser", "hoodies", None),
+    ("dzemper", "hoodies", None),
+    ("vetrovki-i-jakni", "jackets", None),
+    ("elek", "jackets", None),
+    ("dolen-del-trenerki", "trousers", None),
+    ("pantaloni", "trousers", None),
+    ("trenerka", "tracksuits", None),
+    ("set", "tracksuits", None),
+    ("sorc", "shorts", None),
+    ("helanki", "leggings", None),
+    ("helanki-7-8", "leggings", None),
+    ("biciklisticke", "leggings", None),
+    ("gradnik", "sports_bras", _WOMEN_AND_KIDS),
+    ("top", "sports_bras", _WOMEN_AND_KIDS),
+    ("bodi", "sports_bras", _WOMEN_AND_KIDS),
+    ("bokserici", "underwear", None),
+    ("dolna-obleka", "underwear", None),
+    ("fustan", "dresses_skirts", _WOMEN_AND_KIDS),
+    ("suknja", "dresses_skirts", _WOMEN_AND_KIDS),
+    ("kostimi-za-kapenje", "swimwear", None),
+    ("tekstil", "apparel", None),
+)
+
+#: megasport, whose slugs differ per gender for the same thing -- `konduri`
+#: for men against `konduri-obuvki-zheni` for women was the footwear version
+#: of the same habit -- so they are listed rather than generated.
+_MEGA_APPAREL = (
+    ("/kategorija/mazhi/obleka-mazhi/maici/", "tshirts", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/bluza/", "tshirts", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/polo-bluza/", "tshirts", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/dukseri-obleka-mazhi/", "hoodies", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/jakni-obleka-mazhi/", "jackets", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/dolna-trenerka/", "trousers", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/pantaloni/", "trousers", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/ski-pantaloni-obleka-mazhi/",
+     "trousers", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/komplet-trenerki-obleka-mazhi/",
+     "tracksuits", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/shorcevi/", "shorts", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/helanki-obleka-mazhi/",
+     "leggings", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/pododelo-obleka-mazhi/",
+     "underwear", "men"),
+    ("/kategorija/mazhi/obleka-mazhi/kupaki/", "swimwear", "men"),
+    ("/kategorija/zheni/obleka/maici-obleka/", "tshirts", "women"),
+    ("/kategorija/zheni/obleka/dukseri/", "hoodies", "women"),
+    ("/kategorija/zheni/obleka/jakni/", "jackets", "women"),
+    ("/kategorija/zheni/obleka/dolna-trenerka-obleka/", "trousers", "women"),
+    ("/kategorija/zheni/obleka/ski-pantaloni-obleka/", "trousers", "women"),
+    ("/kategorija/zheni/obleka/komplet-trenerki/", "tracksuits", "women"),
+    ("/kategorija/zheni/obleka/shorcevi-obleka/", "shorts", "women"),
+    ("/kategorija/zheni/obleka/helanki/", "leggings", "women"),
+    ("/kategorija/zheni/obleka/sportski-gradnik/", "sports_bras", "women"),
+    ("/kategorija/zheni/obleka/pododelo-obleka/", "underwear", "women"),
+    ("/kategorija/zheni/obleka/kostimi-za-kapene/", "swimwear", "women"),
+    ("/kategorija/deca/obleka-deca/maici-deca/", "tshirts", "kids"),
+    ("/kategorija/deca/obleka-deca/jakni-obleka-deca/", "jackets", "kids"),
+    ("/kategorija/deca/obleka-deca/ski-pantaloni/", "trousers", "kids"),
+    ("/kategorija/deca/obleka-deca/komplet-trenerki-obleka-deca/",
+     "tracksuits", "kids"),
+    ("/kategorija/deca/obleka-deca/kompleti-detski/", "tracksuits", "kids"),
+    ("/kategorija/deca/obleka-deca/socevi/", "shorts", "kids"),
+    ("/kategorija/deca/obleka-deca/helanki-obleka-deca/", "leggings", "kids"),
+    ("/kategorija/deca/obleka-deca/pododelo/", "underwear", "kids"),
+)
+
+#: aspnet `PodGrupa` codes for clothing, read from the shops' own navigation
+#: and shared between the two installations exactly as the footwear codes
+#: are.
+#:
+#: The nav links only 12 of the 26 subgroups the facet sidebar counts --
+#: Градник, Пододело, Дресови and others are counted but never linked, so
+#: there is no code to address them by. Hence the catch-all: everything the
+#: specific facets miss lands as clothing of unspecified kind, which is true
+#: and improvable, rather than missing.
+_PODGRUPA_APPAREL = {
+    "496": ("tshirts", "Маици"),
+    "495": ("tshirts", "Маица со долги ракави"),
+    "540": ("tshirts", "Кошули"),
+    "797": ("tshirts", "Македонски дрес"),
+    "486": ("hoodies", "Блузони"),
+    "796": ("hoodies", "Џемпери"),
+    "614": ("hoodies", "Полари"),
+    "492": ("jackets", "Јакни"),
+    "794": ("jackets", "Тексас јакни"),
+    "616": ("jackets", "Софтшел"),
+    "597": ("jackets", "Елек"),
+    # "Шушкавец" is the rustly shell garment. On these shops it sits beside
+    # Јакни rather than beside Панталони, so it is filed with jackets; a
+    # title rule can disagree later with better evidence.
+    "521": ("jackets", "Шушкавци"),
+    "499": ("trousers", "Панталони"),
+    "787": ("trousers", "Фармерки"),
+    "513": ("tracksuits", "Тренерки"),
+    "584": ("tracksuits", "Летни комплети"),
+    "520": ("shorts", "Шорцеви"),
+    "795": ("shorts", "Тексас шорцеви"),
+    "517": ("leggings", "Хеланки"),
+    "516": ("dresses_skirts", "Фустани"),
+    "510": ("dresses_skirts", "Здолништа"),
+    "441": ("swimwear", "Шорцеви за пливање"),
+    "588": ("swimwear", "Костим за капење"),
+}
+
+
+def _sv_apparel_facets(categories, genders, extra=None) -> tuple[Facet, ...]:
+    """Build the facets, skipping departments that do not stock a category.
+
+    `only` is not a guess about what a shop ought to sell: each restriction
+    below was measured, by fetching the facet and finding it empty for men
+    and full for women.
+    """
+    # The shop-specific entry goes first, never last: the umbrella closes
+    # the list, and discovery keeps the first facet to claim a URL, so an
+    # entry after it would never win anything.
+    entries = ([extra] if extra else []) + list(categories)
+    return tuple(
+        Facet(path=f"/mk/{cat}/{suffix}", category=canonical, gender=gender,
+              label=cat)
+        for cat, canonical, only in entries
+        for gender, suffix in genders
+        if only is None or gender in only)
+
+
+def _aspnet_apparel_facets(departments) -> tuple[Facet, ...]:
+    """Specific subgroups first, then each department as a catch-all."""
+    out = []
+    for segment, gender, codes in departments:
+        for code in codes:
+            canonical, label = _PODGRUPA_APPAREL[code]
+            out.append(Facet(
+                path=f"/ProductCatalog?Segment={segment}&Grupa=02"
+                     f"&PodGrupa={code}",
+                category=canonical, gender=gender, label=label))
+    for segment, gender, _codes in departments:
+        out.append(Facet(
+            path=f"/ProductCatalog?Segment={segment}&Grupa=02",
+            category="apparel", gender=gender, label="Текстил"))
+    return tuple(out)
+
+
+APPAREL_FACET_PLANS: dict[str, PaginatedPlan] = {
+    "sportvision": PaginatedPlan(
+        categories=_sv_apparel_facets(_SV_APPAREL, _SV_GENDERS,
+                                      _SV_LONG_SLEEVE["sportvision"])),
+    "sportreality": PaginatedPlan(
+        categories=_sv_apparel_facets(_SV_APPAREL, _SV_GENDERS,
+                                      _SV_LONG_SLEEVE["sportreality"])),
+    "buzz": PaginatedPlan(
+        categories=_sv_apparel_facets(_BUZZ_APPAREL, _BUZZ_GENDERS)),
+    "megasport": PaginatedPlan(
+        categories=tuple(Facet(path=p, category=c, gender=g,
+                               label=p.rstrip("/").rsplit("/", 1)[-1])
+                         for p, c, g in _MEGA_APPAREL),
+        page_suffix="page/{page}/"),
+    "sizeer": PaginatedPlan(categories=_aspnet_apparel_facets((
+        ("51", "men",   ("496", "495", "540", "486", "492", "794", "521",
+                         "499", "787", "520", "795", "441")),
+        ("52", "women", ("496", "495", "540", "486", "796", "492", "794",
+                         "521", "499", "787", "520", "795")),
+        ("53", "kids",  ("496", "495", "486", "492", "597", "521", "499",
+                         "787", "513", "584", "520", "517", "516", "510",
+                         "588")),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+    "sportm": PaginatedPlan(categories=_aspnet_apparel_facets((
+        ("03", "men",   ("496", "495", "540", "486", "492", "794", "616",
+                         "521", "499", "787", "513", "797")),
+        ("04", "women", ("496", "495", "486", "796", "492", "794", "616",
+                         "521", "499", "787", "513", "797")),
+        ("05", "kids",  ("496", "495", "486", "614", "492", "521", "499",
+                         "787", "513", "520", "517", "516")),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+}
+
+#: Apparel facet labels folded into the same mapping the footwear ones use,
+#: so `OfferEvidence.facet_category` keeps working without knowing which
+#: vertical a label came from. `setdefault`, because a label shared with
+#: footwear (there are none today) must not change meaning here.
+for _plan in APPAREL_FACET_PLANS.values():
+    for _facet in as_facets(_plan.categories):
+        if _facet.label and _facet.category:
+            FACET_CATEGORY.setdefault(_facet.label, _facet.category)
+
+
 #: Search-based sweep for the sampled platform, used when the facet taxonomy
 #: misses a brand. Verified term-sensitive: "zzzznonsense" returns 0 results
 #: while "adidas" returns matches.
@@ -562,11 +827,49 @@ def _listing_job(merchant_slug: str, url: str,
                     priority=priority)
 
 
+def sweep_plan(merchant_slug: str, adapter: str,
+               vertical: str = "footwear"
+               ) -> SitemapPlan | PaginatedPlan | SampledPlan | None:
+    """The plan a *sweep* walks: the one that decides what gets fetched.
+
+    Not the same thing as :func:`facet_plan`, and the difference is worth
+    keeping straight. A footwear sweep walks the coarse `Grupa=01`-style
+    branches, because its job is to find every product once; the fine
+    gender-by-category facets exist to *label* products the sweep already
+    brought in, and walking them for a sweep would fetch the same pages
+    several times over.
+
+    Apparel has no such split: its facet plans already cover the whole
+    vertical exactly once, so a sweep and a walk read the same list -- and
+    the sweep gets the category and gender hints for free, which is why
+    apparel products arrive labelled where footwear ones needed a second
+    pass.
+    """
+    if vertical == "apparel":
+        return APPAREL_FACET_PLANS.get(merchant_slug)
+    if vertical != "footwear":
+        return None
+    # The shop's own plan first: on a white-label platform the adapter says
+    # how to read a page, not what this installation calls its departments.
+    return MERCHANT_PLANS.get(merchant_slug) or DISCOVERY_PLANS.get(adapter)
+
+
+def facet_plan(merchant_slug: str,
+               vertical: str = "footwear") -> PaginatedPlan | None:
+    """The plan a *labelling walk* reads. See :func:`sweep_plan`."""
+    if vertical == "apparel":
+        return APPAREL_FACET_PLANS.get(merchant_slug)
+    if vertical != "footwear":
+        return None
+    return FACET_PLANS.get(merchant_slug)
+
+
 def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
              priority: Priority = Priority.COLD,
              max_requests: int = 400,
              limit: int | None = None,
              plan: SitemapPlan | PaginatedPlan | SampledPlan | None = None,
+             vertical: str = "footwear",
              ) -> DiscoveryReport:
     """Enumerate product URLs for one merchant.
 
@@ -576,13 +879,12 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
     """
     report = DiscoveryReport(merchant_slug=merchant_slug, adapter=adapter)
     # An explicit plan wins -- that is how the facet walk reuses this driver
-    # without becoming a sweep. Otherwise the shop's own plan, because on a
-    # white-label platform the adapter says how to read a page, not what this
-    # installation calls its departments.
-    plan = (plan or MERCHANT_PLANS.get(merchant_slug)
-            or DISCOVERY_PLANS.get(adapter))
+    # without becoming a sweep. Otherwise the sweep plan for the vertical.
+    plan = plan or sweep_plan(merchant_slug, adapter, vertical)
     if plan is None:
-        report.notes.append(f"no discovery plan for adapter {adapter!r}")
+        report.notes.append(
+            f"no {vertical} discovery plan for {merchant_slug!r} "
+            f"(adapter {adapter!r})")
         return report
     report.strategy = plan.strategy
 
