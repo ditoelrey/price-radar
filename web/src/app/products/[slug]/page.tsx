@@ -349,7 +349,7 @@ export default async function ProductDetailPage({
 
         {product.updatedAt && (
           <p className="mt-3 text-center text-xs text-muted-foreground">
-            Catalogue entry last refreshed{" "}
+            Последна проверка кај продавниците:{" "}
             {new Date(product.updatedAt).toLocaleString("mk-MK")}
           </p>
         )}

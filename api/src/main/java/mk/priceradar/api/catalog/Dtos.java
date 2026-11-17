@@ -159,6 +159,15 @@ public final class Dtos {
             int offerCount,
             int merchantCount,
             List<Double> availableSizesEu,
+            /**
+             * When any shop was last asked about this product -- the newest
+             * {@code offer_variant.last_checked_at} among its active
+             * offers, not when we last recomputed its summary row.
+             *
+             * <p>The distinction is visible on the page: it previously
+             * showed today's date above a list of offers each labelled
+             * "checked 4 days ago".
+             */
             Instant updatedAt,
             /** Honest-UI copy: shown next to the prices, not buried. */
             String priceDisclaimer,

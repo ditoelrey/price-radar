@@ -129,10 +129,34 @@ def parse_sizes(payload, *, price_minor: int, currency: str = "MKD",
         if uk_label.isdigit() and 80 <= int(uk_label) <= 200:
             height = int(uk_label)
 
+        # What `Velicina` *means* depends on what else the row carries.
+        #
+        # With `EvropskaVelicina` present it is the UK size ("7.5" beside
+        # "41⅓"). With it absent -- which is how this shop serves a
+        # child's shoe -- the EU size is in `Velicina` and nowhere else:
+        #
+        #     {"Velicina": "34", "Zaliha": 2, "EvropskaVelicina": null}
+        #
+        # Reading that as UK threw the size away entirely, because UK 34 is
+        # not a shoe size and `normalize_size` bounds UK out of range. The
+        # offer kept its label and lost its EU size, so a shopper filtering
+        # for EU 34 was told the shop did not stock it -- 3,873 variants
+        # across 846 products, every one of them sport-m or sizeer.
+        #
+        # The bound settles it: UK sizes stop around 15 and EU starts at 16,
+        # so a `Velicina` that parses inside the EU range is an EU size.
+        primary_as_eu = normalize_size(uk_label) if uk_label else None
+
         variants.append(RawVariant(
             size_label=label,
-            size_eu=normalize_size(eu_label) if eu_label else None,
-            size_uk=normalize_size(uk_label) if uk_label else None,
+            size_eu=(normalize_size(eu_label) if eu_label
+                     else primary_as_eu),
+            # Always None, and deliberately. The only `Velicina` values that
+            # survive `normalize_size` are the ones in EU range -- that is,
+            # exactly the ones that are not UK sizes. A real UK size ("7.5")
+            # is refused by the bound, so this column could never hold one;
+            # filling it was how 3,211 rows came to claim a UK 34.
+            size_uk=None,
             size_cm=cm_val,
             size_height_cm=height,
             price_minor=price_minor,

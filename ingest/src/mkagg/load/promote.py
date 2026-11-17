@@ -521,15 +521,29 @@ def refresh_summary(conn, product_id: int) -> None:
         cur.execute(REFRESH_SUMMARY_SQL, {"pid": product_id})
 
 
+#: Mirrors load.run.APPAREL_KIND. Named locally because run.py imports this
+#: module, so importing the constant back would close the cycle; a test
+#: asserts the two never drift apart.
+APPAREL_RUN_KIND = "apparel_parse"
+
+
 def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                 create_missing_products: bool = True,
-                full_sweep: bool = False) -> PromotionReport:
+                full_sweep: bool = False,
+                kind: str = "catalog_parse") -> PromotionReport:
     """Move a validated run's staged rows into the live catalogue.
 
-    ``full_sweep`` must only be true when the run covered the merchant's
-    entire catalogue. It delists offers that were not seen, which would be
-    catastrophic after a partial run such as a single-category crawl or a
-    stock probe.
+    ``full_sweep`` must only be true when the run covered everything this
+    merchant sells *in this vertical*. It delists the offers that were not
+    seen, which would be catastrophic after a partial run such as a
+    single-category crawl or a stock probe.
+
+    ``kind`` is what makes that promise keepable now that a merchant can
+    have two verticals. Delisting used to be scoped to the merchant alone,
+    so a complete footwear sweep would have retired every apparel offer the
+    shop has -- a correct run quietly destroying a correct catalogue. The
+    offers considered are now only those whose own category sits in the
+    same vertical as the run.
     """
     report = PromotionReport()
     seen_skus: list[str] = []
@@ -627,14 +641,33 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                     report.price_points_written += 1
 
         if full_sweep and seen_skus:
+            # The run's own vertical, named explicitly. "Everything that is
+            # not apparel" was the first attempt and it was wrong: there are
+            # four kinds, and accessories and equipment belong to neither
+            # sweep. megasport carries 80 accessory and 13 equipment offers
+            # that its footwear facets never visit, so a footwear full sweep
+            # would have retired all 93 of them as "not seen" -- and nothing
+            # would ever have brought them back, because no sweep walks
+            # those trees.
+            #
+            # A product with no category is excluded by the inner join, and
+            # that is deliberate too: 203 products are unclassified, most of
+            # them shoes, and delisting on an absence of evidence is how a
+            # live offer disappears for a reason nobody can reconstruct.
+            vertical_kind = ("apparel" if kind == APPAREL_RUN_KIND
+                             else "footwear")
             cur.execute(
-                """UPDATE merchant_offer
+                """UPDATE merchant_offer mo
                       SET status = 'delisted'
-                    WHERE merchant_id = %s
-                      AND status = 'active'
-                      AND merchant_sku <> ALL(%s)
-                  RETURNING product_id""",
-                (merchant_id, seen_skus))
+                     FROM product p
+                     JOIN category c ON c.id = p.category_id
+                    WHERE mo.product_id = p.id
+                      AND mo.merchant_id = %s
+                      AND mo.status = 'active'
+                      AND mo.merchant_sku <> ALL(%s)
+                      AND c.kind::text = %s
+                  RETURNING mo.product_id""",
+                (merchant_id, seen_skus, vertical_kind))
             delisted = cur.fetchall()
             report.offers_delisted = len(delisted)
             report.products_touched.update(

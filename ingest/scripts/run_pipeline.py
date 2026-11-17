@@ -108,7 +108,8 @@ def cmd_discover(args) -> int:
             return 0
 
         print("\ndraining the queue ...")
-        report = run_once(conn, fetcher, queue, max_jobs=args.max_jobs)
+        report = run_once(conn, fetcher, queue, max_jobs=args.max_jobs,
+                          full_sweep=args.full_sweep)
         print(f"  {report.summary()}")
         for outcome in report.ingests:
             print(f"  {outcome.summary()}")
@@ -169,6 +170,10 @@ def cmd_probe(args) -> int:
         if not len(queue):
             print("nothing due")
             return 0
+        # Never full_sweep here. A probe run covers only the variants that
+        # were due, so "not seen in this run" describes almost the whole
+        # catalogue -- the exact case promote_run's docstring calls
+        # catastrophic.
         report = run_once(conn, fetcher, queue, max_jobs=args.max_jobs)
         print(f"  {report.summary()}")
     fetcher.close()
@@ -235,6 +240,14 @@ def main() -> int:
         p.add_argument("--idle-sleep", type=float, default=5.0)
         p.add_argument("--dry-run", action="store_true",
                        help="derive: compute and report, write nothing")
+        p.add_argument("--full-sweep", action="store_true",
+                       help="discover: retire offers this run did not see. "
+                            "Only correct when the run covered everything "
+                            "the merchant sells in this vertical -- after a "
+                            "partial or interrupted crawl it retires live "
+                            "offers. Delisting is scoped to the run's own "
+                            "vertical, so a footwear sweep cannot touch "
+                            "apparel")
         p.add_argument("--vertical", default="footwear",
                        choices=("footwear", "apparel"),
                        help="discover/facets: which vertical to walk. An "

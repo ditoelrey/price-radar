@@ -397,6 +397,76 @@ class TestAspNetMkAdapter:
         # Sizes themselves are still usable, which is the point.
         assert all(v.size_eu is not None for v in offer_sizes)
 
+    def test_an_eu_only_row_is_read_as_eu_not_uk(self):
+        """The storefront bug: Sport-M's EU 34 vanished from the size filter.
+
+        `Velicina` is the platform's primary label, and what it means depends
+        on the row. Beside an `EvropskaVelicina` it is the UK size; alone, as
+        this shop serves a child's shoe, it is the EU size and the only size
+        there is::
+
+            {"Velicina": "34", "Zaliha": 2, "EvropskaVelicina": null}
+
+        Reading it as UK lost the size completely -- `normalize_size` bounds
+        sizes to EU 16-60 and UK sizes stop around 15 -- so the offer kept
+        its label, lost its EU size, and disappeared from every size-filtered
+        page. 3,873 variants across 846 products, all on sport-m and sizeer.
+        """
+        offer_sizes = parse_sizes(
+            [{"Velicina": "34", "Zaliha": 2, "EvropskaVelicina": None,
+              "VelicinaCM": 0.00},
+             {"Velicina": "35", "Zaliha": 1, "EvropskaVelicina": None,
+              "VelicinaCM": 0.00}],
+            price_minor=1195, publishes_stock=True)
+
+        assert [v.size_label for v in offer_sizes] == ["34", "35"]
+        assert [str(v.size_eu) for v in offer_sizes] == ["34.000", "35.000"]
+        assert all(v.in_stock is True for v in offer_sizes)
+
+    def test_a_uk_and_eu_row_still_reads_the_eu_one(self):
+        """The other shape, which must not regress: a real UK size beside a
+        real EU one, where the EU label is the one that counts."""
+        offer_sizes = parse_sizes(
+            [{"Velicina": "7.5", "Zaliha": 3,
+              "EvropskaVelicina": "41\u2153", "VelicinaCM": 26.5}],
+            price_minor=5000, publishes_stock=True)
+
+        assert len(offer_sizes) == 1
+        assert offer_sizes[0].size_label == "41\u2153"
+        assert str(offer_sizes[0].size_eu) == "41.333"
+
+    def test_no_variant_ever_claims_a_uk_size(self):
+        """`size_uk` is unreachable honestly and is left empty.
+
+        The only `Velicina` values that survive the EU bound are the ones
+        that are not UK sizes, so anything this column could hold would be
+        an EU size in the wrong place -- which is exactly how 3,211 rows
+        came to claim a UK 34, a size that does not exist.
+        """
+        payloads = [
+            [{"Velicina": "34", "Zaliha": 1, "EvropskaVelicina": None}],
+            [{"Velicina": "7.5", "Zaliha": 1,
+              "EvropskaVelicina": "41\u2153"}],
+            [{"Velicina": "86", "Zaliha": 1,
+              "EvropskaVelicina": "12-18 \u043c\u0435\u0441."}],
+        ]
+        for payload in payloads:
+            for variant in parse_sizes(payload, price_minor=1,
+                                       publishes_stock=True):
+                assert variant.size_uk is None, payload
+
+    def test_an_apparel_row_keeps_height_and_claims_no_shoe_size(self):
+        """The same two fields, a third meaning: height beside an age."""
+        offer_sizes = parse_sizes(
+            [{"Velicina": "86", "Zaliha": 1,
+              "EvropskaVelicina": "12-18 \u043c\u0435\u0441.",
+              "VelicinaCM": 0.00}],
+            price_minor=999, publishes_stock=True)
+
+        assert offer_sizes[0].size_label == "12-18 \u043c\u0435\u0441."
+        assert offer_sizes[0].size_eu is None
+        assert offer_sizes[0].size_height_cm == 86
+
     def test_sizes_request_is_a_post(self):
         url, body, headers = sizes_request("https://www.sport-m.com.mk", "M20325")
         assert url.endswith("/ProductCatalog/GetVelicini/")

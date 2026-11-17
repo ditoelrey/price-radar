@@ -135,7 +135,7 @@ def ingest(conn, merchant_slug: str, offers: list[RawOffer], *,
         outcome.promotion = promote_run(
             conn, run_id, merchant_id, merchant_slug,
             create_missing_products=create_missing_products,
-            full_sweep=full_sweep)
+            full_sweep=full_sweep, kind=kind)
         record_decision(conn, run, metrics, result)
         conn.commit()
     except Exception:

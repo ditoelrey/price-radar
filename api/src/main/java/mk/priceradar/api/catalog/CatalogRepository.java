@@ -345,7 +345,22 @@ public class CatalogRepository {
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
                    s.min_price_minor, s.max_price_minor, s.currency_code,
                    s.offer_count, s.merchant_count, s.available_sizes_eu,
-                   s.updated_at, c.minor_unit
+                   -- When a shop was last *asked*, not when we last
+                   -- recomputed this row. `product_price_summary.updated_at`
+                   -- is stamped now() by every promotion and by any
+                   -- maintenance pass that touches the summary, so the page
+                   -- claimed a product had been refreshed today while each
+                   -- of its offers said "checked 4 days ago" directly
+                   -- underneath. Taking the newest offer check makes the two
+                   -- read from the same source and agree by construction.
+                   (SELECT max(ov.last_checked_at)
+                      FROM offer_variant ov
+                      JOIN merchant_offer mo ON mo.id = ov.offer_id
+                      JOIN merchant m2 ON m2.id = mo.merchant_id
+                     WHERE mo.product_id = p.id
+                       AND mo.status = 'active'
+                       AND m2.is_active) AS updated_at,
+                   c.minor_unit
               FROM product p
               JOIN brand b ON b.id = p.brand_id
               LEFT JOIN product_price_summary s ON s.product_id = p.id
