@@ -510,6 +510,10 @@ class TestFetcher:
         assert elapsed_ms < BUDGET_MS[Priority.CLICK] * 2.5
 
 
+#: A robots.txt that parses and carries one rule, for the cache tests.
+ROBOTS_WITH_A_RULE = b"User-agent: *\nDisallow: /cart\n"
+
+
 class TestRobots:
     def test_404_means_no_restrictions(self):
         """Four of the seven target stores return 404 for robots.txt."""
@@ -530,6 +534,67 @@ class TestRobots:
         robots = RobotsCache(transport, clock=FakeClock())
         assert robots.allowed("https://x.mk/mk/patiki/1-x") is True
         assert robots.allowed("https://x.mk/cart") is False
+
+    def test_a_failure_is_not_believed_for_a_whole_day(self):
+        """The bug this guards: one blip cost a shop an entire walk.
+
+        A robots fetch that times out is not an answer, and RFC 9309 says to
+        treat the site as disallowed *for now*. The cache was keeping that
+        "for now" for the full 24-hour TTL, so a single 10-second timeout
+        during a facet walk refused all 12 of a shop's facets without one
+        further attempt -- and logged `robots_disallowed`, which reads like
+        the shop asked us to stay out rather than like a network blip.
+        """
+        clock = FakeClock()
+        transport = StubTransport(routes={"/robots.txt": (503, {}, b"")})
+        robots = RobotsCache(transport, clock=clock)
+
+        assert robots.allowed("https://x.mk/p") is False
+        assert len(transport.calls) == 1
+
+        # Inside the failure window it is still refused, and still without
+        # asking again: an origin in trouble should not be hammered.
+        clock.advance(RobotsCache.FAILURE_TTL_S / 2)
+        assert robots.allowed("https://x.mk/p") is False
+        assert len(transport.calls) == 1
+
+        # Past it, we ask again rather than staying out until tomorrow.
+        clock.advance(RobotsCache.FAILURE_TTL_S)
+        transport.routes["/robots.txt"] = (404, {}, b"")
+        assert robots.allowed("https://x.mk/p") is True
+        assert len(transport.calls) == 2
+
+    def test_a_successful_answer_is_still_cached_for_a_day(self):
+        """The short window must apply to failures only.
+
+        robots.txt is answered once per origin per day by design; making
+        every lookup re-fetch would add a request per facet.
+        """
+        clock = FakeClock()
+        transport = StubTransport(
+            routes={"/robots.txt": (200, {"content-type": "text/plain"},
+                                    ROBOTS_WITH_A_RULE)})
+        robots = RobotsCache(transport, clock=clock)
+
+        assert robots.allowed("https://x.mk/p") is True
+        clock.advance(RobotsCache.FAILURE_TTL_S * 10)
+        assert robots.allowed("https://x.mk/p") is True
+        assert len(transport.calls) == 1
+
+        clock.advance(RobotsCache.TTL_S)
+        assert robots.allowed("https://x.mk/p") is True
+        assert len(transport.calls) == 2
+
+    def test_a_404_is_an_answer_not_a_failure(self):
+        """"No robots.txt" means no restrictions, and is good for a day."""
+        clock = FakeClock()
+        transport = StubTransport(routes={"/robots.txt": (404, {}, b"")})
+        robots = RobotsCache(transport, clock=clock)
+
+        assert robots.allowed("https://x.mk/p") is True
+        clock.advance(RobotsCache.FAILURE_TTL_S * 10)
+        assert robots.allowed("https://x.mk/p") is True
+        assert len(transport.calls) == 1
 
     def test_result_is_cached_per_origin(self):
         transport = StubTransport(routes={"/robots.txt": (404, {}, b"")})

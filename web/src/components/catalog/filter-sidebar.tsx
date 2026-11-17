@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { SizePicker } from "@/components/catalog/size-picker";
 import { SortSelect } from "@/components/catalog/sort-select";
-import { DEFAULT_SORT, type SortKey } from "@/lib/sort";
+import { listingHref, type ListingParams } from "@/lib/navigation";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
@@ -40,29 +40,21 @@ const SHOPS = [
  */
 export function FilterSidebar({
   sizes,
-  sizeEu,
-  brand,
-  query,
-  sort,
+  filters,
 }: {
   sizes: number[];
-  sizeEu?: number;
-  brand?: string;
-  query?: string;
-  sort?: SortKey;
+  /**
+   * The listing's whole filter state, passed as one object rather than as
+   * loose props. These hrefs are rebuilt from scratch, so anything not
+   * carried here is silently dropped the moment a shopper picks a brand --
+   * which is what used to happen, and what would have happened again to the
+   * category and gender the mega menu sets.
+   */
+  filters: ListingParams;
 }) {
-  const brandHref = (slug: string | null) => {
-    const params = new URLSearchParams();
-    if (query) params.set("q", query);
-    if (sizeEu !== undefined) params.set("sizeEu", String(sizeEu));
-    // Carried explicitly, because this href is rebuilt from scratch rather
-    // than edited: without it, picking a brand would silently throw away the
-    // shopper's chosen order.
-    if (sort && sort !== DEFAULT_SORT) params.set("sort", sort);
-    if (slug) params.set("brand", slug);
-    const qs = params.toString();
-    return `/products${qs ? `?${qs}` : ""}`;
-  };
+  const { sizeEu, brand, sort } = filters;
+  const brandHref = (slug: string | null) =>
+    listingHref({ ...filters, brand: slug ?? undefined });
 
   return (
     <aside className="w-full shrink-0 lg:w-64">
@@ -72,16 +64,16 @@ export function FilterSidebar({
         <Separator />
 
         <section>
-          <h2 className="mb-1 text-sm font-semibold">Your size</h2>
+          <h2 className="mb-1 text-sm font-semibold">Вашиот број</h2>
           <p className="mb-3 text-xs text-muted-foreground">
-            Pick a size and every price becomes the price you would actually
-            pay in it.
+            Изберете број и секоја цена станува цената што навистина би ја
+            платиле во тој број.
           </p>
           {sizes.length > 0 ? (
             <SizePicker sizes={sizes} selected={sizeEu} />
           ) : (
             <p className="text-xs text-muted-foreground">
-              No sizes in this result set.
+              Нема броеви во овие резултати.
             </p>
           )}
         </section>
@@ -89,7 +81,7 @@ export function FilterSidebar({
         <Separator />
 
         <section>
-          <h2 className="mb-2 text-sm font-semibold">Brand</h2>
+          <h2 className="mb-2 text-sm font-semibold">Бренд</h2>
           <ul className="space-y-0.5">
             <li>
               <Link
@@ -99,7 +91,7 @@ export function FilterSidebar({
                   !brand && "bg-accent font-medium",
                 )}
               >
-                All brands
+                Сите брендови
               </Link>
             </li>
             {BRANDS.map((b) => (
@@ -123,7 +115,7 @@ export function FilterSidebar({
         <Separator />
 
         <section>
-          <h2 className="mb-2 text-sm font-semibold">Shops we compare</h2>
+          <h2 className="mb-2 text-sm font-semibold">Продавници што ги споредуваме</h2>
           <ul className="space-y-1 text-xs text-muted-foreground">
             {SHOPS.map((shop) => (
               <li key={shop} className="flex items-center gap-2">
@@ -133,8 +125,8 @@ export function FilterSidebar({
             ))}
           </ul>
           <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-            Offers are ranked by total price including delivery — never by what
-            a shop pays us.
+            Понудите се подредени според вкупна цена со достава — никогаш
+            според тоа колку продавницата ни плаќа.
           </p>
         </section>
       </div>

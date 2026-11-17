@@ -63,7 +63,7 @@ export function SizePicker({
               href={href(isSelected ? null : size)}
               scroll={false}
               aria-pressed={isSelected}
-              title={isOut ? `EU ${formatSizeEu(size)} — not available` : undefined}
+              title={isOut ? `EU ${formatSizeEu(size)} — нема залиха` : undefined}
               className={cn(
                 "tnum inline-flex h-9 min-w-[3rem] items-center justify-center rounded-md border px-2 text-sm font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
@@ -87,7 +87,7 @@ export function SizePicker({
           className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
         >
           <X className="size-3" />
-          Clear size EU {formatSizeEu(selected)}
+          Откажи број EU {formatSizeEu(selected)}
         </Link>
       )}
     </div>

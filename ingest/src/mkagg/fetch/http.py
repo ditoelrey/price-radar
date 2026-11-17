@@ -165,6 +165,20 @@ class RobotsCache:
 
     TTL_S = 86_400
 
+    #: How long a *failed* robots fetch is believed, as opposed to a
+    #: successful one.
+    #:
+    #: Separate from TTL_S because the two mean different things. A parsed
+    #: robots.txt is an answer and is good for a day. A timeout is not an
+    #: answer -- it is the absence of one, and RFC 9309 says to treat the
+    #: site as disallowed *for now*. Caching that for a day turns "for now"
+    #: into "until tomorrow": one 10-second blip silently cost a whole
+    #: shop's facet walk, 12 facets refused without a single further
+    #: attempt, and the log read `robots_disallowed` as though the shop had
+    #: asked us to stay out. A minute is long enough to stop us hammering an
+    #: origin that is genuinely in trouble.
+    FAILURE_TTL_S = 60
+
     def __init__(self, transport: Transport, user_agent: str = DEFAULT_USER_AGENT,
                  clock=time.monotonic) -> None:
         self.transport = transport
@@ -198,7 +212,7 @@ class RobotsCache:
     def allowed(self, url: str) -> bool:
         origin = self._origin(url)
         entry = self._cache.get(origin)
-        if entry is None or self._clock() - entry.fetched_at > self.TTL_S:
+        if entry is None or self._clock() - entry.fetched_at > self._ttl(entry):
             entry = self._load(origin)
             self._cache[origin] = entry
         if entry.allow_all:
@@ -206,6 +220,17 @@ class RobotsCache:
         if entry.parser is None:
             return False
         return entry.parser.can_fetch(self.user_agent, url)
+
+    @classmethod
+    def _ttl(cls, entry: _RobotsEntry) -> float:
+        """How long to believe this entry.
+
+        A failure carries no parser and no permission -- that pairing is what
+        `_load` returns when the fetch raised or answered 5xx, and nothing
+        else produces it.
+        """
+        failed = entry.parser is None and not entry.allow_all
+        return cls.FAILURE_TTL_S if failed else cls.TTL_S
 
     def crawl_delay(self, url: str) -> float | None:
         entry = self._cache.get(self._origin(url))

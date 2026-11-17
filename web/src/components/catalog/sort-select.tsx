@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDownUp, ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { DEFAULT_SORT, SORTS, type SortKey } from "@/lib/sort";
+import { DEFAULT_SORT_LABEL, SORTS, type SortKey } from "@/lib/sort";
 
 /**
  * The sort control, above the size rail.
@@ -23,9 +23,10 @@ import { DEFAULT_SORT, SORTS, type SortKey } from "@/lib/sort";
  * leave the page.
  */
 export function SortSelect({
-  selected = DEFAULT_SORT,
+  selected,
   className,
 }: {
+  /** Undefined when the shopper has not chosen one. */
   selected?: SortKey;
   className?: string;
 }) {
@@ -35,9 +36,8 @@ export function SortSelect({
 
   const onChange = (value: string) => {
     const next = new URLSearchParams(params.toString());
-    if (value === DEFAULT_SORT) {
-      // The default stays out of the URL, so the canonical listing has one
-      // address rather than two that render identically.
+    if (value === "") {
+      // The placeholder: back to no explicit order at all.
       next.delete("sort");
     } else {
       next.set("sort", value);
@@ -62,7 +62,7 @@ export function SortSelect({
       <div className="relative">
         <select
           id="sort"
-          value={selected}
+          value={selected ?? ""}
           onChange={(event) => onChange(event.target.value)}
           className={cn(
             // Same height, radius, border and hover as a size chip, so the
@@ -74,6 +74,13 @@ export function SortSelect({
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
           )}
         >
+          {/* `hidden` keeps this out of the open list while still letting
+              the closed control display it -- the shopper sees exactly the
+              four orderings on offer, and an honest label for the order the
+              page is actually in. */}
+          <option value="" hidden>
+            {DEFAULT_SORT_LABEL}
+          </option>
           {SORTS.map((sort) => (
             <option key={sort.value} value={sort.value}>
               {sort.label}

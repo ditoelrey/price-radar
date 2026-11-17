@@ -4,7 +4,8 @@ import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 import { searchProducts } from "@/lib/api";
 import { formatSizeEu } from "@/lib/format";
 import { FilterSidebar } from "@/components/catalog/filter-sidebar";
-import { DEFAULT_SORT, isSortKey } from "@/lib/sort";
+import { listingHref, listingTitle } from "@/lib/navigation";
+import { isSortKey } from "@/lib/sort";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -33,18 +34,31 @@ export default async function ProductsPage({
   // Validated against the known keys rather than passed through: an unknown
   // value would otherwise travel to the API to be silently ignored there,
   // and the control would show a selection the listing is not using.
+  // Undefined, not a fallback value: "no sort chosen" is a real state that
+  // the API answers with its own default ordering, and the control has to be
+  // able to show that rather than claim a choice the shopper never made.
   const sortRaw = one(params.sort);
-  const sort = isSortKey(sortRaw) ? sortRaw : DEFAULT_SORT;
+  const sort = isSortKey(sortRaw) ? sortRaw : undefined;
   const page = Number(one(params.page) ?? 0) || 0;
+  // Passed through rather than validated against a list. An unknown value
+  // matches no row and the shopper gets an empty listing, which is the
+  // truthful answer; validating here would mean this page kept its own copy
+  // of the taxonomy, to be forgotten the next time the tree changes.
+  const kind = one(params.kind);
+  const category = one(params.category);
+  const gender = one(params.gender);
 
-  const result = await searchProducts({
+  const filters = {
     q,
     brand,
     sizeEu: Number.isFinite(sizeEu) ? sizeEu : undefined,
+    kind,
+    category,
+    gender,
     sort,
-    page,
-    pageSize: 24,
-  });
+  };
+
+  const result = await searchProducts({ ...filters, page, pageSize: 24 });
 
   // The size rail offers what this result set actually contains, so it never
   // suggests a size that would empty the page.
@@ -52,65 +66,50 @@ export default async function ProductsPage({
     new Set(result.items.flatMap((item) => item.availableSizesEu)),
   ).sort((a, b) => a - b);
 
-  const pageHref = (next: number) => {
-    const sp = new URLSearchParams();
-    if (q) sp.set("q", q);
-    if (brand) sp.set("brand", brand);
-    if (sizeEu !== undefined) sp.set("sizeEu", String(sizeEu));
-    if (sort !== DEFAULT_SORT) sp.set("sort", sort);
-    if (next > 0) sp.set("page", String(next));
-    const qs = sp.toString();
-    return `/products${qs ? `?${qs}` : ""}`;
-  };
+  const pageHref = (next: number) => listingHref({ ...filters, page: next });
 
   return (
     <div className="flex min-h-screen flex-col">
-      <SiteHeader query={q} />
+      <SiteHeader query={q} activeKind={kind} />
 
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
         <div className="mb-5 flex flex-wrap items-baseline justify-between gap-2">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">
-              {q ? `Results for “${q}”` : "Патики"}
+              {listingTitle(filters)}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
               {result.items.length === 0
-                ? "No products"
-                : `${result.items.length}${result.hasMore ? "+" : ""} products`}
+                ? "Нема производи"
+                : `${result.items.length}${result.hasMore ? "+" : ""} производи`}
               {sizeEu !== undefined && (
-                <> · priced for EU {formatSizeEu(sizeEu)}</>
+                <> · цени за EU {formatSizeEu(sizeEu)}</>
               )}
             </p>
           </div>
 
           {sizeEu !== undefined && (
             <Badge variant="price" className="h-7 px-3 text-sm">
-              Showing prices in EU {formatSizeEu(sizeEu)}
+              Прикажани се цени за EU {formatSizeEu(sizeEu)}
             </Badge>
           )}
         </div>
 
         <div className="flex flex-col gap-6 lg:flex-row">
-          <FilterSidebar
-            sizes={sizes}
-            sizeEu={sizeEu}
-            brand={brand}
-            query={q}
-            sort={sort}
-          />
+          <FilterSidebar sizes={sizes} filters={filters} />
 
           <section className="min-w-0 flex-1">
             {result.items.length === 0 ? (
               <div className="grid place-items-center rounded-lg border border-dashed py-20 text-center">
                 <SearchX className="mb-3 size-8 text-muted-foreground/50" />
-                <p className="font-medium">Nothing matched</p>
+                <p className="font-medium">Нема резултати</p>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
                   {sizeEu !== undefined
-                    ? `No shop currently lists these products in EU ${formatSizeEu(sizeEu)}. Try clearing the size.`
-                    : "Try a different brand, or a shorter search term."}
+                    ? `Ниту една продавница не ја нуди оваа комбинација во EU ${formatSizeEu(sizeEu)}. Пробајте без филтер за број.`
+                    : "Пробајте друг бренд или пократок поим за пребарување."}
                 </p>
                 <Button asChild variant="outline" size="sm" className="mt-4">
-                  <Link href="/products">Clear all filters</Link>
+                  <Link href={listingHref()}>Исчисти ги филтрите</Link>
                 </Button>
               </div>
             ) : (
@@ -130,19 +129,19 @@ export default async function ProductsPage({
                 {page > 0 ? (
                   <Button asChild variant="outline" size="sm">
                     <Link href={pageHref(page - 1)}>
-                      <ChevronLeft /> Previous
+                      <ChevronLeft /> Претходна
                     </Link>
                   </Button>
                 ) : (
                   <span />
                 )}
                 <span className="text-sm text-muted-foreground">
-                  Page {page + 1}
+                  Страница {page + 1}
                 </span>
                 {result.hasMore ? (
                   <Button asChild variant="outline" size="sm">
                     <Link href={pageHref(page + 1)}>
-                      Next <ChevronRight />
+                      Следна <ChevronRight />
                     </Link>
                   </Button>
                 ) : (

@@ -88,7 +88,7 @@ export function ProductCard({
 
         <div className="mt-auto pt-2">
           <p className="text-[11px] text-muted-foreground">
-            {product.fromPriceIsSizeSpecific ? "in your size from" : "from"}
+            {product.fromPriceIsSizeSpecific ? "во вашиот број од" : "од"}
           </p>
           <p className="tnum text-lg font-semibold text-price">
             {formatMoney(product.fromPrice)}
@@ -96,10 +96,10 @@ export function ProductCard({
           <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
             <Store className="size-3" />
             {product.merchantCount === 1
-              ? "1 shop"
-              : `${product.merchantCount} shops`}
+              ? "1 продавница"
+              : `${product.merchantCount} продавници`}
             {product.offerCount > product.merchantCount &&
-              ` · ${product.offerCount} offers`}
+              ` · ${product.offerCount} понуди`}
           </p>
         </div>
       </div>

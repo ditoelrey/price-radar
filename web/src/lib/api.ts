@@ -133,6 +133,11 @@ export type SearchParams = {
   q?: string;
   brand?: string;
   sizeEu?: number;
+  /**
+   * Which category kinds the listing serves: `footwear` (the default on the
+   * API side), `apparel`, `accessory`, `equipment`, or `all`.
+   */
+  kind?: string;
   /** One canonical leaf. Matched exactly, so it never returns the parent. */
   category?: string;
   /** `men` and `women` include unisex, as the shops' own departments do. */
@@ -173,6 +178,7 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       q: params.q,
       brand: params.brand,
       sizeEu: params.sizeEu,
+      kind: params.kind,
       category: params.category,
       gender: params.gender,
       sort: params.sort,

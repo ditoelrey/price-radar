@@ -80,7 +80,24 @@ public class CatalogRepository {
      * bug that looks like a phantom duplicate and is miserable to chase.
      */
     public enum Sort {
-        /** Cheapest first: the default, and what the site is for. */
+        /**
+         * The default, and deliberately not offered in the sort control.
+         *
+         * <p>Products carried by several shops first. This is a comparison
+         * site, and a product with four shops behind it is one where the
+         * comparison is worth something -- 1,935 of the catalogue's products
+         * have two or more offers and 42 have four, while the long tail is
+         * single-shop listings where we can only repeat one price back.
+         * Opening on cheapest-first instead leads with 219 MKD oddities that
+         * exactly one shop sells.
+         *
+         * <p>It is absent from {@code SORTS} on the storefront on purpose:
+         * "by number of shops" is a mechanism, not something a shopper
+         * thinks in. They see the four orderings they might actually want,
+         * and this is what they get when they have not asked for one.
+         */
+        POPULAR("{MERCHANTS} DESC, {PRICE} ASC, p.id"),
+        /** Cheapest first: what the site is for, once someone asks. */
         CHEAPEST("{PRICE} ASC, p.id"),
         EXPENSIVE("{PRICE} DESC, p.id"),
         /**
@@ -99,21 +116,27 @@ public class CatalogRepository {
             this.template = template;
         }
 
-        /** @param priceColumn the price expression of the query being built */
-        String orderBy(String priceColumn) {
-            return template.replace("{PRICE}", priceColumn);
+        /**
+         * @param priceColumn the price expression of the query being built
+         * @param merchantsColumn the shop-count expression of that query
+         */
+        String orderBy(String priceColumn, String merchantsColumn) {
+            return template
+                    .replace("{PRICE}", priceColumn)
+                    .replace("{MERCHANTS}", merchantsColumn);
         }
 
         public static Sort parse(String raw) {
             if (raw == null || raw.isBlank()) {
-                return CHEAPEST;
+                return POPULAR;
             }
             try {
                 return valueOf(raw.trim().toUpperCase(java.util.Locale.ROOT));
             } catch (IllegalArgumentException unknown) {
                 // An unreadable sort key is not worth a 400: the shopper
-                // still wants the listing, and cheapest is the honest default.
-                return CHEAPEST;
+                // still wants the listing, and the default is the honest
+                // answer to "I did not ask for an order".
+                return POPULAR;
             }
         }
     }
@@ -264,9 +287,12 @@ public class CatalogRepository {
         // The price column differs between the two queries -- the size-
         // filtered one prices each product in the requested size -- so the
         // sort is rendered against whichever is in play.
+        // Both expressions differ between the two queries: the size-filtered
+        // one recomputes price and shop count in its own CTE.
         String sql = (sized ? LIST_BY_SIZE : LIST_BASE).replace(
                 "/*{ORDER}*/",
-                sort.orderBy(sized ? "z.from_price_minor" : "s.min_price_minor"));
+                sort.orderBy(sized ? "z.from_price_minor" : "s.min_price_minor",
+                             sized ? "z.merchant_count" : "s.merchant_count"));
         var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
                 .param("brand", blankToNull(brandSlug))
