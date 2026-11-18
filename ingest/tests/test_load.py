@@ -411,7 +411,13 @@ class TestIngestAgainstPostgres:
             status, product_id = cur.fetchone()
         assert status == "unmatched" and product_id is None
 
-    def test_full_sweep_delists_what_it_did_not_see(self, conn):
+    def test_full_sweep_proposes_what_it_did_not_see(self, conn):
+        """A sweep nominates; it no longer decides.
+
+        The listing's silence is all a sweep can observe, and it does not
+        distinguish "the shop removed this" from "the shop stopped linking
+        it". So the offer stays active until something asks its page.
+        """
         from mkagg.load import ingest
 
         ingest(conn, "sportvision",
@@ -419,11 +425,57 @@ class TestIngestAgainstPostgres:
         outcome = ingest(conn, "sportvision", [offer(sku="392290-02")],
                          requests=1, full_sweep=True,
                          thresholds=Thresholds(offers_delta=0.95))
+
+        assert outcome.promotion.offers_delisted == 0
+        assert outcome.promotion.delist_unchecked == 1
+        skus = [c.merchant_sku
+                for c in outcome.promotion.delist_candidates]
+        assert skus == ["403299-01"]
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM merchant_offer "
+                        "WHERE status = 'delisted'")
+            assert cur.fetchone()[0] == 0
+
+    def test_full_sweep_delists_what_a_fetch_confirms_is_gone(self, conn):
+        from mkagg.load import ingest
+
+        ingest(conn, "sportvision",
+               [offer(sku="392290-02"), offer(sku="403299-01")], requests=2)
+        outcome = ingest(conn, "sportvision", [offer(sku="392290-02")],
+                         requests=1, full_sweep=True,
+                         thresholds=Thresholds(offers_delta=0.95),
+                         confirm_gone=lambda candidates: candidates)
+
         assert outcome.promotion.offers_delisted == 1
+        assert outcome.promotion.delist_kept == 0
         with conn.cursor() as cur:
             cur.execute("""SELECT merchant_sku FROM merchant_offer
                             WHERE status = 'delisted'""")
             assert cur.fetchone()[0] == "403299-01"
+
+    def test_a_candidate_whose_page_is_alive_keeps_its_offer(self, conn):
+        """The Vans case: hidden from browse, still on sale.
+
+        sportvision serves `/mk/patiki/8578840-vans-sport` at 200 with one
+        size left and links it from no listing we can find. Retiring it
+        would also stop it being probed -- `enqueue_due` filters on
+        `status = 'active'` -- so the mistake would never be corrected.
+        """
+        from mkagg.load import ingest
+
+        ingest(conn, "sportvision",
+               [offer(sku="392290-02"), offer(sku="403299-01")], requests=2)
+        outcome = ingest(conn, "sportvision", [offer(sku="392290-02")],
+                         requests=1, full_sweep=True,
+                         thresholds=Thresholds(offers_delta=0.95),
+                         confirm_gone=lambda candidates: [])
+
+        assert outcome.promotion.offers_delisted == 0
+        assert outcome.promotion.delist_kept == 1
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM merchant_offer "
+                        "WHERE status = 'active'")
+            assert cur.fetchone()[0] == 2
 
     def test_partial_run_never_delists(self, conn):
         """A stock probe or one-category crawl must not wipe the catalogue."""

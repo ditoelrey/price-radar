@@ -24,6 +24,23 @@ from ..models import MatchResult, ProductCandidate, RawOffer, RawVariant
 from ..normalize import normalize_sku, slugify, translit_mk
 
 
+@dataclass(frozen=True)
+class DelistCandidate:
+    """An active offer this sweep did not see, and where to go and ask.
+
+    Not a verdict. A shop that hides a product from category browse while
+    keeping its page live and in stock produces exactly this, and retiring
+    it on the listing's silence alone is unrecoverable: `enqueue_due`
+    filters `status = 'active'`, so a delisted offer stops being probed
+    too, and no later sweep walks a page it cannot find a link to.
+    """
+
+    offer_id: int
+    merchant_sku: str
+    product_url: str | None
+    product_id: int | None
+
+
 @dataclass
 class PromotionReport:
     offers_promoted: int = 0
@@ -35,6 +52,13 @@ class PromotionReport:
     candidates_queued: int = 0
     offers_delisted: int = 0
     images_backfilled: int = 0
+    #: Active offers the sweep did not see, awaiting a direct fetch.
+    delist_candidates: list = field(default_factory=list)
+    #: Candidates whose own page answered: still a listing, so still active.
+    delist_kept: int = 0
+    #: Candidates nobody confirmed either way -- no confirmer was supplied,
+    #: or the shop was unreachable. Left active on purpose.
+    delist_unchecked: int = 0
 
 
 # -----------------------------------------------------------------------------
@@ -544,6 +568,12 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
     shop has -- a correct run quietly destroying a correct catalogue. The
     offers considered are now only those whose own category sits in the
     same vertical as the run.
+
+    Promotion no longer retires anything itself. It collects
+    :class:`DelistCandidate` rows into the report, and a caller that can
+    reach the network decides -- see :func:`apply_delistings`. Confirming a
+    candidate means fetching its page, and this is a single short
+    transaction that must not be held open across the network.
     """
     report = PromotionReport()
     seen_skus: list[str] = []
@@ -657,21 +687,21 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
             vertical_kind = ("apparel" if kind == APPAREL_RUN_KIND
                              else "footwear")
             cur.execute(
-                """UPDATE merchant_offer mo
-                      SET status = 'delisted'
-                     FROM product p
+                """SELECT mo.id, mo.merchant_sku, mo.product_url,
+                          mo.product_id
+                     FROM merchant_offer mo
+                     JOIN product p ON p.id = mo.product_id
                      JOIN category c ON c.id = p.category_id
-                    WHERE mo.product_id = p.id
-                      AND mo.merchant_id = %s
+                    WHERE mo.merchant_id = %s
                       AND mo.status = 'active'
                       AND mo.merchant_sku <> ALL(%s)
                       AND c.kind::text = %s
-                  RETURNING mo.product_id""",
+                    ORDER BY mo.id""",
                 (merchant_id, seen_skus, vertical_kind))
-            delisted = cur.fetchall()
-            report.offers_delisted = len(delisted)
-            report.products_touched.update(
-                pid for (pid,) in delisted if pid is not None)
+            report.delist_candidates = [
+                DelistCandidate(offer_id=row[0], merchant_sku=row[1],
+                                product_url=row[2], product_id=row[3])
+                for row in cur.fetchall()]
 
     for product_id in report.products_touched:
         refresh_summary(conn, product_id)
@@ -683,3 +713,29 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                 WHERE id = %s""",
             (report.offers_promoted, run_id))
     return report
+
+
+def apply_delistings(conn, confirmed) -> int:
+    """Retire the candidates a direct fetch proved are gone.
+
+    Separate from promotion for two reasons. Confirming means going to the
+    network, which promotion's one short transaction must not wait on; and
+    the decision belongs to whoever can fetch, not to the loader, which
+    only has a database handle.
+
+    Takes the confirmed subset, never the candidate list: passing the whole
+    list back is how "we could not reach the shop" would turn into "the
+    shop removed everything".
+    """
+    ids = [c.offer_id for c in confirmed]
+    if not ids:
+        return 0
+    with conn.cursor() as cur:
+        cur.execute(
+            """UPDATE merchant_offer SET status = 'delisted'
+                WHERE id = ANY(%s) AND status = 'active'
+             RETURNING product_id""", (ids,))
+        rows = cur.fetchall()
+    for product_id in {pid for (pid,) in rows if pid is not None}:
+        refresh_summary(conn, product_id)
+    return len(rows)

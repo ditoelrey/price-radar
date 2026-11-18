@@ -22,6 +22,7 @@ or newly redesigned costs its own jobs and nothing else.
 """
 from __future__ import annotations
 
+import functools
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -141,6 +142,70 @@ def parse_result(fetcher, result: FetchResult, merchant: dict, *,
 
     offer = adapter.parse_product(result.body, job.url, job.merchant_slug)
     return [offer] if offer else []
+
+
+# -----------------------------------------------------------------------------
+# Confirming a delisting
+# -----------------------------------------------------------------------------
+
+#: Statuses that prove a product is gone. Measured on all six shops: the
+#: Sport Vision family answers a removed product with 404, while megasport,
+#: sizeer and sport-m answer 200 with an empty size run.
+GONE_STATUSES = frozenset({404, 410})
+
+
+def confirm_delist_candidates(fetcher, merchant: dict, candidates, *,
+                              waiter: BreakerWait | None = None) -> list:
+    """Ask each candidate's own page whether it is really gone.
+
+    A sweep walks category listings, so the only thing it can observe is
+    that a product was not *linked*. Shops hide near-sold-out stock from
+    browse while still selling it -- sportvision serves
+    ``/mk/patiki/8578840-vans-sport`` at 200 with one size left and lists it
+    nowhere -- and that stock is clearance-priced, so the offers most likely
+    to go missing from a listing are the cheapest ones a comparison site
+    exists to show.
+
+    Only positive evidence retires an offer:
+
+    * 404 or 410 -- the shop says the page is gone;
+    * 200 with no parseable product, or a product with no sizes at all --
+      the page is a husk, which is how the other three platforms express
+      the same thing.
+
+    Everything else keeps the offer. A timeout, a 500, an open circuit or a
+    robots refusal is evidence about the shop's availability and none at all
+    about the product, and treating it as removal would let one bad night
+    empty a merchant.
+
+    Returns the confirmed subset, in candidate order.
+    """
+    gone = []
+    for candidate in candidates:
+        if not candidate.product_url:
+            continue
+        result = fetch_patiently(fetcher, FetchJob(
+            merchant_slug=merchant["slug"], url=candidate.product_url,
+            kind="catalog_parse", priority=Priority.COLD,
+            # A 304 answers "unchanged since you last asked", which is not
+            # the question. Ask for the body.
+            revalidate=False), waiter)
+
+        if result.status in GONE_STATUSES:
+            gone.append(candidate)
+            continue
+        if result.skipped or not result.ok:
+            continue
+
+        try:
+            offers = parse_result(fetcher, result, merchant, waiter=waiter)
+        except Exception:
+            # A parser that cannot read the page has told us nothing about
+            # the shop's intent. Keep the offer.
+            continue
+        if not any(offer.variants for offer in offers):
+            gone.append(candidate)
+    return gone
 
 
 # -----------------------------------------------------------------------------
@@ -385,10 +450,17 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
         conn.commit()
 
     for (slug, kind), offers in catalog.items():
+        # Only a full sweep produces delist candidates, so only a full sweep
+        # needs a confirmer. Built per merchant because confirming goes
+        # through that merchant's own adapter and rate-limit budget.
+        confirm = None
+        if full_sweep and slug in merchants:
+            confirm = functools.partial(confirm_delist_candidates, fetcher,
+                                        merchants[slug], waiter=waiter)
         outcome = ingest_fn(conn, slug, offers, kind=kind,
                             requests=requests[slug],
                             http_errors=errors[slug],
-                            full_sweep=full_sweep)
+                            full_sweep=full_sweep, confirm_gone=confirm)
         report.ingests.append(outcome)
 
     report.duration_s = time.monotonic() - started

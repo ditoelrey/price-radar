@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from ..models import RawOffer
 from ..taxonomy import APPAREL_SLUGS
-from .promote import PromotionReport, promote_run
+from .promote import PromotionReport, apply_delistings, promote_run
 from .staging import (StagedRun, clear_stage, merchant_id_for, open_run,
                       record_decision, stage_offers)
 from .validate import (Baseline, Decision, RunMetrics, Thresholds,
@@ -57,6 +57,13 @@ class IngestOutcome:
             bits.append(f"price_points={self.promotion.price_points_written}")
             if self.promotion.images_backfilled:
                 bits.append(f"images={self.promotion.images_backfilled}")
+            if self.promotion.offers_delisted:
+                bits.append(f"delisted={self.promotion.offers_delisted}")
+            if self.promotion.delist_kept:
+                bits.append(f"still_live={self.promotion.delist_kept}")
+            if self.promotion.delist_unchecked:
+                bits.append(
+                    f"unconfirmed={self.promotion.delist_unchecked}")
         if self.reason:
             bits.append(f"reason={self.reason}")
         return "  ".join(bits)
@@ -96,12 +103,20 @@ def ingest(conn, merchant_slug: str, offers: list[RawOffer], *,
            thresholds: Thresholds | None = None,
            create_missing_products: bool = True,
            full_sweep: bool = False,
+           confirm_gone=None,
            keep_stage: bool = False) -> IngestOutcome:
     """Run the full stage -> validate -> promote cycle for one merchant.
 
     Returns an outcome describing what happened, including for a rejection.
     A rejected run keeps its staged rows so the parser can be diagnosed and
     the fix replayed over them.
+
+    ``confirm_gone`` turns a full sweep's silence into a question. It is
+    handed the run's :class:`DelistCandidate` list -- the active offers the
+    sweep did not see -- and returns the subset whose own page proved they
+    are gone. Without it nothing is retired: absence from a listing is not
+    evidence of removal, and a shop that hides a near-sold-out product
+    while still selling it produces exactly that absence.
     """
     merchant_id = merchant_id_for(conn, merchant_slug)
     run_id = open_run(conn, merchant_id, kind)
@@ -153,6 +168,18 @@ def ingest(conn, merchant_slug: str, offers: list[RawOffer], *,
         outcome.reason = "promotion raised; rolled back"
         outcome.promotion = None
         raise
+
+    # --- confirm the delist candidates (outside the promotion txn) -------
+    candidates = outcome.promotion.delist_candidates
+    if candidates:
+        if confirm_gone is None:
+            outcome.promotion.delist_unchecked = len(candidates)
+        else:
+            confirmed = list(confirm_gone(candidates))
+            outcome.promotion.offers_delisted = apply_delistings(
+                conn, confirmed)
+            outcome.promotion.delist_kept = len(candidates) - len(confirmed)
+            conn.commit()
 
     if not keep_stage:
         clear_stage(conn, run_id)
