@@ -481,3 +481,101 @@ class TestNoConditionalRequests:
         # A 404 or a 500 IS evidence about the URL and must not creep in here.
         assert 404 not in NO_EVIDENCE_STATUSES
         assert 500 not in NO_EVIDENCE_STATUSES
+
+
+class TestAnOversizedResourceIsRefusedNotRetriedForever:
+    """One buzz photo declares 19 960 352 bytes and truncates every time.
+
+    Three image passes, three `RemoteProtocolError`s at a different byte
+    each (520 433, then 1 247 522), while `JH6518_1.jpg` on the same host
+    serves fine at 123 739. The classification was right -- the fetcher
+    raised, so there was no status and nothing learned -- but it meant the
+    URL was re-asked every hour for bytes that cannot arrive.
+
+    A declared length is different in kind from a dropped connection: the
+    server told us, so it is evidence about the resource.
+    """
+
+    DECLARED = 19_960_352
+
+    def _big(self):
+        return {"content-type": "image/jpeg",
+                "content-length": str(self.DECLARED)}
+
+    def test_the_declaration_alone_earns_the_full_window(self):
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/a.jpg": (200, self._big(), b"")})
+        report = fetch_product_images(conn, fetcher, None, limit=10)
+
+        assert report.stored == 0
+        assert conn.retry_hours() == [RETRY_HOURS]
+        assert any(k.startswith("too_large_declared")
+                   for k in report.skipped), report.skipped
+
+    def test_it_is_not_counted_as_an_error(self):
+        """A shop publishing a broken asset is not our request failing."""
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/a.jpg": (200, self._big(), b"")})
+        report = fetch_product_images(conn, fetcher, None, limit=10)
+        assert report.errors == 0
+
+    def test_the_size_is_recorded_so_the_reason_is_legible_later(self):
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/a.jpg": (200, self._big(), b"")})
+        report = fetch_product_images(conn, fetcher, None, limit=10)
+        assert f"too_large_declared:{self.DECLARED}" in report.skipped
+
+    def test_a_normal_photo_is_untouched_by_the_guard(self, tmp_path):
+        """The regression that matters: every other image still stores.
+
+        Its Content-Length is honest and well under the cap, which is the
+        case for all 15 127 photos already held.
+        """
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/a.jpg": (
+            200, {"content-type": "image/jpeg", "content-length": str(len(JPEG))},
+            JPEG)})
+        report = fetch_product_images(conn, fetcher, ImageStore(tmp_path),
+                                      limit=10)
+        assert report.stored == 1
+        assert report.skipped == {}
+        assert conn.retry_hours() == []
+
+    def test_a_declared_size_inside_the_cap_is_fetched(self):
+        """The cap is the transport's 16 MB, the refusal is media's 8 MB.
+
+        Between them sits a body that is downloaded and then refused by
+        `is_storable` on its actual length -- a different reason, the same
+        full retry window.
+        """
+        oversize = JPEG + b"\x00" * MAX_BYTES
+        conn = RecordingConn(PENDING)
+        fetcher = image_fetcher({"/img/a.jpg": (
+            200, {"content-type": "image/jpeg",
+                  "content-length": str(len(oversize))}, oversize)})
+        report = fetch_product_images(conn, fetcher, None, limit=10)
+
+        assert report.stored == 0
+        assert conn.retry_hours() == [RETRY_HOURS]
+        assert any(k.startswith("too_large_declared") for k in report.skipped)
+
+
+class TestFetchResultCarriesTheDeclaredLength:
+    def test_a_numeric_content_length_is_read(self):
+        fetcher = image_fetcher({"/img/a.jpg": (
+            200, {"content-type": "image/jpeg", "content-length": "4004"},
+            JPEG)})
+        result = fetcher.fetch(FetchJob(
+            merchant_slug="sportvision",
+            url="https://www.sportvision.mk/img/a.jpg"))
+        assert result.content_length == 4004
+
+    def test_a_missing_or_unparseable_one_stays_none(self):
+        for headers in ({"content-type": "image/jpeg"},
+                        {"content-type": "image/jpeg",
+                         "content-length": "chunked"}):
+            fetcher = image_fetcher({"/img/a.jpg": (200, headers, JPEG)})
+            result = fetcher.fetch(FetchJob(
+                merchant_slug="sportvision",
+                url="https://www.sportvision.mk/img/a.jpg"))
+            assert result.content_length is None, headers

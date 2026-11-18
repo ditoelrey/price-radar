@@ -53,6 +53,12 @@ class FetchResult:
     job: FetchJob
     status: int = 0
     body: bytes = b""
+    #: What the server said the body would be, when it said anything. Kept
+    #: separate from ``len(body)`` because the interesting case is when they
+    #: disagree: a declared size over the transport's cap means the body was
+    #: deliberately never read, so this is the only evidence of how big the
+    #: resource claims to be.
+    content_length: int | None = None
     content_type: str = ""
     etag: str | None = None
     last_modified: str | None = None
@@ -97,23 +103,57 @@ class Transport(Protocol):
                 ) -> tuple[int, dict[str, str], bytes]: ...
 
 
+#: Hard ceiling on one response body. Nothing this crawler wants is close:
+#: the largest page measured is a 900 KB listing and the largest product
+#: photo 1.4 MB. The cap exists so a single pathological resource cannot
+#: spend minutes of a merchant's budget or arrive in memory at all.
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
+class ResponseTooLarge(Exception):
+    """A body passed the cap while streaming, having declared no size."""
+
+
 class HttpxTransport:
     """Production transport. HTTP/2 keeps the probe loop cheap."""
 
-    def __init__(self, *, http2: bool = True, verify: bool = True) -> None:
+    def __init__(self, *, http2: bool = True, verify: bool = True,
+                 max_bytes: int = MAX_RESPONSE_BYTES) -> None:
         import httpx  # imported lazily so stdlib-only test runs still work
 
         self._client = httpx.Client(
             http2=http2, verify=verify, follow_redirects=True,
             limits=httpx.Limits(max_connections=16,
                                 max_keepalive_connections=8))
+        self.max_bytes = max_bytes
 
     def request(self, method, url, *, headers, body, timeout_s):
-        response = self._client.request(
-            method, url, headers=headers, content=body, timeout=timeout_s)
-        return (response.status_code,
-                {k.lower(): v for k, v in response.headers.items()},
-                response.content)
+        """Stream, so an oversized body can be refused rather than received.
+
+        The headers arrive before the body, which is what makes the refusal
+        cheap: a resource that declares more than the cap costs one set of
+        headers and is never read. Its declared length is still returned, so
+        the caller can tell "the server says this is 19 MB" from "the server
+        sent nothing" and schedule accordingly.
+        """
+        with self._client.stream(method, url, headers=headers, content=body,
+                                 timeout=timeout_s) as response:
+            received = {k.lower(): v for k, v in response.headers.items()}
+            declared = received.get("content-length", "")
+            if declared.isdigit() and int(declared) > self.max_bytes:
+                return response.status_code, received, b""
+
+            chunks, total = [], 0
+            for chunk in response.iter_bytes():
+                total += len(chunk)
+                if total > self.max_bytes:
+                    # No Content-Length to go on, so this is only knowable
+                    # part-way through. Treated as a transport failure: we
+                    # stopped reading, so nothing was learned about the URL.
+                    raise ResponseTooLarge(
+                        f"{url}: body passed {self.max_bytes} bytes")
+                chunks.append(chunk)
+            return response.status_code, received, b"".join(chunks)
 
     def close(self) -> None:
         self._client.close()
@@ -359,9 +399,12 @@ class Fetcher:
         content_type = headers.get("content-type", "")
         etag = headers.get("etag")
         last_modified = headers.get("last-modified")
+        declared = headers.get("content-length", "")
+        content_length = int(declared) if str(declared).isdigit() else None
 
         result = FetchResult(
             job=job, status=status, body=body, content_type=content_type,
+            content_length=content_length,
             etag=etag, last_modified=last_modified, latency_ms=latency_ms)
 
         if status == 304:

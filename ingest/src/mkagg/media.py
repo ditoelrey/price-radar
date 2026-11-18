@@ -78,6 +78,11 @@ NO_EVIDENCE_STATUSES = frozenset({0, 304})
 #: transport error is still recorded, with a window short enough that a blip
 #: heals on the next pass and long enough that a reliably broken URL costs
 #: one request an hour instead of one per pass.
+#:
+#: That image is now caught before it is read at all -- see
+#: `MAX_RESPONSE_BYTES` and `too_large_declared` below -- because a declared
+#: size is evidence about the URL and earns the full day, not the hour. This
+#: window is back to meaning what it says: a connection that broke.
 TRANSPORT_RETRY_HOURS = 1
 
 #: Below this a "photo" is a spacer, a tracking pixel or an error page.
@@ -254,6 +259,15 @@ def fetch_product_images(conn, fetcher, store: ImageStore, *,
             _stamp(conn, product_id,
                    transport_retry_hours
                    if result.status in NO_EVIDENCE_STATUSES else retry_hours)
+            continue
+
+        # The server's own declaration, which the transport refused to
+        # download: no product photo is 19 MB, and unlike a dropped
+        # connection this is a fact about the resource, so it earns the full
+        # retry window rather than being re-asked every hour forever.
+        if result.content_length and result.content_length > MAX_BYTES:
+            report.note(f"too_large_declared:{result.content_length}")
+            _stamp(conn, product_id, retry_hours)
             continue
 
         ok, reason = is_storable(result.content_type, result.body)
