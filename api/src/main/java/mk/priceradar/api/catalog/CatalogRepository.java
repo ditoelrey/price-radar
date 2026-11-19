@@ -150,7 +150,8 @@ public class CatalogRepository {
                    p.primary_mpn, cat.slug AS category, cat.name_mk AS category_mk,
                    p.gender::text AS gender,
                    s.min_price_minor, s.currency_code, s.offer_count,
-                   s.merchant_count, s.available_sizes_eu, s.updated_at,
+                   s.merchant_count, s.available_sizes_eu,
+                   s.available_sizes_alpha, s.updated_at,
                    s.max_discount_pct, c.minor_unit
               FROM product_price_summary s
               JOIN product  p ON p.id = s.product_id
@@ -196,6 +197,13 @@ public class CatalogRepository {
      * size</em>, computed from {@code offer_variant}. Unknown stock
      * ({@code in_stock IS NULL}) counts as a candidate: sizeer does not
      * publish availability, and excluding it would hide real offers.
+     *
+     * <p>One query for two size systems. The EU number and the letter are
+     * different axes -- a shoe has one, a hoodie the other, and nothing has
+     * both -- but everything after the match is identical, so only the
+     * predicate is substituted. Duplicating the sixty lines around it is how
+     * the kind, category and gender filters would come to exist in one copy
+     * and not the other.
      */
     private static final String LIST_BY_SIZE = """
             WITH sized AS (
@@ -219,7 +227,7 @@ public class CatalogRepository {
                  WHERE mo.status = 'active'
                    AND m.is_active
                    AND mo.product_id IS NOT NULL
-                   AND ov.size_eu = CAST(:sizeEu AS numeric)
+                   AND /*{SIZE_MATCH}*/
                    AND ov.in_stock IS NOT FALSE
                  GROUP BY mo.product_id
             )
@@ -232,7 +240,7 @@ public class CatalogRepository {
                    p.gender::text AS gender,
                    z.from_price_minor AS min_price_minor, z.currency_code,
                    z.offer_count, z.merchant_count,
-                   s.available_sizes_eu, s.updated_at,
+                   s.available_sizes_eu, s.available_sizes_alpha, s.updated_at,
                    z.max_discount_pct, c.minor_unit
               FROM sized z
               JOIN product  p ON p.id = z.product_id
@@ -279,11 +287,18 @@ public class CatalogRepository {
      *        does not want twelve uncategorised sneakers as well.
      */
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
-                                       Double sizeEu, String[] kinds,
+                                       Double sizeEu, String sizeAlpha,
+                                       String[] kinds,
                                        boolean includeUnclassified,
                                        String categorySlug, String gender,
                                        Sort sort, int limit, int offset) {
-        boolean sized = sizeEu != null;
+        String alpha = blankToNull(sizeAlpha);
+        // An EU number wins when both arrive. They cannot both be satisfied
+        // -- no variant carries both -- so honouring both would return an
+        // empty page for a shopper who merely changed vertical with a size
+        // still in the URL.
+        boolean byEu = sizeEu != null;
+        boolean sized = byEu || alpha != null;
         // The price column differs between the two queries -- the size-
         // filtered one prices each product in the requested size -- so the
         // sort is rendered against whichever is in play.
@@ -293,6 +308,9 @@ public class CatalogRepository {
                 "/*{ORDER}*/",
                 sort.orderBy(sized ? "z.from_price_minor" : "s.min_price_minor",
                              sized ? "z.merchant_count" : "s.merchant_count"));
+        if (sized) {
+            sql = sql.replace("/*{SIZE_MATCH}*/", sizeMatch(byEu));
+        }
         var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
                 .param("brand", blankToNull(brandSlug))
@@ -302,12 +320,27 @@ public class CatalogRepository {
                 .param("gender", blankToNull(gender))
                 .param("limit", limit)
                 .param("offset", offset);
-        if (sized) {
+        if (byEu) {
             spec = spec.param("sizeEu", sizeEu);
+        } else if (sized) {
+            spec = spec.param("sizeAlpha", alpha);
         } else {
             spec = spec.param("country", country);
         }
         return spec.query((rs, rowNum) -> mapCard(rs, sized)).list();
+    }
+
+    /**
+     * The predicate that narrows the sized CTE to one size.
+     *
+     * <p>Package-private so a test can assert which axis each flag selects
+     * without a database: getting this backwards would quietly return every
+     * garment for a shoe size and vice versa, and both read as "no results"
+     * rather than as an error.
+     */
+    static String sizeMatch(boolean byEu) {
+        return byEu ? "ov.size_eu = CAST(:sizeEu AS numeric)"
+                    : "ov.size_alpha = CAST(:sizeAlpha AS text)";
     }
 
     private Dtos.ProductCard mapCard(ResultSet rs, boolean sizeSpecific) throws SQLException {
@@ -328,6 +361,7 @@ public class CatalogRepository {
                 rs.getInt("merchant_count"),
                 sizeSpecific,
                 readSizes(rs, "available_sizes_eu"),
+                readLabels(rs, "available_sizes_alpha"),
                 nullableInt(rs, "max_discount_pct"),
                 toInstant(rs, "updated_at"));
     }
@@ -339,12 +373,15 @@ public class CatalogRepository {
     private static final String PRODUCT_BY_SLUG = """
             SELECT p.id, p.slug, p.canonical_name, b.name AS brand, p.colorway,
                    p.gender::text AS gender, p.primary_mpn,
+                   cat.kind::text AS category_kind, cat.slug AS category,
+                   cat.name_mk AS category_mk,
        -- Our own copy when we hold one, the shop's URL only while the
        -- image pipeline catches up. Resolved in SQL so every caller gets
        -- the same answer and no one can forget the fallback.
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
                    s.min_price_minor, s.max_price_minor, s.currency_code,
                    s.offer_count, s.merchant_count, s.available_sizes_eu,
+                   s.available_sizes_alpha,
                    -- When a shop was last *asked*, not when we last
                    -- recomputed this row. `product_price_summary.updated_at`
                    -- is stamped now() by every promotion and by any
@@ -363,6 +400,7 @@ public class CatalogRepository {
                    c.minor_unit
               FROM product p
               JOIN brand b ON b.id = p.brand_id
+              LEFT JOIN category cat ON cat.id = p.category_id
               LEFT JOIN product_price_summary s ON s.product_id = p.id
               LEFT JOIN currency c ON c.code = s.currency_code
               LEFT JOIN image_asset ia ON ia.id = p.image_asset_id
@@ -385,6 +423,16 @@ public class CatalogRepository {
                        m.publishes_stock, m.delivery_days_min, m.delivery_days_max,
                        m.related_merchant_id, m.id AS merchant_id,
                        ov.id AS variant_id, ov.size_label, ov.size_eu,
+                       -- The canonical letter, not `size_label`: Sport
+                       -- Vision renders its whole size dictionary into every
+                       -- garment page, so the raw labels include 2XLS, M-T
+                       -- and YXS. `size_alpha` is what V18's parser could
+                       -- actually place on the ladder.
+                       ov.size_alpha, ov.size_system,
+                       -- Carried only so the ORDER BY below can reach them:
+                       -- an age or height size has no place on the alpha
+                       -- ladder and sorts on its own normalised number.
+                       ov.size_age_min_months, ov.size_height_cm,
                        ov.price_minor, ov.list_price_minor, ov.currency_code,
                        ov.in_stock, ov.stock_qty, ov.last_checked_at,
                        CASE
@@ -415,7 +463,16 @@ public class CatalogRepository {
              -- NULLS LAST: an offer with no published price is sold out,
              -- and it belongs below every offer a shopper can actually buy.
              ORDER BY offer_from_total_minor ASC NULLS LAST, merchant_name,
-                      size_eu NULLS LAST, size_label
+                      -- Every size system in one ordering, so the page can
+                      -- render variants in arrival order whatever it is
+                      -- looking at. Ordering on `size_label` alone put a
+                      -- kids' rail in alphabetical order: "1-2 год.",
+                      -- "11-12 год.", then "9-10 год.".
+                      size_eu NULLS LAST,
+                      alpha_size_rank(size_alpha) NULLS LAST,
+                      size_age_min_months NULLS LAST,
+                      size_height_cm NULLS LAST,
+                      size_label
             """;
 
     public Optional<ProductRow> findProductBySlug(String slug) {
@@ -429,12 +486,16 @@ public class CatalogRepository {
                         rs.getString("gender"),
                         rs.getString("primary_mpn"),
                         rs.getString("image_url"),
+                        rs.getString("category_kind"),
+                        rs.getString("category"),
+                        rs.getString("category_mk"),
                         nullableLong(rs, "min_price_minor"),
                         nullableLong(rs, "max_price_minor"),
                         rs.getString("currency_code"),
                         rs.getInt("offer_count"),
                         rs.getInt("merchant_count"),
                         readSizes(rs, "available_sizes_eu"),
+                        readLabels(rs, "available_sizes_alpha"),
                         toInstant(rs, "updated_at"),
                         rs.getInt("minor_unit")))
                 .optional();
@@ -455,6 +516,8 @@ public class CatalogRepository {
                         rs.getLong("variant_id"),
                         rs.getString("size_label"),
                         nullableDouble(rs, "size_eu"),
+                        rs.getString("size_alpha"),
+                        rs.getString("size_system"),
                         // nullableLong, not getLong: a sold-out offer whose
                         // shop publishes no price has price_minor NULL, and
                         // getLong would silently turn that into 0 -- which
@@ -479,10 +542,13 @@ public class CatalogRepository {
 
     public record ProductRow(long id, String slug, String name, String brand,
                              String colorway, String gender, String mpn,
-                             String imageUrl, Long minPriceMinor,
+                             String imageUrl, String categoryKind,
+                             String category, String categoryMk,
+                             Long minPriceMinor,
                              Long maxPriceMinor, String currency,
                              int offerCount, int merchantCount,
-                             List<Double> availableSizesEu, Instant updatedAt,
+                             List<Double> availableSizesEu,
+                             List<String> availableSizes, Instant updatedAt,
                              int minorUnit) {
     }
 
@@ -492,6 +558,7 @@ public class CatalogRepository {
                                   Integer deliveryDaysMin, Integer deliveryDaysMax,
                                   String relatedMerchantSlug, long variantId,
                                   String sizeLabel, Double sizeEu,
+                                  String sizeAlpha, String sizeSystem,
                                   Long priceMinor, Long listPriceMinor,
                                   long shippingMinor, Long totalMinor,
                                   Long offerFromPriceMinor,
@@ -530,6 +597,30 @@ public class CatalogRepository {
             }
         }
         out.sort(Double::compareTo);
+        return out;
+    }
+
+    /**
+     * Text sizes, in the order the database put them.
+     *
+     * <p>Unsorted here on purpose, unlike {@link #readSizes}: the array is
+     * built in ladder order by {@code alpha_size_rank}, and sorting the
+     * strings again would hand the rail 3XL, L, M, S, XL, XS.
+     */
+    private static List<String> readLabels(ResultSet rs, String column) throws SQLException {
+        var array = rs.getArray(column);
+        if (array == null) {
+            return List.of();
+        }
+        Object raw = array.getArray();
+        List<String> out = new ArrayList<>();
+        if (raw instanceof Object[] values) {
+            for (Object value : values) {
+                if (value != null) {
+                    out.add(value.toString());
+                }
+            }
+        }
         return out;
     }
 

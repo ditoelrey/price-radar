@@ -65,7 +65,8 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("tracksuits", ("trenerka", "trenerki", "komplet", "kompleti",
                     "tracksuit", "jumpsuit", "kombinezon")),
     ("leggings", ("helanki", "helanka", "legging", "tajice",
-                  "biciklistichki", "biciklisticke", "ski helanki")),
+                  "biciklistichki", "biciklisticke", "biciklisticki",
+                  "biciklisticka", "ski helanki")),
     # "Топ" is deliberately absent. It transliterates to "top", and
     # "COURT BOROUGH LOW TOP" is a shoe -- this block runs before the
     # footwear rules, so a bare "top" here would file trainers as sports
@@ -83,13 +84,21 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                  "polari", "djemper", "djemperi", "sweatshirt", "fleece")),
     ("jackets", ("jakna", "jakni", "jacket", "elek", "eleci", "prsluk",
                  "vetrovka", "vetrovki", "softshel", "softshell",
-                 "shushkavec", "shushkavci", "teksas jakni", "vest",
+                 "shushkavec", "shushkavci", "suskavec", "suskavci",
+                 "teksas jakni", "vest",
                  "windbreaker", "parka", "anorak")),
     # Plural only. "short" singular matched UGG's "Чизми CLASSIC SHORT II",
     # a boot -- and this block runs before the footwear rules, so it won.
-    ("shorts", ("shorc", "shorcevi", "shorts")),
+    #
+    # The h-less spellings are the shops' own URL slugs: Шорц is "sorc" in a
+    # sportvision path and "shorc" out of the transliterator, so the section
+    # holding 835 offers was unreadable to every rule. Same for Шушкавец and
+    # Кошула above. These are slugs, not English, so the singular is safe.
+    ("shorts", ("shorc", "shorcevi", "shorts", "sorc", "sorcevi",
+                "sorcevii", "bermudi")),
     ("tshirts", ("maica", "maici", "majica", "maici so dolgi rakavi",
-                 "dres", "dresovi", "koshula", "koshuli", "polo", "fanela",
+                 "dres", "dresovi", "koshula", "koshuli", "kosula",
+                 "kosuli", "polo", "fanela",
                  "t shirt", "tshirt", "tee", "jersey", "shirt")),
     # Clothing whose kind the title does not narrow. Last of the apparel
     # rules, and still a real answer: the parent category means "clothing,
@@ -212,8 +221,36 @@ def _normalise(text: str) -> str:
 
 
 def _first_match(rules, haystacks) -> str | None:
-    for haystack in haystacks:
-        for slug, keywords in rules:
+    """The first rule any haystack satisfies, rules tried in order.
+
+    The loop nesting is the whole point, and it used to be the other way
+    round: every rule was tried against the title before the URL was looked
+    at even once. That made a weak word in a marketing name outrank the
+    section the shop itself shelved the article in.
+
+    What it cost, measured over 29 611 live offers: ``tf`` is in the cleats
+    list because it means *turf*, and Nike abbreviates Therma-FIT the same
+    way, so ``Nike W NK TF SYN CLSSC JKT`` was a football boot -- while its
+    own URL said ``/mk/jakna/``, the shop's jacket section. ``terrex`` did
+    the same to the Terrex clothing line. 42 garments sat in footwear
+    categories, and no re-crawl could repair them: the title said the same
+    thing every time.
+
+    Trying each rule against every haystack puts the URL on equal footing
+    and lets rule order resolve the rest, which is what the facet-first
+    precedence in :mod:`mkagg.derive` already assumes. 212 offers move, 196
+    of them to a better answer -- including 99 ``Fleece Jogger``s that were
+    hoodies because of the word "fleece" and are shelved under
+    ``/mk/dolen-del-trenerki/``.
+
+    The remainder is a real trade, not a free win: where a title names one
+    garment and the shop's section names another, the shop now wins. A
+    "WOVEN UTILITY JACKET" filed under ``/mk/dukser/`` becomes a hoodie, 14
+    offers' worth. That is the shop's own shelving, which is the source this
+    taxonomy trusts most elsewhere, so it is allowed to win here too.
+    """
+    for slug, keywords in rules:
+        for haystack in haystacks:
             for keyword in keywords:
                 # Keep the padding: matching whole words, not substrings.
                 # Stripping it made "ball" match inside "HANDBALL SPEZIAL" and

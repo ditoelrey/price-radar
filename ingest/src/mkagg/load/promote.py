@@ -490,8 +490,8 @@ WITH v AS (
 INSERT INTO product_price_summary (
         product_id, country_code, min_price_minor, min_price_variant_id,
         max_price_minor, currency_code, offer_count, merchant_count,
-        in_stock_offer_count, available_sizes_eu, max_discount_pct,
-        updated_at)
+        in_stock_offer_count, available_sizes_eu, available_sizes_alpha,
+        max_discount_pct, updated_at)
 SELECT %(pid)s, 'MK',
        min(price_minor),
        (SELECT id FROM v ORDER BY price_minor LIMIT 1),
@@ -501,6 +501,14 @@ SELECT %(pid)s, 'MK',
        coalesce(array_agg(DISTINCT size_eu)
                 FILTER (WHERE size_eu IS NOT NULL AND in_stock IS NOT FALSE),
                 '{}'),
+       -- The same thing for garments, which have no EU number at all. Built
+       -- in a subquery rather than with a FILTER: the array has to come out
+       -- in ladder order (XXS, XS, S ... 5XL), and DISTINCT inside
+       -- array_agg will only order by the expression it is de-duplicating.
+       coalesce((SELECT array_agg(a ORDER BY alpha_size_rank(a), a)
+                   FROM (SELECT DISTINCT size_alpha AS a FROM v
+                          WHERE size_alpha IS NOT NULL
+                            AND in_stock IS NOT FALSE) t), '{}'),
        -- The best saving any shop advertises on this product, so the listing
        -- can sort by discount without joining the variants. A maximum, not an
        -- average: a shopper asking "where is this most reduced" is asking
@@ -530,6 +538,7 @@ ON CONFLICT (product_id) DO UPDATE SET
         merchant_count       = EXCLUDED.merchant_count,
         in_stock_offer_count = EXCLUDED.in_stock_offer_count,
         available_sizes_eu   = EXCLUDED.available_sizes_eu,
+        available_sizes_alpha = EXCLUDED.available_sizes_alpha,
         max_discount_pct     = EXCLUDED.max_discount_pct,
         updated_at           = now()
 """

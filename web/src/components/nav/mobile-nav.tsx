@@ -23,9 +23,9 @@ import { ArrowRight, ChevronDown, Menu, X, type LucideIcon } from "lucide-react"
 
 import {
   COMING_SOON,
-  FOOTWEAR_CATEGORIES,
   GENDER_COLUMNS,
   VERTICALS,
+  categoriesFor,
   listingHref,
 } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
@@ -136,7 +136,7 @@ export function MobileNav() {
                         key={gender.slug}
                         className="flex items-center justify-between py-1.5 text-sm text-muted-foreground/70"
                       >
-                        {gender.nounLabel}
+                        {gender.label}
                         <span className="text-xs">{COMING_SOON}</span>
                       </div>
                     ))}
@@ -150,7 +150,7 @@ export function MobileNav() {
                       onClick={close}
                       className="block py-1.5 text-sm font-medium underline underline-offset-4"
                     >
-                      Сите обувки
+                      {vertical.allLabel}
                     </Link>
 
                     {GENDER_COLUMNS.map((gender) => {
@@ -166,7 +166,10 @@ export function MobileNav() {
                           {genderOpen && (
                             <div className="pb-2 pl-3">
                               <ul>
-                                {FOOTWEAR_CATEGORIES.map((category) => (
+                                {categoriesFor(
+                                  vertical.kind,
+                                  gender.slug,
+                                ).map((category) => (
                                   <li key={category.slug}>
                                     <Link
                                       href={listingHref({
@@ -195,7 +198,7 @@ export function MobileNav() {
                                 onClick={close}
                                 className="mt-1 flex items-center gap-1 border-t pt-2 text-sm font-medium"
                               >
-                                Сите обувки
+                                {vertical.allLabel}
                                 <ArrowRight className="size-3.5" />
                               </Link>
                             </div>

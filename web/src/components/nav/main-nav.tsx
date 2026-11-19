@@ -19,9 +19,9 @@ import { ArrowRight, ChevronDown } from "lucide-react";
 
 import {
   COMING_SOON,
-  FOOTWEAR_CATEGORIES,
   GENDER_COLUMNS,
   VERTICALS,
+  categoriesFor,
   listingHref,
   type Vertical,
 } from "@/lib/navigation";
@@ -30,69 +30,63 @@ import { cn } from "@/lib/utils";
 /** Long enough to cross the gap below the trigger, short enough to feel shut. */
 const CLOSE_DELAY_MS = 120;
 
-function FootwearMenu() {
+/**
+ * One menu for every vertical that has leaves.
+ *
+ * This was two components, `FootwearMenu` and a `ComingSoonMenu` that drew
+ * the three gender headings with "Наскоро" under each. Apparel went live
+ * with 17 032 offers and still rendered the second one, so the menu showed
+ * Мажи / Жени / Деца and nothing to click.
+ */
+function VerticalMenu({ vertical }: { vertical: Vertical }) {
   return (
     <div className="grid grid-cols-3 gap-8">
-      {GENDER_COLUMNS.map((gender) => (
-        <section key={gender.slug}>
-          {/* text-base against the leaves' text-sm. Both were text-sm
-              first, which left weight and colour doing all the work and the
-              column reading as five similar links. */}
-          <h3 className="border-b pb-2 text-base font-semibold">
-            {gender.label}
-          </h3>
-          {/* The leaves carry the weight here, so they are set smaller and
-              tighter than the column head: four short labels at body size
-              read as four headings rather than as a list under one. */}
-          <ul className="mt-3 space-y-1">
-            {FOOTWEAR_CATEGORIES.map((category) => (
-              <li key={category.slug}>
-                <Link
-                  href={listingHref({
-                    kind: "footwear",
-                    gender: gender.slug,
-                    category: category.slug,
-                  })}
-                  className="block py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {category.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
+      {GENDER_COLUMNS.map((gender) => {
+        const categories = categoriesFor(vertical.kind, gender.slug);
+        return (
+          <section key={gender.slug}>
+            {/* text-base against the leaves' text-sm. Both were text-sm
+                first, which left weight and colour doing all the work and the
+                column reading as five similar links. */}
+            <h3 className="border-b pb-2 text-base font-semibold">
+              {gender.label}
+            </h3>
+            {/* The leaves carry the weight here, so they are set smaller and
+                tighter than the column head. Apparel brings eleven of them
+                against footwear's four, so the list scrolls with the panel
+                rather than setting its own height. */}
+            <ul className="mt-3 space-y-1">
+              {categories.map((category) => (
+                <li key={category.slug}>
+                  <Link
+                    href={listingHref({
+                      kind: vertical.kind,
+                      gender: gender.slug,
+                      category: category.slug,
+                    })}
+                    className="block py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {category.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
 
-          {/* Last, not first. "Сите обувки" is the escape hatch for someone
-              the four leaves did not serve, and a shopper who knows they
-              want Копачки should not have to read past "everything" to find
-              it. Separated by a rule so it reads as a different kind of
-              link rather than a fifth category. */}
-          <Link
-            href={listingHref({ kind: "footwear", gender: gender.slug })}
-            className="mt-3 flex items-center gap-1 border-t pt-3 text-sm font-medium transition-colors hover:text-primary"
-          >
-            Сите обувки
-            <ArrowRight className="size-3.5" />
-          </Link>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function ComingSoonMenu() {
-  return (
-    <div className="grid grid-cols-3 gap-8">
-      {GENDER_COLUMNS.map((gender) => (
-        <section key={gender.slug}>
-          <h3 className="border-b pb-2 text-base font-semibold text-muted-foreground">
-            {gender.nounLabel}
-          </h3>
-          {/* A span, not a link. There is nothing to navigate to yet, and a
-              link that lands on an empty listing reads as a broken site
-              rather than an unfinished section. */}
-          <p className="mt-3 text-sm text-muted-foreground/70">{COMING_SOON}</p>
-        </section>
-      ))}
+            {/* Last, not first. The "view all" link is the escape hatch for
+                someone the leaves did not serve, and a shopper who knows
+                they want Копачки should not have to read past "everything"
+                to find it. Separated by a rule so it reads as a different
+                kind of link rather than one more category. */}
+            <Link
+              href={listingHref({ kind: vertical.kind, gender: gender.slug })}
+              className="mt-3 flex items-center gap-1 border-t pt-3 text-sm font-medium transition-colors hover:text-primary"
+            >
+              {vertical.allLabel}
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -130,8 +124,9 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [openKind]);
 
-  // Equipment has no menu at all, so it gets no trigger behaviour either.
-  const hasMenu = (vertical: Vertical) => vertical.kind !== "equipment";
+  // Driven by the data now, not by naming the one vertical that lacks
+  // leaves: a vertical with no categories has nothing to open.
+  const hasMenu = (vertical: Vertical) => Boolean(vertical.categories);
 
   return (
     <div
@@ -218,7 +213,12 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
           onMouseLeave={scheduleClose}
         >
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            {openKind === "footwear" ? <FootwearMenu /> : <ComingSoonMenu />}
+            {(() => {
+              const vertical = VERTICALS.find((v) => v.kind === openKind);
+              return vertical?.categories ? (
+                <VerticalMenu vertical={vertical} />
+              ) : null;
+            })()}
           </div>
         </div>
       )}

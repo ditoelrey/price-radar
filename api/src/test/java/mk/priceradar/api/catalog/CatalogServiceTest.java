@@ -39,6 +39,10 @@ class CatalogServiceTest {
         return new CatalogRepository.OfferVariantRow(
                 offerId, merchantSlug, merchantName, 4.0, 10, publishesStock,
                 2, 4, relatedSlug, variantId, sizeLabel, sizeEu,
+                // sizeAlpha and sizeSystem: null because every row in these
+                // tests is a shoe carrying an EU number, which is the point
+                // -- a variant sits on one ladder or the other, never both.
+                null, null,
                 price, null, shipping, price + shipping, price, offerFromTotal,
                 "MKD", inStock, inStock == Boolean.TRUE ? 3 : null,
                 checkedAt, 0);

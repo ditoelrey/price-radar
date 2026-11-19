@@ -171,12 +171,18 @@ class DeriveReport:
     gender_conflicts: int = 0
     unchanged: int = 0
     kept_facet: int = 0
+    #: Products a person has decided, which this pass left alone. Counted
+    #: separately from `kept_facet` so the number is visible: a manual
+    #: category that silently stopped being honoured would look exactly like
+    #: one that was never set.
+    kept_manual: int = 0
 
     def summary(self) -> str:
         return (f"products={self.products} category_set={self.category_set} "
                 f"gender_set={self.gender_set} "
                 f"unchanged={self.unchanged} "
                 f"kept_facet={self.kept_facet} "
+                f"kept_manual={self.kept_manual} "
                 f"gender_conflicts={self.gender_conflicts}")
 
 
@@ -237,11 +243,22 @@ def rederive(conn, *, dry_run: bool = False,
         # break a tie between them has not lost anything, and blocking that
         # was keeping 16 products in the parent bucket whose own titles said
         # "Terrex".
-        if cat_src == "facet" and not any(o.facet_category for o in offers):
+        # A person outranks both automatic sources and is never revised.
+        # The case it exists for is a shop contradicting itself: Sport
+        # Reality shelves `puma-wardrobe-essentials-62974230` under Градник
+        # and calls it a маица in its own description, so the facet is wrong
+        # and the title is silent. Re-deriving would put it back in the bra
+        # bucket on every pass, for ever.
+        if cat_src == "manual":
+            category, category_source = cur_cat, cat_src
+            report.kept_manual += 1
+        elif cat_src == "facet" and not any(o.facet_category for o in offers):
             category, category_source = cur_cat, cat_src
             report.kept_facet += 1
-        if gender_src == "facet" and not any(o.merchant_gender
-                                             for o in offers):
+        if gender_src == "manual":
+            gender, gender_source = cur_gender, gender_src
+        elif gender_src == "facet" and not any(o.merchant_gender
+                                               for o in offers):
             gender, gender_source = cur_gender, gender_src
 
         if (category, category_source, gender, gender_source) == \

@@ -88,6 +88,16 @@ public final class Dtos {
             boolean fromPriceIsSizeSpecific,
             List<Double> availableSizesEu,
             /**
+             * Letter sizes a shopper can buy, smallest first.
+             *
+             * <p>Separate from {@code availableSizesEu} rather than merged
+             * into one list of strings: they are different axes and nothing
+             * carries both. A shoe fills the first and a garment the second,
+             * so a client can tell which rail to draw by seeing which list
+             * has anything in it.
+             */
+            List<String> availableSizes,
+            /**
              * Best advertised saving on this product, as whole percent, or
              * null when no shop is discounting it.
              *
@@ -113,6 +123,26 @@ public final class Dtos {
             long id,
             String sizeLabel,
             Double sizeEu,
+            /**
+             * The canonical letter, XXS to 5XL, or null when this variant is
+             * not on that ladder. Distinct from {@code sizeLabel}, which is
+             * whatever the shop printed: Sport Vision renders its entire size
+             * dictionary into every garment page, so the raw labels include
+             * 2XLS, M-T and YXS alongside the real ones.
+             */
+            String sizeAlpha,
+            /**
+             * Which ladder this size is on: {@code alpha}, {@code age},
+             * {@code height}, {@code numeric}, or null.
+             *
+             * <p>{@code numeric} is the sizing parser's catch-all, not a
+             * system: every normalised column is empty on those rows. For
+             * apparel it is almost entirely Sport Vision's template
+             * dictionary -- NS, 1X, YMD, 2XLT -- which the shop renders into
+             * every garment page and sells in none of: 2 479 NS variants, 0
+             * of them in stock. A client showing sizes should skip them.
+             */
+            String sizeSystem,
             Money price,
             Money listPrice,
             Money shipping,
@@ -154,11 +184,19 @@ public final class Dtos {
             String gender,
             String mpn,
             String imageUrl,
+            /** {@code footwear}, {@code apparel}, ... or null if unclassified. */
+            String categoryKind,
+            /** Canonical leaf slug, or null. */
+            String category,
+            /** The same leaf in Macedonian, for the breadcrumb. */
+            String categoryMk,
             Money lowestPrice,
             Money highestPrice,
             int offerCount,
             int merchantCount,
             List<Double> availableSizesEu,
+            /** Letter sizes, smallest first; the garment counterpart. */
+            List<String> availableSizes,
             /**
              * When any shop was last asked about this product -- the newest
              * {@code offer_variant.last_checked_at} among its active

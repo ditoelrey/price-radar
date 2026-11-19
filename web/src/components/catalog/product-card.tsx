@@ -18,13 +18,21 @@ import { cn } from "@/lib/utils";
 export function ProductCard({
   product,
   sizeEu,
+  size,
 }: {
   product: ProductCardData;
   sizeEu?: number;
+  /** The letter in force, when the listing is filtered on that axis. */
+  size?: string;
 }) {
+  // The size in force travels to the detail page, whichever axis it is on.
+  // Only `sizeEu` did, so clicking a hoodie from a listing filtered to M
+  // landed on a page that had forgotten the size.
   const href = sizeEu
     ? `/products/${product.slug}?sizeEu=${sizeEu}`
-    : `/products/${product.slug}`;
+    : size
+      ? `/products/${product.slug}?size=${encodeURIComponent(size)}`
+      : `/products/${product.slug}`;
 
   return (
     <Link
@@ -53,9 +61,16 @@ export function ProductCard({
           </div>
         )}
 
+        {/* "EU 42" for a shoe, a bare "M" for a garment: the letter is not
+            an EU measurement and labelling it one is simply wrong. */}
         {product.fromPriceIsSizeSpecific && sizeEu !== undefined && (
           <Badge variant="price" className="absolute left-2 top-2">
             EU {formatSizeEu(sizeEu)}
+          </Badge>
+        )}
+        {product.fromPriceIsSizeSpecific && sizeEu === undefined && size && (
+          <Badge variant="price" className="absolute left-2 top-2">
+            {size}
           </Badge>
         )}
 
@@ -87,8 +102,17 @@ export function ProductCard({
         </p>
 
         <div className="mt-auto pt-2">
+          {/* "број" is a shoe size and "големина" a garment size; the card
+              knows which it is by which list the product filled, since
+              nothing carries both. Saying "во вашиот број" over a hoodie is
+              the same mismatch the size rail's own heading had. */}
           <p className="text-[11px] text-muted-foreground">
-            {product.fromPriceIsSizeSpecific ? "во вашиот број од" : "од"}
+            {product.fromPriceIsSizeSpecific
+              ? product.availableSizesEu.length === 0 &&
+                product.availableSizes.length > 0
+                ? "во вашата големина од"
+                : "во вашиот број од"
+              : "од"}
           </p>
           <p className="tnum text-lg font-semibold text-price">
             {formatMoney(product.fromPrice)}

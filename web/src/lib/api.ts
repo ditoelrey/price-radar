@@ -65,6 +65,14 @@ export type ProductCard = {
   fromPriceIsSizeSpecific: boolean;
   availableSizesEu: number[];
   /**
+   * Letter sizes, smallest first, already in ladder order from the API.
+   * Never re-sorted here: sorting these as strings gives 3XL, L, M, S, XL.
+   *
+   * A product fills this or `availableSizesEu`, never both, so which one has
+   * entries is how the rail knows which axis it is on.
+   */
+  availableSizes: string[];
+  /**
    * Best advertised saving on this product, as whole percent, or null when
    * no shop is discounting it. Null rather than 0, so the card can treat
    * "present" as "worth a badge".
@@ -83,8 +91,20 @@ export type ProductPage = {
 
 export type OfferVariant = {
   id: number;
+  /** Whatever the shop printed, junk included. Prefer `displaySize`. */
   sizeLabel: string;
   sizeEu: number | null;
+  /** The canonical letter, or null when this variant is not on that ladder. */
+  sizeAlpha: string | null;
+  /**
+   * `alpha`, `age`, `height`, `numeric`, or null.
+   *
+   * `numeric` is the sizing parser's catch-all rather than a system, and on
+   * apparel it is almost entirely Sport Vision's template dictionary -- NS,
+   * 1X, YMD, 2XLT -- rendered into every garment page and sold in none of
+   * them. 2 479 NS variants exist and not one is in stock.
+   */
+  sizeSystem: string | null;
   price: Money | null;
   listPrice: Money | null;
   shipping: Money | null;
@@ -119,11 +139,17 @@ export type ProductDetail = {
   gender: string | null;
   mpn: string | null;
   imageUrl: string | null;
+  /** `footwear`, `apparel`, ... or null when nothing has classified it. */
+  categoryKind: string | null;
+  category: string | null;
+  /** The leaf in Macedonian, for the breadcrumb. */
+  categoryMk: string | null;
   lowestPrice: Money | null;
   highestPrice: Money | null;
   offerCount: number;
   merchantCount: number;
   availableSizesEu: number[];
+  availableSizes: string[];
   updatedAt: string | null;
   priceDisclaimer: string;
   offers: Offer[];
@@ -133,6 +159,8 @@ export type SearchParams = {
   q?: string;
   brand?: string;
   sizeEu?: number;
+  /** A letter from the ladder, XXS to 5XL. The garment half of `sizeEu`. */
+  size?: string;
   /**
    * Which category kinds the listing serves: `footwear` (the default on the
    * API side), `apparel`, `accessory`, `equipment`, or `all`.
@@ -178,6 +206,7 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       q: params.q,
       brand: params.brand,
       sizeEu: params.sizeEu,
+      size: params.size,
       kind: params.kind,
       category: params.category,
       gender: params.gender,
@@ -191,9 +220,11 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
 export async function getProduct(
   slug: string,
   sizeEu?: number,
+  /** The non-EU axis: a letter, or a kids' age or height band. */
+  size?: string,
 ): Promise<ProductDetail | null> {
   const response = await fetch(
-    `${API_BASE}/api/v1/products/${encodeURIComponent(slug)}${buildQuery({ sizeEu })}`,
+    `${API_BASE}/api/v1/products/${encodeURIComponent(slug)}${buildQuery({ sizeEu, size })}`,
     { headers: { Accept: "application/json" }, next: { revalidate: 60 } },
   );
   if (response.status === 404) return null;

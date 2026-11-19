@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 import { searchProducts } from "@/lib/api";
 import { formatSizeEu } from "@/lib/format";
 import { FilterSidebar } from "@/components/catalog/filter-sidebar";
-import { listingHref, listingTitle } from "@/lib/navigation";
+import { byAlphaLadder, listingHref, listingTitle } from "@/lib/navigation";
 import { isSortKey } from "@/lib/sort";
 import { ProductCard } from "@/components/catalog/product-card";
 import { SiteFooter } from "@/components/site-footer";
@@ -31,6 +31,11 @@ export default async function ProductsPage({
   const brand = one(params.brand);
   const sizeRaw = one(params.sizeEu);
   const sizeEu = sizeRaw ? Number(sizeRaw) : undefined;
+  // The garment axis. Not validated against the ladder here: an unknown
+  // letter matches no row and the shopper gets an empty listing, which is
+  // the truthful answer, and validating would mean this page kept its own
+  // copy of a vocabulary that lives in the database.
+  const size = one(params.size);
   // Validated against the known keys rather than passed through: an unknown
   // value would otherwise travel to the API to be silently ignored there,
   // and the control would show a selection the listing is not using.
@@ -52,6 +57,7 @@ export default async function ProductsPage({
     q,
     brand,
     sizeEu: Number.isFinite(sizeEu) ? sizeEu : undefined,
+    size,
     kind,
     category,
     gender,
@@ -65,6 +71,13 @@ export default async function ProductsPage({
   const sizes = Array.from(
     new Set(result.items.flatMap((item) => item.availableSizesEu)),
   ).sort((a, b) => a - b);
+  // Ranked, not sorted and not left as found. Each card's own list arrives
+  // in ladder order, but merging 24 of them orders by first appearance --
+  // a page opening with an S/M/XL hoodie renders "S M XL L XXL" -- and
+  // sorting the strings instead would give 3XL, L, M, S, XL, XS.
+  const alphaSizes = Array.from(
+    new Set(result.items.flatMap((item) => item.availableSizes)),
+  ).sort(byAlphaLadder);
 
   const pageHref = (next: number) => listingHref({ ...filters, page: next });
 
@@ -96,7 +109,11 @@ export default async function ProductsPage({
         </div>
 
         <div className="flex flex-col gap-6 lg:flex-row">
-          <FilterSidebar sizes={sizes} filters={filters} />
+          <FilterSidebar
+            sizes={sizes}
+            alphaSizes={alphaSizes}
+            filters={filters}
+          />
 
           <section className="min-w-0 flex-1">
             {result.items.length === 0 ? (
@@ -119,6 +136,7 @@ export default async function ProductsPage({
                     key={product.slug}
                     product={product}
                     sizeEu={sizeEu}
+                    size={size}
                   />
                 ))}
               </div>

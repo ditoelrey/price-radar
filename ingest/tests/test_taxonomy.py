@@ -518,3 +518,92 @@ class TestCatalogueNames:
     def test_empty_title(self):
         assert clean_model_name("", "Puma", mpn="X", merchant="Y") == ""
         assert clean_model_name(None, None) == ""
+
+
+class TestTheShopsSectionIsConsultedPerRule:
+    """A weak word in a title must not outrank the shop's own section.
+
+    Every rule is now tried against the title and the URL together, rather
+    than the whole rule list being spent on the title first. These are the
+    live offers that behaviour was wrong for.
+    """
+
+    #: ``tf`` is in the cleats list for *turf*. Nike abbreviates Therma-FIT
+    #: identically, so these garments were football boots.
+    THERMA_FIT = [
+        ("Nike W NK TF SYN CLSSC JKT",
+         "https://www.sportvision.mk/mk/jakna/8726800-nike-w-nk-tf", "jackets"),
+        ("Nike M NK TF FLEX FLC FZ HD",
+         "https://www.sportvision.mk/mk/dukser/8724981-nike-m-nk-tf", "hoodies"),
+        ("Nike M NK TF RPL CHLLGR PANT",
+         "https://www.sportvision.mk/mk/dolen-del-trenerki/8672285-x",
+         "trousers"),
+        ("Nike W NK ONE TF HZ TOP POLAR",
+         "https://www.sportvision.mk/mk/maica-dolgi-rakavi/8705852-x",
+         "tshirts"),
+        ("Adidas TF BASE TIGHT",
+         "https://www.sportvision.mk/mk/helanki/8661180-x", "leggings"),
+    ]
+
+    @pytest.mark.parametrize("title,url,expected", THERMA_FIT)
+    def test_therma_fit_clothing_is_not_a_football_boot(self, title, url,
+                                                        expected):
+        assert classify(title, url=url) == expected
+
+    #: The same collision from the other direction: adidas sells Terrex
+    #: clothing, and ``terrex`` is a shoes_boots rule.
+    TERREX_CLOTHING = [
+        ("adidas Terrex Multi",
+         "https://www.sportreality.mk/mk/maica/158157-adidas-terrex-multi",
+         "tshirts"),
+        ("adidas Terrex Polar",
+         "https://www.sportvision.mk/mk/dukser/8701351-adidas-terrex-polar",
+         "hoodies"),
+        ("adidas Terrex Multi RAIN.RDY 2-Layer",
+         "https://www.sportreality.mk/mk/jakna/161132-adidas-terrex-multi",
+         "jackets"),
+        ("adidas Terrex",
+         "https://www.sportvision.mk/mk/dolen-del-trenerki/8697272-x",
+         "trousers"),
+    ]
+
+    @pytest.mark.parametrize("title,url,expected", TERREX_CLOTHING)
+    def test_terrex_clothing_is_not_a_hiking_boot(self, title, url, expected):
+        assert classify(title, url=url) == expected
+
+    def test_turf_boots_keep_their_keyword(self):
+        """The fix must not be a keyword removal: 124 live offers say TF and
+        mean turf, 33 of them with no other football word to fall back on."""
+        for title in ("Nike Tiempo Maestro Club TF", "Umbro Libero TF",
+                      "Adidas COPA PURE IV CLUB TF", "Lotto MEDO KIDS TF"):
+            assert classify(title) == "cleats", title
+        assert classify(
+            "IE7525 Патики COPA PURE 2 CLUB TF - Megasport",
+            url="https://megasportonlineshop.com/p/patiki-copa-pure-2-club-tf/"
+        ) == "cleats"
+
+    def test_a_shoe_section_still_names_the_shoe(self):
+        """The inversion must not hand apparel anything that is footwear."""
+        assert classify(
+            "Salomon Shoes Exeo 2 GTX",
+            url="https://www.sportvision.mk/mk/patiki/8717840-salomon-shoes"
+        ) == "sneakers"
+        assert classify(
+            "Timberland MID LACE SNEAKER",
+            url="https://www.sportvision.mk/mk/konduri/8731146-timberland"
+        ) == "shoes_boots"
+
+    def test_a_material_word_does_not_beat_the_section(self):
+        """99 offers: "Fleece Jogger" read as a hoodie because of "fleece",
+        while the shop shelves it under tracksuit bottoms."""
+        assert classify(
+            "Under Armour UA Essential Fleece Jogger",
+            url="https://www.sportreality.mk/mk/dolen-del-trenerki/180136-x"
+        ) == "trousers"
+
+    def test_the_title_still_decides_when_the_url_says_nothing(self):
+        """aspnet shops put no category in the path, only query parameters."""
+        assert classify(
+            "IN5590 Хеланки ADIDAS TF BASE TIGHT - Megasport",
+            url="https://sport-m.mk/ProductCatalog?Segment=03&Grupa=02"
+        ) == "leggings"

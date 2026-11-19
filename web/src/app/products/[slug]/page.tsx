@@ -6,10 +6,12 @@ import { ChevronRight, ImageIcon, Info, Store } from "lucide-react";
 import { getProduct, type Offer } from "@/lib/api";
 import { formatMoney, formatSizeEu } from "@/lib/format";
 import { OfferRow } from "@/components/catalog/offer-row";
+import { LabelSizePicker } from "@/components/catalog/label-size-picker";
 import { SizePicker } from "@/components/catalog/size-picker";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
+import { VERTICALS, listingHref } from "@/lib/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -60,14 +62,21 @@ export async function generateMetadata({
  * its cheapest overall only when nothing is available, in which case the row
  * reads honestly as sold out.
  */
-function rowsFor(offers: Offer[], sizeEu?: number) {
+function rowsFor(offers: Offer[], sizeEu?: number, size?: string) {
   const rows = offers.flatMap((offer) => {
+    // One axis or the other. A variant carries an EU number or a letter,
+    // never both, so narrowing on both at once always empties the table.
     const variants =
-      sizeEu === undefined
-        ? offer.variants
-        : offer.variants.filter(
+      sizeEu !== undefined
+        ? offer.variants.filter(
             (v) => v.sizeEu !== null && Math.abs(v.sizeEu - sizeEu) < 0.005,
-          );
+          )
+        : size !== undefined
+          ? // Matched against the same string the chip shows, which is the
+            // canonical letter where there is one and the shop's own label
+            // otherwise -- the only form a kids' size has.
+            offer.variants.filter((v) => (v.sizeAlpha ?? v.sizeLabel) === size)
+          : offer.variants;
     if (variants.length === 0) return [];
 
     const byPrice = [...variants].sort(
@@ -123,18 +132,27 @@ export default async function ProductDetailPage({
   const search = await searchParams;
   const sizeRaw = one(search.sizeEu);
   const sizeEu = sizeRaw ? Number(sizeRaw) : undefined;
+  const size = one(search.size);
 
+  // Fetched unfiltered on purpose, even when a size is in the URL: the page
+  // needs every offer to work out whether the headline price is actually
+  // available in that size. The endpoint takes `size` too, for clients that
+  // only want the narrowed list.
   const product = await getProduct(slug);
   if (!product) notFound();
 
-  const rows = rowsFor(product.offers, sizeEu);
+  // The vertical this product belongs to, for the breadcrumb's first step.
+  // Looked up rather than assumed: an unclassified product has no vertical
+  // and gets a plain link to everything instead of a wrong one.
+  const vertical = VERTICALS.find((v) => v.kind === product.categoryKind);
+  const rows = rowsFor(product.offers, sizeEu, size);
   const best = rows[0];
 
   // The headline across all sizes, so the page can say plainly when the
   // advertised price is not available in the size the shopper asked for.
   const overallBest = rowsFor(product.offers)[0];
   const headlineDiffers =
-    sizeEu !== undefined &&
+    (sizeEu !== undefined || size !== undefined) &&
     best &&
     overallBest &&
     best.variant.totalPrice &&
@@ -157,16 +175,65 @@ export default async function ProductDetailPage({
     ),
   ).sort((a, b) => a - b);
 
+  // The non-EU sizes: letters for adult garments, age bands for kids'. Shown
+  // because the page otherwise listed a price and no sizes at all for every
+  // apparel product -- 17 032 offers whose sizes we hold.
+  //
+  // `numeric` is excluded, and that is the whole filter. It is the sizing
+  // parser's catch-all rather than a real system, and on apparel it is
+  // almost entirely Sport Vision's template dictionary: every garment page
+  // carries NS, 1X, 2XLT, YMD and twenty more the shop never sells. One
+  // adidas tee renders 33 sizes that way, of which five are real.
+  //
+  // Order is the API's, which ranks each system on its own scale -- the
+  // ladder for letters, months for ages. Re-sorting here would put "11-12
+  // год." before "9-10 год.".
+  const labelled = product.offers.flatMap((offer) => offer.variants).filter(
+    (v) =>
+      v.sizeEu === null &&
+      v.sizeSystem !== null &&
+      v.sizeSystem !== "numeric",
+  );
+  const otherSizes: string[] = [];
+  const otherInStock = new Set<string>();
+  for (const variant of labelled) {
+    const label = variant.sizeAlpha ?? variant.sizeLabel;
+    if (!otherSizes.includes(label)) otherSizes.push(label);
+    if (variant.stock !== "SOLD_OUT") otherInStock.add(label);
+  }
+
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
+        {/* The trail the product actually sits on. It read "Патики" for
+            every product, which on a Puma t-shirt was both wrong and a dead
+            end: the link went to all footwear. */}
         <nav className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
-          <Link href="/products" className="hover:text-foreground">
-            Патики
+          <Link
+            href={listingHref(
+              vertical ? { kind: vertical.kind } : {},
+            )}
+            className="hover:text-foreground"
+          >
+            {vertical?.label ?? "Производи"}
           </Link>
           <ChevronRight className="size-3" />
+          {product.categoryMk && product.category && (
+            <>
+              <Link
+                href={listingHref({
+                  kind: product.categoryKind ?? undefined,
+                  category: product.category,
+                })}
+                className="hover:text-foreground"
+              >
+                {product.categoryMk}
+              </Link>
+              <ChevronRight className="size-3" />
+            </>
+          )}
           <Link
             href={`/products?brand=${product.brand.toLowerCase().replace(/\s+/g, "-")}`}
             className="hover:text-foreground"
@@ -221,7 +288,9 @@ export default async function ProductDetailPage({
                     ? "Currently unavailable"
                     : sizeEu !== undefined
                       ? `Best total in EU ${formatSizeEu(sizeEu)}`
-                      : "Best total price"}
+                      : size !== undefined
+                        ? `Best total in ${size}`
+                        : "Best total price"}
                 </p>
                 <p className="tnum text-3xl font-bold text-price">
                   {/*
@@ -253,8 +322,9 @@ export default async function ProductDetailPage({
                     {formatMoney(overallBest.variant.totalPrice)}
                   </span>{" "}
                   headline is from {overallBest.offer.merchantName}, which does
-                  not have EU {formatSizeEu(sizeEu!)}. In your size the cheapest
-                  is{" "}
+                  not have{" "}
+                  {sizeEu !== undefined ? `EU ${formatSizeEu(sizeEu)}` : size}.
+                  In your size the cheapest is{" "}
                   <span className="tnum font-semibold">
                     {formatMoney(best.variant.totalPrice)}
                   </span>{" "}
@@ -272,6 +342,17 @@ export default async function ProductDetailPage({
                   sizes={allSizes}
                   selected={sizeEu}
                   unavailable={allSizes.filter((s) => !sizesWithStock.has(s))}
+                />
+              </div>
+            )}
+
+            {otherSizes.length > 0 && (
+              <div className="mt-5">
+                <p className="mb-2 text-sm font-semibold">Size</p>
+                <LabelSizePicker
+                  sizes={otherSizes}
+                  selected={size}
+                  unavailable={otherSizes.filter((s) => !otherInStock.has(s))}
                 />
               </div>
             )}

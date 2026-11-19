@@ -37,7 +37,8 @@ public class CatalogService {
 
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
                                    int page, int pageSize) {
-        return search(query, brand, sizeEu, CatalogRepository.FOOTWEAR_KINDS,
+        return search(query, brand, sizeEu, null,
+                CatalogRepository.FOOTWEAR_KINDS,
                 true, null, null, CatalogRepository.Sort.CHEAPEST,
                 page, pageSize);
     }
@@ -49,27 +50,67 @@ public class CatalogService {
      *        ski leggings and helmets.
      */
     public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+                                   String size,
                                    String[] kinds, boolean includeUnclassified,
                                    String category, String gender,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
+        String alpha = normalizeAlpha(size);
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
-                country, query, brand, sizeEu, kinds, includeUnclassified,
+                country, query, brand, sizeEu, alpha, kinds,
+                includeUnclassified,
                 category, gender, sort, pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
             rows = rows.subList(0, pageSize);
         }
-        return new Dtos.ProductPage(rows, page, pageSize, hasMore,
-                sizeEu == null ? null : trimSize(sizeEu));
+        // Whichever axis actually filtered, as the client should echo it. The
+        // EU number wins when both are present, exactly as the repository
+        // resolves them.
+        String applied = sizeEu != null ? trimSize(sizeEu) : alpha;
+        return new Dtos.ProductPage(rows, page, pageSize, hasMore, applied);
+    }
+
+    /**
+     * A letter size as the catalogue spells it, or null.
+     *
+     * <p>Upper-cased because {@code offer_variant.size_alpha} is canonical
+     * and a shopper's URL is not: "xl" in an address bar is the same request
+     * as "XL". Nothing else is corrected -- an unknown label matches no row
+     * and returns an empty page, which is the truthful answer to a size we
+     * do not carry.
+     */
+    static String normalizeAlpha(String size) {
+        if (size == null || size.isBlank()) {
+            return null;
+        }
+        return size.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
     public Optional<Dtos.ProductDetail> detail(String slug, Double sizeEu) {
+        return detail(slug, sizeEu, null);
+    }
+
+    /**
+     * One product, optionally narrowed to a single size.
+     *
+     * <p>{@code size} is the non-EU axis: a letter for adult garments, an age
+     * band or a height for kids'. It is matched against the same string the
+     * page shows -- {@code sizeAlpha} when the variant is on the letter
+     * ladder, the shop's own label otherwise -- so a chip a shopper can see
+     * is a chip that can filter. Matching {@code sizeLabel} alone would miss
+     * the adidas spellings the parser folds in ({@code LG}, {@code MD},
+     * {@code 2XL}), and matching {@code sizeAlpha} alone would exclude every
+     * kids' size, which has no letter at all.
+     */
+    public Optional<Dtos.ProductDetail> detail(String slug, Double sizeEu,
+                                               String size) {
+        String alpha = normalizeAlpha(size);
         return repository.findProductBySlug(slug).map(product -> {
             List<CatalogRepository.OfferVariantRow> rows = repository.findOffers(product.id());
-            List<Dtos.Offer> offers = groupIntoOffers(rows, sizeEu);
+            List<Dtos.Offer> offers = groupIntoOffers(rows, sizeEu, alpha);
             return new Dtos.ProductDetail(
                     product.slug(),
                     product.name(),
@@ -78,15 +119,37 @@ public class CatalogService {
                     product.gender(),
                     product.mpn(),
                     product.imageUrl(),
+                    product.categoryKind(),
+                    product.category(),
+                    product.categoryMk(),
                     Dtos.Money.of(product.minPriceMinor(), product.currency(), product.minorUnit()),
                     Dtos.Money.of(product.maxPriceMinor(), product.currency(), product.minorUnit()),
                     product.offerCount(),
                     product.merchantCount(),
                     product.availableSizesEu(),
+                    product.availableSizes(),
                     product.updatedAt(),
                     PRICE_DISCLAIMER,
                     offers);
         });
+    }
+
+    /**
+     * Whether a variant is the size a shopper asked for, on the non-EU axis.
+     *
+     * <p>Compared case-insensitively against the letter first and the shop's
+     * own label second, which is the same pair the page renders. The label
+     * side is what carries kids' sizes: "9-10 год." is not on any ladder and
+     * has no canonical form to normalise to.
+     */
+    static boolean sameLabel(CatalogRepository.OfferVariantRow row,
+                                     String wanted) {
+        if (row.sizeAlpha() != null
+                && row.sizeAlpha().equalsIgnoreCase(wanted)) {
+            return true;
+        }
+        return row.sizeLabel() != null
+                && row.sizeLabel().equalsIgnoreCase(wanted);
     }
 
     /**
@@ -97,9 +160,18 @@ public class CatalogService {
      */
     List<Dtos.Offer> groupIntoOffers(List<CatalogRepository.OfferVariantRow> rows,
                                      Double sizeFilter) {
+        return groupIntoOffers(rows, sizeFilter, null);
+    }
+
+    List<Dtos.Offer> groupIntoOffers(List<CatalogRepository.OfferVariantRow> rows,
+                                     Double sizeFilter, String labelFilter) {
         Map<Long, List<CatalogRepository.OfferVariantRow>> byOffer = new LinkedHashMap<>();
         for (var row : rows) {
             if (sizeFilter != null && !sameSize(row.sizeEu(), sizeFilter)) {
+                continue;
+            }
+            if (sizeFilter == null && labelFilter != null
+                    && !sameLabel(row, labelFilter)) {
                 continue;
             }
             byOffer.computeIfAbsent(row.offerId(), key -> new ArrayList<>()).add(row);
@@ -126,6 +198,8 @@ public class CatalogService {
                         row.variantId(),
                         row.sizeLabel(),
                         row.sizeEu(),
+                        row.sizeAlpha(),
+                        row.sizeSystem(),
                         Dtos.Money.of(row.priceMinor(), row.currency(), row.minorUnit()),
                         Dtos.Money.of(row.listPriceMinor(), row.currency(), row.minorUnit()),
                         Dtos.Money.of(row.shippingMinor(), row.currency(), row.minorUnit()),

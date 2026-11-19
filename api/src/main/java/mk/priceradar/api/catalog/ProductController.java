@@ -13,6 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Read endpoints for the storefront.
  *
+ * <p>{@code size} is its counterpart for garments -- a letter from the
+ * ladder, XXS to 5XL -- because a hoodie has no EU number and the rail would
+ * otherwise be empty on every apparel listing. The two are alternatives, not
+ * a pair: nothing in the catalogue carries both, and {@code sizeEu} wins if
+ * both arrive.
+ *
  * <p>{@code sizeEu} is the parameter that matters most. Passing it switches
  * both the listing and the detail page from "cheapest offer for this product"
  * to "cheapest offer you can actually buy in your size" -- which for the
@@ -53,6 +59,7 @@ public class ProductController {
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String brand,
             @RequestParam(required = false) Double sizeEu,
+            @RequestParam(required = false) String size,
             @RequestParam(required = false) String kind,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String gender,
@@ -60,8 +67,8 @@ public class ProductController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         boolean isDefaultScope = kind == null || kind.isBlank();
-        return catalog.search(q, brand, sizeEu, kindsFor(kind), isDefaultScope,
-                normalize(category), normalize(gender),
+        return catalog.search(q, brand, sizeEu, size, kindsFor(kind),
+                isDefaultScope, normalize(category), normalize(gender),
                 CatalogRepository.Sort.parse(sort),
                 page, Math.min(pageSize, MAX_PAGE_SIZE));
     }
@@ -94,8 +101,9 @@ public class ProductController {
     @GetMapping("/products/{slug}")
     public ResponseEntity<Dtos.ProductDetail> detail(
             @PathVariable String slug,
-            @RequestParam(required = false) Double sizeEu) {
-        return catalog.detail(slug, sizeEu)
+            @RequestParam(required = false) Double sizeEu,
+            @RequestParam(required = false) String size) {
+        return catalog.detail(slug, sizeEu, size)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }

@@ -513,3 +513,94 @@ class TestRederiveOverRows:
             cur.execute("SELECT category_id FROM product WHERE id = %s",
                         (pid,))
             assert cur.fetchone()[0] is None
+
+
+class TestAPersonOutranksBothSources:
+    """`manual`, the third source V22 added.
+
+    It exists for a shop that contradicts itself. Sport Reality shelves
+    `puma-wardrobe-essentials-62974230` under `/mk/gradnik/`, badges it
+    ГРАДНИК, and describes it on the same page as a "женска lifestyle slim
+    маица". The facet is wrong, the title names no garment, and descriptions
+    are weaker evidence than either -- a bra listing routinely describes the
+    top worn over it. So a person decides, and the decision has to survive
+    every later pass.
+    """
+
+    def test_a_manual_category_survives_a_contradicting_facet(self, clean_db):
+        """The exact shape of the Puma row: a live facet saying otherwise.
+
+        This is what separates `manual` from `facet`. The existing guard
+        keeps a facet value only when *no* offer carries facet evidence; here
+        one does, and says bra.
+        """
+        from mkagg.derive import rederive
+        pid = _product(clean_db, slug="p-manual", category="tshirts",
+                       source="manual")
+        _offer(clean_db, pid, path="gradnik", title="Puma Wardrobe Essentials")
+        clean_db.commit()
+
+        report = rederive(clean_db)
+        assert report.kept_manual == 1
+
+        with clean_db.cursor() as cur:
+            cur.execute("""SELECT c.slug, p.category_source
+                             FROM product p
+                             JOIN category c ON c.id = p.category_id
+                            WHERE p.id = %s""", (pid,))
+            assert cur.fetchone() == ("tshirts", "manual")
+
+    def test_it_survives_being_re_derived_twice(self, clean_db):
+        """A guard that holds once and not twice is worse than none: the row
+        would look corrected until the next scheduled pass."""
+        from mkagg.derive import rederive
+        pid = _product(clean_db, slug="p-manual-2", category="tshirts",
+                       source="manual")
+        _offer(clean_db, pid, path="gradnik", title="Puma Wardrobe Essentials")
+        clean_db.commit()
+
+        rederive(clean_db)
+        rederive(clean_db)
+
+        with clean_db.cursor() as cur:
+            cur.execute("""SELECT c.slug FROM product p
+                             JOIN category c ON c.id = p.category_id
+                            WHERE p.id = %s""", (pid,))
+            assert cur.fetchone()[0] == "tshirts"
+
+    def test_a_manual_gender_is_kept_the_same_way(self, clean_db):
+        from mkagg.derive import rederive
+        pid = _product(clean_db, slug="p-manual-3", category="tshirts",
+                       source="manual", gender="women",
+                       gender_source="manual")
+        _offer(clean_db, pid, path="gradnik", gender="men",
+               title="Puma Wardrobe Essentials")
+        clean_db.commit()
+
+        rederive(clean_db)
+
+        with clean_db.cursor() as cur:
+            cur.execute("""SELECT gender::text, gender_source FROM product
+                            WHERE id = %s""", (pid,))
+            assert cur.fetchone() == ("women", "manual")
+
+    def test_nothing_else_is_frozen_by_it(self, clean_db):
+        """The guard must key on the source, not leak onto its neighbours."""
+        from mkagg.derive import rederive
+        kept = _product(clean_db, slug="p-kept", category="tshirts",
+                        source="manual")
+        _offer(clean_db, kept, path="gradnik")
+        moved = _product(clean_db, slug="p-moved", category="footwear",
+                         source="title")
+        _offer(clean_db, moved, path="kopacki")
+        clean_db.commit()
+
+        report = rederive(clean_db)
+        assert report.kept_manual == 1
+
+        with clean_db.cursor() as cur:
+            cur.execute("""SELECT p.slug, c.slug FROM product p
+                             JOIN category c ON c.id = p.category_id
+                            ORDER BY p.slug""")
+            assert cur.fetchall() == [("p-kept", "tshirts"),
+                                      ("p-moved", "cleats")]
