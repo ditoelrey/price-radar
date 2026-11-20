@@ -39,6 +39,7 @@ import re
 
 from ..models import RawOffer, RawVariant
 from ..normalize import normalize_size, parse_price_minor
+from ..taxonomy import classify
 from .base import Adapter, as_text, register
 
 SIZES_PATH = "/ProductCatalog/GetVelicini/"
@@ -185,6 +186,92 @@ def product_image(html: str, product_id: str, base_url: str = "") -> str | None:
     return url
 
 
+#: The product page's own specification table.
+#:
+#: ::
+#:
+#:     <div id="collapseOpis" class="collapse">
+#:       <ul>
+#:         <li><span class="opis">Возраст</span><b> — </b> <span>За возрасни</span></li>
+#:         <li><span class="opis">Пол</span><b> — </b> <span>Унисекс</span></li>
+#:         <li><span class="opis">Подгрупа</span><b> — </b> <span>Ранци</span></li>
+#:       </ul>
+#:     </div>
+#:
+#: Worth parsing because of one section. Sport-M publishes Опрема at
+#: `/ProductCatalog?Segment=06` with no gender anywhere in the URL -- 758
+#: articles that the facet walk can categorise and cannot gender at all --
+#: while every one of their pages states it outright. The same table also
+#: names the subgroup, which is the shop's own leaf.
+_SPEC_BLOCK = re.compile(r'id="collapseOpis".*?<ul>(.*?)</ul>', re.S | re.I)
+_SPEC_ROW = re.compile(
+    r'<li>\s*<span class="opis">\s*([^<]+?)\s*</span>.*?'
+    r'<span[^>]*>\s*([^<]*?)\s*</span>', re.S | re.I)
+
+#: Пол, as the shop writes it.
+_SPEC_GENDER = {
+    "машки": "men", "мажи": "men", "maski": "men", "mashki": "men",
+    "женски": "women", "жени": "women", "zenski": "women",
+    "унисекс": "unisex", "uniseks": "unisex", "unisex": "unisex",
+}
+
+#: Words in Возраст that mean this is a child's article, whatever Пол says.
+#:
+#: They disagree often enough to matter: a Speedo swim cap reads
+#: "Возраст — За бебиња (до 3 год.)" and "Пол — Машки". Taking Пол there
+#: would file an infant's cap in the men's department, and `kids` mixed with
+#: an adult department resolves to nothing at all downstream.
+_SPEC_CHILD = ("деца", "дете", "бебе", "бебиња", "тинејџер", "јуниор",
+               "момчиња", "девојчиња", "deca", "bebinja", "junior")
+
+#: And the one that means it is not.
+_SPEC_ADULT = ("возрасни", "vozrasni", "adult")
+
+
+def parse_specifications(html: str) -> dict[str, str]:
+    """The page's specification table as ``{key: value}``, or ``{}``.
+
+    Scoped to the collapsible block rather than the whole document: the same
+    markup shape renders in the recommendation tiles further down the page.
+    """
+    block = _SPEC_BLOCK.search(html or "")
+    if not block:
+        return {}
+    out: dict[str, str] = {}
+    for key, value in _SPEC_ROW.findall(block.group(1)):
+        key = re.sub(r"\s+", " ", key).strip()
+        value = re.sub(r"\s+", " ", value).strip()
+        if key and value:
+            out.setdefault(key, value)
+    return out
+
+
+def spec_gender(specs: dict[str, str]) -> str | None:
+    """Who the shop says this is for, or ``None`` when it does not say.
+
+    Возраст is read before Пол, because a child's article carries both and
+    only one of them is the department it belongs in.
+    """
+    age = (specs.get("Возраст") or "").lower()
+    if any(word in age for word in _SPEC_CHILD):
+        return "kids"
+    sex = (specs.get("Пол") or "").strip().lower()
+    gender = _SPEC_GENDER.get(sex)
+    if gender and not age:
+        # No age stated at all. The gender word is still evidence; it simply
+        # cannot be contradicted by something that was never published.
+        return gender
+    if gender and any(word in age for word in _SPEC_ADULT):
+        return gender
+    return gender or None
+
+
+def spec_category(specs: dict[str, str]) -> str | None:
+    """The canonical leaf for the shop's own Подгрупа, if it maps to one."""
+    subgroup = specs.get("Подгрупа")
+    return classify(subgroup) if subgroup else None
+
+
 def _brand_from_title(title: str | None) -> str | None:
     """First token of the title, which is the brand on this platform."""
     if not title:
@@ -241,6 +328,14 @@ class AspNetMkAdapter(Adapter):
             variants = [RawVariant(size_label="", price_minor=price_minor,
                                    currency_code="MKD", in_stock=None)]
 
+        # What the page itself states about the article. Left as hints rather
+        # than a new pair of fields because the worker only overwrites a hint
+        # when the discovery job carried one -- so a facet still wins, and
+        # this fills the gap where there is no facet to win. Sport-M's whole
+        # Опрема section is that gap: 758 articles at
+        # `/ProductCatalog?Segment=06`, no gender in any URL.
+        specs = parse_specifications(html)
+
         return RawOffer(
             merchant_slug=merchant_slug,
             merchant_sku=product_id,
@@ -255,8 +350,11 @@ class AspNetMkAdapter(Adapter):
             product_url=url,
             currency_code="MKD",
             variants=variants,
+            category_hint=spec_category(specs),
+            gender_hint=spec_gender(specs),
             extractors={"mpn": "url", "price": "css",
-                        "sizes": "api" if sizes_payload is not None else "none"},
+                        "sizes": "api" if sizes_payload is not None else "none",
+                        "specs": "css" if specs else "none"},
         )
 
     def parse_stock(self, payload, url, merchant_slug, *,

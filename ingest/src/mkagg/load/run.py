@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..models import RawOffer
-from ..taxonomy import APPAREL_SLUGS
+from ..taxonomy import ACCESSORY_SLUGS, APPAREL_SLUGS
 from .promote import PromotionReport, apply_delistings, promote_run
 from .staging import (StagedRun, clear_stage, merchant_id_for, open_run,
                       record_decision, stage_offers)
@@ -82,18 +82,27 @@ class IngestOutcome:
 #: either vertical.
 CATALOG_KIND = "catalog_parse"
 APPAREL_KIND = "apparel_parse"
+ACCESSORY_KIND = "accessory_parse"
 
 
 def run_kind_for(offer: RawOffer) -> str:
     """Which run an offer belongs to, from the facet it was found in.
 
     Taken from the offer rather than passed down from the command, so a
-    drain holding both verticals splits into two runs instead of filing one
-    under the other's name. A product with no hint -- dsport's sitemap, a
-    stock probe -- stays with the catalogue default.
+    drain holding several verticals splits into several runs instead of
+    filing one under another's name. A product with no hint -- dsport's
+    sitemap, a stock probe -- stays with the catalogue default.
+
+    `socks` is the reason this reads the category and not the command.
+    V10 filed it under the accessory kind while footwear sweeps were still
+    the only thing bringing it in, so a pack of socks found on a shoe shelf
+    belongs to the equipment run however it was reached.
     """
-    return (APPAREL_KIND if offer.category_hint in APPAREL_SLUGS
-            else CATALOG_KIND)
+    if offer.category_hint in APPAREL_SLUGS:
+        return APPAREL_KIND
+    if offer.category_hint in ACCESSORY_SLUGS:
+        return ACCESSORY_KIND
+    return CATALOG_KIND
 
 
 def ingest(conn, merchant_slug: str, offers: list[RawOffer], *,

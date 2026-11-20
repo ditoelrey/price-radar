@@ -558,6 +558,14 @@ def refresh_summary(conn, product_id: int) -> None:
 #: module, so importing the constant back would close the cycle; a test
 #: asserts the two never drift apart.
 APPAREL_RUN_KIND = "apparel_parse"
+ACCESSORY_RUN_KIND = "accessory_parse"
+
+#: Which category kind a run may retire. The whole point of keeping the run
+#: kinds apart: a complete equipment sweep must not be able to touch a shoe.
+_RUN_KIND_VERTICAL = {
+    APPAREL_RUN_KIND: "apparel",
+    ACCESSORY_RUN_KIND: "accessory",
+}
 
 
 def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
@@ -693,8 +701,7 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
             # that is deliberate too: 203 products are unclassified, most of
             # them shoes, and delisting on an absence of evidence is how a
             # live offer disappears for a reason nobody can reconstruct.
-            vertical_kind = ("apparel" if kind == APPAREL_RUN_KIND
-                             else "footwear")
+            vertical_kind = _RUN_KIND_VERTICAL.get(kind, "footwear")
             cur.execute(
                 """SELECT mo.id, mo.merchant_sku, mo.product_url,
                           mo.product_id

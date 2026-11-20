@@ -16,7 +16,7 @@ import pytest
 
 from mkagg.discover import (APPAREL_FACET_PLANS, FACET_CATEGORY, FACET_PLANS,
                             as_facets)
-from mkagg.taxonomy import APPAREL_SLUGS, KNOWN_GENDERS
+from mkagg.taxonomy import APPAREL_SLUGS, FACET_GENDERS, KNOWN_GENDERS
 
 
 def facets(slug):
@@ -33,7 +33,7 @@ class TestEveryShopIsCovered:
         for slug in APPAREL_FACET_PLANS:
             for facet in facets(slug):
                 assert facet.category, (slug, facet.path)
-                assert facet.gender in KNOWN_GENDERS, (slug, facet.path)
+                assert facet.gender in FACET_GENDERS, (slug, facet.path)
                 assert facet.label, (slug, facet.path)
 
     def test_every_category_is_one_V18_seeded(self):

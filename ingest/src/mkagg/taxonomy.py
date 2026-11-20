@@ -40,7 +40,8 @@ from .normalize import translit_mk
 #: first matching rule decides.
 _RULES: list[tuple[str, tuple[str, ...]]] = [
     # --- not footwear, but sold alongside it and easily mistaken for it ----
-    ("socks", ("chorapi", "corapi", "sok 3p", "crew sock", "ankle sock",
+    ("socks", ("chorapi", "corapi", "shtuci", "stuci", "shtucni", "stucni",
+               "sok 3p", "crew sock", "ankle sock",
                "quarter sock", "no show sock", "socks", "sock 3p")),
     # --- apparel, the eleven leaves V18 seeded ----------------------------
     # Order inside this block is doing real work, because several of these
@@ -108,12 +109,113 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # title "Штитник TIRO SG EU CLB" fell through to the footwear rules and
     # the SG there -- soft-ground studs on a football boot -- made a shin
     # guard into a pair of cleats.
-    ("accessories", ("kapa", "shapka", "ranec", "backpack", "torba", "chanta",
-                     "rakavici", "gloves", "shal", "kaciga", "helmet",
-                     "naocari", "sticnici", "shin guard", "shtitnik",
-                     "shtitnici")),
-    ("equipment", ("topka", " ball", "raketa", "racket", "shipka",
-                   "dumbbell", "tegovi", "lopta")),
+    # --- Опрема, the ten leaves V23 seeded ---------------------------------
+    # Order inside this block is load-bearing, because the narrow words sit
+    # inside the broad ones. Each of these was a real facet on at least two
+    # shops during recon.
+    #
+    # Swimming comes first and is the reason: "Капа за пливање" contains
+    # "капа" and "Наочари за пливање" contains "наочари", so a swim cap would
+    # be headwear and swim goggles would be ski goggles if `caps_hats` or
+    # `protective_gear` ran ahead of it.
+    ("swim_gear", ("plivanje", "za plivanje", "oprema za plivanje",
+                   "kapa za plivanje", "kapi za plivanje",
+                   "naocari za plivanje", "naochari za plivanje",
+                   "maska i perai", "perai", "chepovi za ushi",
+                   "cepovi za usi", "shtipka za nos", "stipka za nos",
+                   "swim", "swimming", "goggles")),
+    # Wallets before bags, and that ordering is the whole reason the leaf can
+    # exist: megasport publishes one facet, "Ранци и Паричници", for both. A
+    # wallet is only ever recognisable there by its own name.
+    #
+    # Singular only, and that is not a style choice. megasport's facet slug
+    # is `ranci-i-parichnici`, which contains the plural -- so with the
+    # plural here the URL alone matched, and since this rule runs before
+    # `bags_backpacks`, every backpack on that shop became a wallet. The
+    # whole-word padding then does the work: " parichnik " is not inside
+    # " ranci i parichnici ", while a title that names one still wins.
+    #
+    # It costs nothing today. No shop publishes a wallets-only facet; if one
+    # ever does, its plural slug goes in `bags_backpacks` first, the way the
+    # combined facet would have had to.
+    ("wallets", ("parichnik", "paricnik", "novchanik", "novcanik",
+                 "wallet")),
+    # Helmets, eyewear and gloves are one leaf, not three. On megasport --
+    # the only shop that stocks helmets at all -- Кациги, Наочари, Ракавици
+    # and Ски бандана are one ski outfit sold off one shelf, and split apart
+    # each would be a menu entry serving a few dozen products.
+    #
+    # "Штитник" earns its place by having been misread: the title "Штитник
+    # TIRO SG EU CLB" fell through to the footwear rules and the SG there --
+    # soft-ground studs on a football boot -- made a shin guard into cleats.
+    # The `h`-less spellings are the shops' own URLs again: Sport Reality
+    # writes `/mk/stitnik/` for 11 offers and `/mk/sal/` for one, while the
+    # transliterator produces `shtitnik` and `shal`. The first URL-section
+    # audit after the first Опрема sweep found both, the same way the apparel
+    # one found `/mk/sorc/`.
+    ("protective_gear", ("kaciga", "kacigi", "helmet", "naocari", "naochari",
+                         "rakavici", "rakavica", "gloves", "golmanski",
+                         "kostobrani", "kostobran", "sticnici", "shtitnik",
+                         "shtitnici", "stitnik", "stitnici",
+                         "stitnik za zabi", "shtitnik za zabi", "bandazer",
+                         "stegac", "stegach", "suspenzor", "mouthguard",
+                         "shin guard", "visor")),
+    ("caps_hats", ("kapa", "kapi", "kachket", "kacket", "kachketi",
+                   "kacketi", "shapka", "shapki", "bandana", "bandani",
+                   "zimski kapi", "zimska kapa", "podkapa", "traka za glava", "traka za kosa",
+                   "grejac za vrat", "grejach za vrat", "headband",
+                   "beanie", "cap", "shal", "sal")),
+    # "torbici" is megasport's spelling for the women's bag facet, and it is
+    # here because the slug probe caught it falling through to the parent
+    # `accessories` -- a quieter failure than matching nothing, and one that
+    # would have put thirty women's bags in the catch-all.
+    ("bags_backpacks", ("ranec", "ranci", "backpack", "torba", "torbi",
+                        "torbici", "torbica", "torbichka", "torbicka",
+                        "torbichki", "torbicki", "chanta", "canta",
+                        "vreka za trening", "vrekja za trening", "bag",
+                        "duffel", "holdall", "kufer", "kuferi",
+                        "suitcase")),
+    ("skates_scooters", ("roleri", "roler", "rollers", "trotinet",
+                         "trotineti", "scooter", "skiroli", "skirol",
+                         "klizalki", "ostrica za klizalki", "skateboard",
+                         "skejtbord")),
+    ("balls_training", ("topka", "topki", " ball", "lopta", "raketa",
+                        "racket", "shipka", "dumbbell", "tegovi", "podloga",
+                        "prostirka", "balans topka", "drzhachi za sklekovi",
+                        "drzaci za sklekovi", "sklekovi", "jaze za skokanje",
+                        "oprema za trening", "pumpa za topka", "pumpa",
+                        "fitnes rekvizit", "pomagalo za sklekovi",
+                        "mat", "yoga")),
+    ("bottles_thermos", ("shishe", "shishinja", "sise za voda", "termos",
+                         "termosi", "bidon", "bottle", "flask", "thermos")),
+    # Before the footwear rules, and these phrases are why. Sizeer files
+    # "Средство за чистење на обувки" under its accessories group, and the
+    # word обувки at the end of it carried the whole thing into the footwear
+    # umbrella -- a cleaning spray classified as a shoe. Its three siblings
+    # (водоотпорно средство, средство за миризби, четка за велур) matched
+    # nothing at all. The probe found all four.
+    ("shoe_care_laces", ("vrvki", "vrvka", "vrvci", "laces", "shoelace",
+                         "oprema za chistenje", "oprema za cistenje",
+                         "chistenje na obuvki", "cistenje na obuvki",
+                         "sredstvo za chistenje", "sredstvo za cistenje",
+                         "sredstvo za zashtita", "sredstvo za zastita",
+                         "sredstvo za otstranuvanje", "chetka za velur",
+                         "cetka za velur", "pribor i dodatoci za obuvki",
+                         "sprej za obuvki", "sprej", "vloski", "vloshki",
+                         "nega na obuvki", "shoe care")),
+    # Last of the accessory leaves, and a real answer rather than a shrug:
+    # the shops put face masks and odds and ends in a "Друго" of their own.
+    # Keyrings and charms: buzz shelves them as Украс and Привезок, and
+    # neither is a leaf of its own at seven offers between them.
+    ("other_accessories", ("drugo", "ostanato", "maska za lice",
+                           "zashtitna maska", "zastitna maska",
+                           "ukras", "ukrasi", "privezok", "privezoci",
+                           "keyring", "keychain")),
+    # Equipment whose kind the title does not narrow, then the umbrella --
+    # the parent category, meaning "equipment, kind unspecified", exactly as
+    # `footwear` and `apparel` do for theirs.
+    ("accessories", ("dodatoci", "dodatok", "oprema", "accessories",
+                     "accessory")),
 
     # --- footwear, four canonical buckets (V17) ----------------------------
     # One named exception, before anything else reads a model name. Asics
@@ -193,12 +295,23 @@ APPAREL_SLUGS = frozenset({
     "swimwear",
 })
 
+#: The ten Опрема leaves V23 seeded, plus the parent and `socks`, which V10
+#: placed under this kind before there was a vertical to put it in.
+#:
+#: `equipment` is gone: V23 folded that kind into `accessory` and deleted its
+#: one leaf, so a rule returning it would now null the category instead.
+ACCESSORY_SLUGS = frozenset({
+    "accessories", "socks", "caps_hats", "bags_backpacks", "wallets",
+    "protective_gear", "swim_gear", "balls_training", "bottles_thermos",
+    "skates_scooters", "shoe_care_laces", "other_accessories",
+})
+
 #: Category slugs this module can return. Kept in step with V4 + V10 + V17 +
-#: V18 so a typo here fails a test rather than silently nulling a category.
+#: V18 + V23 so a typo here fails a test rather than silently nulling a
+#: category.
 KNOWN_SLUGS = frozenset({
     "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
-    "accessories", "socks", "equipment",
-}) | APPAREL_SLUGS
+}) | APPAREL_SLUGS | ACCESSORY_SLUGS
 
 #: Which of those are footwear, i.e. the MVP's storefront. ``footwear`` itself
 #: is in here: it is the parent row, and means "a shoe, kind unspecified".
@@ -211,6 +324,23 @@ FOOTWEAR_SLUGS = frozenset({
 #: saying nothing is ``None``, and "sold to men and women both" is a finding
 #: about two facets, which only :mod:`mkagg.derive` can see.
 KNOWN_GENDERS = frozenset({"men", "women", "kids"})
+
+#: What a *facet* may declare, which is one value more. A department can say
+#: unisex outright, and three of the six shops do: Sport Vision and Sport
+#: Reality publish Унисекс as its own filter on their equipment sections, 803
+#: and 404 articles respectively.
+#:
+#: That is a different claim from the one :func:`resolve_departments` infers.
+#: The inference -- listed in both the men's and the women's department --
+#: needs two memberships and is all the footwear and apparel plans can
+#: produce, because their gender suffixes bundle unisex into both adult
+#: departments (``maski+unisex``, ``unisex+zenski``). An explicit facet is
+#: the shop stating it in one place, which is stronger, and it is the only
+#: way to gender a section that has no men's or women's URL at all.
+#:
+#: Separate from ``KNOWN_GENDERS`` rather than folded into it, so the
+#: narrower promise about titles keeps being tested.
+FACET_GENDERS = KNOWN_GENDERS | {"unisex"}
 
 _PUNCT = re.compile(r"[^a-z0-9]+")
 
@@ -261,6 +391,41 @@ def _first_match(rules, haystacks) -> str | None:
     return None
 
 
+#: Kinds the catalogue deliberately does not carry, whatever shelf they are
+#: found on.
+#:
+#: Four of them, each excluded for a reason rather than a taste:
+#:
+#: * **Pet accessories** and **Funko POP! figures** sell only at Sizeer and
+#:   Sport-M, which are one operator on one host, so neither can ever carry a
+#:   second independent price. A comparison site with one seller has nothing
+#:   to compare, and neither is a sporting good.
+#: * **Bicycles** are a different market, not an accessory.
+#: * **Watches** are the arguable one -- a sport watch is genuinely
+#:   comparable -- but there is no leaf for them and inventing one for a
+#:   single shop's shelf is how micro-buckets start.
+#:
+#: Enforced here rather than only by leaving the subgroup out of a facet
+#: plan, because a facet plan is not the only way in. Sport-M's Спецификации
+#: parser reads `Подгрупа` straight off the product page, and "Додатоци за
+#: миленици" matches the `accessories` umbrella -- so a dog collar reached by
+#: any other shelf would have been filed as equipment of unspecified kind.
+#: Excluded means uncategorised, which is visible, rather than filed
+#: somewhere plausible, which is not.
+EXCLUDED_PHRASES = ("dodatoci za milenici", "milenici", "funko",
+                    "pet ogrlica", "ogrlica za milenici",
+                    "velosiped", "velosipedi", "chasovnik", "chasovnici",
+                    "casovnik", "casovnici")
+
+
+def is_excluded(text: str | None) -> bool:
+    """Whether this names something the catalogue does not carry."""
+    if not text:
+        return False
+    haystack = _normalise(text)
+    return any(_normalise(p) in haystack for p in EXCLUDED_PHRASES)
+
+
 def classify(title: str | None, *, url: str | None = None) -> str | None:
     """Return a category slug, or ``None`` when the title does not say.
 
@@ -277,6 +442,8 @@ def classify(title: str | None, *, url: str | None = None) -> str | None:
     dsport's path carries the category even when its title does not
     (``/muskarci/obuca/cizme/...``).
     """
+    if is_excluded(title) or is_excluded(url):
+        return None
     haystacks = [_normalise(title)]
     if url:
         haystacks.append(_normalise(url))

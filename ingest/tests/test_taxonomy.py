@@ -172,7 +172,7 @@ class TestFourCanonicalBuckets:
         turn protective gear into a pair of cleats.
         """
         assert classify(
-            "IP3992 Штитник TIRO SG EU CLB - Megasport") == "accessories"
+            "IP3992 Штитник TIRO SG EU CLB - Megasport") == "protective_gear"
         assert classify("Adidas F50 LEAGUE SG") == "cleats"
 
     def test_retired_slugs_are_gone(self):
@@ -181,21 +181,28 @@ class TestFourCanonicalBuckets:
             assert gone not in KNOWN_SLUGS
 
     def test_known_slugs_are_exactly_the_seeded_ones(self):
-        """Every slug this module may return, matching V4 + V10 + V17 + V18.
+        """Every slug this module may return, matching V4 + V10 + V17 + V18
+        + V23.
 
-        The apparel leaves joined in V18. No title rule returns one yet --
-        apparel classification is its own piece of work -- but they are
-        declared so the size parser can ask whether an offer came from an
-        apparel facet, which is the only thing that tells a dress size 38
-        from a shoe size 38.
+        The apparel leaves joined in V18, the Опрема ones in V23. `equipment`
+        left in the same migration: that kind was folded into `accessory` and
+        its one leaf deleted, so a rule still returning it would null the
+        category rather than set it.
         """
         assert KNOWN_SLUGS == {
             "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
-            "accessories", "socks", "equipment",
             "apparel", "tshirts", "hoodies", "jackets", "trousers",
             "tracksuits", "shorts", "leggings", "sports_bras", "underwear",
             "dresses_skirts", "swimwear",
+            "accessories", "socks", "caps_hats", "bags_backpacks", "wallets",
+            "protective_gear", "swim_gear", "balls_training",
+            "bottles_thermos", "skates_scooters", "shoe_care_laces",
+            "other_accessories",
         }
+
+    def test_the_retired_equipment_slug_is_gone(self):
+        """V23 deleted the category row, so returning it would set NULL."""
+        assert "equipment" not in KNOWN_SLUGS
 
 
 class TestModelLines:
@@ -251,11 +258,11 @@ class TestModelLines:
         # offers, not one Predator, F50 or Terrex title carries a glove,
         # guard, ball or garment word -- so this is the rule order holding a
         # door shut rather than a bug being fixed.
-        ("Adidas PREDATOR голмански ракавици", "accessories"),
-        ("Adidas PREDATOR GLOVES", "accessories"),
-        ("Штитник PREDATOR SG", "accessories"),
+        ("Adidas PREDATOR голмански ракавици", "protective_gear"),
+        ("Adidas PREDATOR GLOVES", "protective_gear"),
+        ("Штитник PREDATOR SG", "protective_gear"),
         ("Adidas TERREX јакна за планинарење", "jackets"),
-        ("Adidas F50 Топка", "equipment"),
+        ("Adidas F50 Топка", "balls_training"),
     ])
     def test_a_model_line_never_outranks_a_non_footwear_word(self, title,
                                                              expected):
@@ -607,3 +614,221 @@ class TestTheShopsSectionIsConsultedPerRule:
             "IN5590 Хеланки ADIDAS TF BASE TIGHT - Megasport",
             url="https://sport-m.mk/ProductCatalog?Segment=03&Grupa=02"
         ) == "leggings"
+
+
+class TestAccessoryLeaves:
+    """The ten Опрема buckets V23 seeded, and the order that keeps them apart.
+
+    Every one of these is a facet that appeared on at least two of the six
+    shops during recon. The failures they guard are all the same shape: a
+    narrow category whose name contains a broader one.
+    """
+
+    @pytest.mark.parametrize("title,expected", [
+        ("Nike Чорапи Everyday Cushion 3P", "socks"),
+        ("adidas Качкет Baseball Cap", "caps_hats"),
+        ("Зимска капа Nike Beanie", "caps_hats"),
+        ("Ски бандана Megasport", "caps_hats"),
+        ("Puma Ранец Phase Backpack", "bags_backpacks"),
+        ("adidas Торбичка Waist Bag", "bags_backpacks"),
+        ("Вреќа за тренинг adidas", "bags_backpacks"),
+        ("Кациги Smith Ski Helmet", "protective_gear"),
+        ("Голмански ракавици adidas", "protective_gear"),
+        ("Костобрани Nike", "protective_gear"),
+        ("Ролери Rollerblade", "skates_scooters"),
+        ("Тротинет Micro", "skates_scooters"),
+        ("adidas Топка Champions League", "balls_training"),
+        ("Држачи за склекови", "balls_training"),
+        ("Термос Stanley 1L", "bottles_thermos"),
+        ("Врвки за патики 120cm", "shoe_care_laces"),
+        ("Заштитна маска за лице", "other_accessories"),
+    ])
+    def test_reads_the_leaf(self, title, expected):
+        assert classify(title) == expected
+
+    @pytest.mark.parametrize("title,expected", [
+        # Each of these contains a broader category's word, and must not be
+        # read as it.
+        ("Капа за пливање Arena", "swim_gear"),       # contains "капа"
+        ("Наочари за пливање Speedo", "swim_gear"),   # contains "наочари"
+        ("Опрема за пливање Arena", "swim_gear"),
+    ])
+    def test_swimming_outranks_the_word_inside_it(self, title, expected):
+        assert classify(title) == expected
+
+    def test_a_wallet_is_not_a_backpack(self):
+        """The whole reason `wallets` can be a leaf at all.
+
+        megasport publishes one facet, "Ранци и Паричници", for both. On that
+        shop a wallet is recognisable only by its own name, so the rule has
+        to run before `bags_backpacks` rather than after it.
+        """
+        assert classify("Nike Паричник Elemental") == "wallets"
+        assert classify("adidas Wallet Essentials") == "wallets"
+        assert classify("Nike Ранец Elemental") == "bags_backpacks"
+
+    MEGA_COMBINED = ("https://megasportonlineshop.com/kategorija/mazhi/"
+                     "oprema-mazhi/ranci-i-parichnici/")
+
+    def test_the_combined_facet_falls_back_to_bags(self):
+        """A megasport item whose title names neither is a bag, not a wallet.
+
+        The facet says "Ранци и Паричници" and the title says nothing, so the
+        honest answer is the broader of the two.
+
+        This is also the regression that made the `wallets` rule singular.
+        The facet slug contains "parichnici", so a plural keyword matched the
+        URL of every product in it -- and `wallets` runs first -- which filed
+        the shop's entire backpack range as wallets.
+        """
+        assert classify("Nike Elemental Premium",
+                        url=self.MEGA_COMBINED) == "bags_backpacks"
+
+    def test_a_named_wallet_still_wins_inside_that_facet(self):
+        """The other half: the split has to survive the fallback."""
+        assert classify("Nike Паричник Elemental",
+                        url=self.MEGA_COMBINED) == "wallets"
+
+    def test_equipment_of_unnamed_kind_still_answers(self):
+        """The parent is a real answer, exactly as `footwear` is for shoes.
+
+        Sport Vision's sport-specific shelves are the honest case for it:
+        "Опрема за фудбал" holds balls, shin guards and gloves together, so
+        no leaf is truer than the parent. "Опрема за тренинг" is deliberately
+        not among them -- the probe found that one, and training gear is
+        `balls_training`.
+        """
+        assert classify("adidas Додатоци Training") == "accessories"
+        for section in ("oprema-za-fudbal", "oprema-za-ping-pong",
+                        "ostanata-oprema"):
+            assert classify(
+                None,
+                url=f"https://www.sportvision.mk/mk/{section}/x",
+            ) == "accessories", section
+        assert classify("Опрема за тренинг") == "balls_training"
+
+    def test_a_shoe_is_still_a_shoe(self):
+        """The accessory block runs before the footwear rules, so a word that
+        appears in both would quietly empty the footwear catalogue."""
+        assert classify("Патики Nike Air Max") == "sneakers"
+        assert classify("Копачки PREDATOR CLUB FG") == "cleats"
+        assert classify("Чизми UGG CLASSIC SHORT II") == "shoes_boots"
+
+    def test_clothing_is_not_equipment(self):
+        """The apparel block runs first and has to keep winning."""
+        assert classify("Nike Јакна Windrunner") == "jackets"
+        assert classify("adidas Маица Essentials") == "tshirts"
+        assert classify("Костим за капење Arena") == "swimwear"
+
+
+class TestWhatTheSlugProbeFound:
+    """Real section names, read off the shops rather than guessed.
+
+    Each of these answered 200 during the Опрема slug probe and was then
+    classified; these are the ones that came back wrong or blank.
+    """
+
+    def test_a_cleaning_spray_is_not_a_shoe(self):
+        """The worst of them. Sizeer files "Средство за чистење на обувки"
+        under its accessories group, and the обувки at the end carried the
+        whole phrase into the footwear umbrella -- so a bottle of cleaner
+        classified as footwear, which is a vertical away from the truth."""
+        assert classify("Средство за чистење на обувки") == "shoe_care_laces"
+        assert classify("Обувки за вода") == "slides_sandals"
+        assert classify("Патики Nike Air Max") == "sneakers"
+
+    @pytest.mark.parametrize("label", [
+        "Средство за заштита од влага",
+        "Средство за отстранување на непријатни миризби",
+        "Комбинирана четка за велур кожа",
+    ])
+    def test_the_rest_of_the_shoe_care_shelf(self, label):
+        """Its three siblings matched no rule at all."""
+        assert classify(label) == "shoe_care_laces"
+
+    @pytest.mark.parametrize("slug,expected", [
+        ("pribor-i-dodatoci-za-obuvki", "shoe_care_laces"),
+        ("oprema-za-trening", "balls_training"),
+        ("kaciga", "protective_gear"),
+        ("kacketi-i-kapi", "caps_hats"),
+        ("naocari-za-plivanje", "swim_gear"),
+        ("corapi", "socks"),
+        ("sise-za-voda", "bottles_thermos"),
+    ])
+    def test_sportvision_sections_as_the_shop_spells_them(self, slug,
+                                                          expected):
+        """Enumerated from its own Опрема page. Note the spellings: this
+        shop drops the `h` the transliterator produces, which is how
+        `/mk/sorc/` once hid 835 offers."""
+        assert classify(
+            None, url=f"https://www.sportvision.mk/mk/{slug}/x") == expected
+
+    @pytest.mark.parametrize("label,expected", [
+        ("Ролери", "skates_scooters"),
+        ("Скироли", "skates_scooters"),
+        ("Тротинети", "skates_scooters"),
+        ("Голмански ракавици", "protective_gear"),
+        ("Костобрани", "protective_gear"),
+        ("Капи за пливање", "swim_gear"),
+        ("Торбички", "bags_backpacks"),
+        ("Зимски капи", "caps_hats"),
+        ("Бандани", "caps_hats"),
+        ("Шишиња", "bottles_thermos"),
+        ("Термос", "bottles_thermos"),
+        ("Баланс топка", "balls_training"),
+        ("Држачи за склекови", "balls_training"),
+        ("Друго", "other_accessories"),
+        ("Заштитна маска за лице", "other_accessories"),
+    ])
+    def test_the_aspnet_subgroup_dictionary(self, label, expected):
+        """Sport-M and Sizeer publish their whole subgroup list on every
+        catalogue page; these are the accessory half of it, verbatim."""
+        assert classify(label) == expected
+
+
+class TestWhatTheCatalogueDoesNotCarry:
+    """Four kinds excluded by decision, enforced rather than documented.
+
+    Leaving a subgroup out of a facet plan is not enough, because a facet
+    plan is not the only way in: Sport-M's Спецификации parser reads
+    `Подгрупа` off the product page, and "Додатоци за миленици" matches the
+    `accessories` umbrella. A dog collar reached by any other shelf would
+    have been filed as equipment of unspecified kind.
+    """
+
+    @pytest.mark.parametrize("label", [
+        "Додатоци за миленици",
+        "Funko POP! фигури",
+        "Велосипеди",
+        "Часовници",
+        "Garmin Forerunner 55 часовник",
+    ])
+    def test_an_excluded_kind_stays_uncategorised(self, label):
+        """None, not a plausible leaf. Uncategorised is visible in a count;
+        filed somewhere plausible is not."""
+        assert classify(label) is None
+
+    def test_the_pet_shelf_no_longer_reaches_the_umbrella(self):
+        """The leak this exists for: "Додатоци" alone matches `accessories`,
+        so the pet shelf resolved to the parent before it was excluded."""
+        assert classify("Додатоци за миленици") is None
+        assert classify("adidas Додатоци Training") == "accessories"
+
+    def test_a_url_carrying_one_is_excluded_too(self):
+        assert classify(
+            None, url="https://sizeer.com.mk/mk/funko-pop/1-x") is None
+
+    def test_cycling_clothing_is_untouched(self):
+        """The near miss worth pinning: Бициклистички is not Велосипед, and
+        cycling shorts are a live apparel leaf with 56 products."""
+        assert classify("Бициклистички шорц") == "leggings"
+        assert classify(
+            None, url="https://www.sportvision.mk/mk/biciklisticki/1-x",
+        ) == "leggings"
+
+    def test_ordinary_equipment_still_classifies(self):
+        """The guard runs before every rule, so a false positive here would
+        silently empty whole shelves."""
+        assert classify("Nike Ранец Elemental") == "bags_backpacks"
+        assert classify("adidas Топка Champions League") == "balls_training"
+        assert classify("Патики Nike Air Max") == "sneakers"

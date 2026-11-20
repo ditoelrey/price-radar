@@ -38,7 +38,61 @@ const CLOSE_DELAY_MS = 120;
  * with 17 032 offers and still rendered the second one, so the menu showed
  * Мажи / Жени / Деца and nothing to click.
  */
+/**
+ * The menu for a vertical whose departments hold the same stock.
+ *
+ * Опрема is that vertical. Splitting it into Мажи / Жени / Деца would draw
+ * thirty links where ten will do, because a men's listing already includes
+ * unisex and most equipment is unisex -- 55 percent of Sport Vision's, 66 of
+ * Sport Reality's. The two adult columns would be near-copies of each other.
+ *
+ * Kids is the exception and gets a link of its own: ролери, тротинети and
+ * кациги are a genuinely different shelf.
+ */
+function CategoryMenu({ vertical }: { vertical: Vertical }) {
+  const categories = categoriesFor(vertical.kind);
+  return (
+    <div>
+      <ul className="grid grid-cols-2 gap-x-8 gap-y-1 sm:grid-cols-3">
+        {categories.map((category) => (
+          <li key={category.slug}>
+            <Link
+              href={listingHref({
+                kind: vertical.kind,
+                category: category.slug,
+              })}
+              className="block py-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {category.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 border-t pt-3">
+        <Link
+          href={listingHref({ kind: vertical.kind, gender: "kids" })}
+          className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+        >
+          {vertical.label} за деца
+          <ArrowRight className="size-3.5" />
+        </Link>
+        <Link
+          href={listingHref({ kind: vertical.kind })}
+          className="flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+        >
+          {vertical.allLabel}
+          <ArrowRight className="size-3.5" />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function VerticalMenu({ vertical }: { vertical: Vertical }) {
+  if (vertical.genderColumns === false) {
+    return <CategoryMenu vertical={vertical} />;
+  }
   return (
     <div className="grid grid-cols-3 gap-8">
       {GENDER_COLUMNS.map((gender) => {

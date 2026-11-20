@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import pytest
 
-from mkagg.discover import (APPAREL_FACET_PLANS, DISCOVERY_PLANS,
+from mkagg.discover import (ACCESSORY_FACET_PLANS, APPAREL_FACET_PLANS,
+                            DISCOVERY_PLANS,
                             FACET_PLANS, MERCHANT_PLANS, as_facets,
                             discover, facet_plan, sweep_plan)
-from mkagg.load import APPAREL_KIND, CATALOG_KIND, run_kind_for
+from mkagg.load import (ACCESSORY_KIND, APPAREL_KIND,
+                        CATALOG_KIND, run_kind_for)
 from mkagg.models import RawOffer
-from mkagg.taxonomy import APPAREL_SLUGS, FOOTWEAR_SLUGS
+from mkagg.taxonomy import (ACCESSORY_SLUGS, APPAREL_SLUGS, FACET_GENDERS,
+                            FOOTWEAR_SLUGS)
 
 from test_discover import HTML, make_fetcher
 
@@ -116,16 +119,35 @@ class TestRunKind:
     def test_every_footwear_facet_opens_a_catalogue_run(self, hint):
         assert run_kind_for(offer(hint)) == CATALOG_KIND
 
-    @pytest.mark.parametrize("hint", [None, "socks", "accessories",
-                                      "equipment"])
-    def test_anything_else_stays_with_the_catalogue(self, hint):
-        """dsport's sitemap carries no hint, and a sock is not apparel here.
+    @pytest.mark.parametrize("hint", sorted(ACCESSORY_SLUGS))
+    def test_every_accessory_facet_opens_an_accessory_run(self, hint):
+        """Including `socks`, which V10 filed under this kind long before
+        there was a vertical to put it in. A pack of socks found on a shoe
+        shelf still belongs to the equipment run -- the category decides,
+        not the sweep that happened to reach it."""
+        assert run_kind_for(offer(hint)) == ACCESSORY_KIND
 
-        Defaulting the unknown case to the apparel run would quietly move
-        products out of the baseline they have been measured against for
-        every run so far.
+    @pytest.mark.parametrize("hint", [None, "", "unknown-slug"])
+    def test_anything_else_stays_with_the_catalogue(self, hint):
+        """dsport's sitemap carries no hint, and a stock probe none either.
+
+        Defaulting the unknown case to another vertical's run would quietly
+        move products out of the baseline they have been measured against
+        for every run so far.
         """
         assert run_kind_for(offer(hint)) == CATALOG_KIND
+
+    def test_the_three_kinds_are_distinct(self):
+        """A shared kind would make `ingest_run_baseline` compare each
+        vertical against the others' medians, which rejects every first
+        run."""
+        assert len({CATALOG_KIND, APPAREL_KIND, ACCESSORY_KIND}) == 3
+
+    def test_a_retired_slug_no_longer_routes(self):
+        """V23 deleted the `equipment` category, so nothing can be hinted
+        with it any more; it falls back rather than opening a run of its
+        own."""
+        assert run_kind_for(offer("equipment")) == CATALOG_KIND
 
     def test_the_two_kinds_are_distinct(self):
         assert APPAREL_KIND != CATALOG_KIND
@@ -183,3 +205,110 @@ class TestDrainSplitsByKind:
         """dsport's sitemap carries no hint; nothing should move baseline."""
         seen = self._drain([None, None])
         assert seen == [("sportvision", CATALOG_KIND, 2)]
+
+
+class TestAccessoryFacetPlans:
+    """The Опрема plans, every slug of which the probe confirmed.
+
+    These assertions are cheap and the failure they prevent is not: a slug
+    that 404s inside a facet walk takes its whole section with it silently,
+    and nothing in the run report says a thing.
+    """
+
+    SHOPS = ("sportvision", "sportreality", "buzz", "megasport", "sizeer",
+             "sportm")
+
+    @pytest.mark.parametrize("slug", SHOPS)
+    def test_every_shop_has_one(self, slug):
+        assert ACCESSORY_FACET_PLANS.get(slug) is not None
+
+    @pytest.mark.parametrize("slug", SHOPS)
+    def test_every_facet_names_a_leaf_this_kind_owns(self, slug):
+        """A category outside the kind would make a full sweep retire rows
+        from another vertical -- the exact failure V19 and V23 exist to stop."""
+        for facet in as_facets(ACCESSORY_FACET_PLANS[slug].categories):
+            assert facet.category in ACCESSORY_SLUGS, (slug, facet.path)
+
+    @pytest.mark.parametrize("slug", SHOPS)
+    def test_every_gender_is_one_a_department_may_declare(self, slug):
+        """`unisex` is allowed here and nowhere else. See FACET_GENDERS."""
+        for facet in as_facets(ACCESSORY_FACET_PLANS[slug].categories):
+            assert facet.gender is None or facet.gender in FACET_GENDERS, (
+                slug, facet.gender)
+
+    @pytest.mark.parametrize("slug", ("sportvision", "sportreality", "buzz"))
+    def test_the_sport_vision_family_walks_unisex_outright(self, slug):
+        """55 percent of sportvision's equipment is unisex and 66 of sport
+        reality's, against 4.2 percent of footwear. Inferring it from two
+        bundled departments is not enough when a shop publishes the
+        department itself."""
+        genders = {f.gender for f in
+                   as_facets(ACCESSORY_FACET_PLANS[slug].categories)}
+        assert "unisex" in genders
+        assert {"men", "women", "kids"} <= genders
+
+    def test_sportm_walks_its_genderless_section(self):
+        """Segment=06 holds 758 articles with no department in any URL. The
+        facet carries no gender rather than inventing one; the Спецификации
+        table on each page supplies it."""
+        facets = as_facets(ACCESSORY_FACET_PLANS["sportm"].categories)
+        genderless = [f for f in facets if f.gender is None]
+        assert genderless, "the standalone Опрема section is missing"
+        assert all("Segment=06" in f.path for f in genderless)
+
+    def test_the_h_less_spellings_are_the_ones_used(self):
+        """The probe's central finding: the shops drop the `h` the
+        transliterator produces. `chorapi` 404s and `corapi` answers."""
+        paths = " ".join(
+            f.path for f in
+            as_facets(ACCESSORY_FACET_PLANS["sportvision"].categories))
+        assert "/mk/corapi/" in paths
+        assert "/mk/chorapi/" not in paths
+        assert "/mk/sise-za-voda/" in paths
+        assert "/mk/shishe-za-voda/" not in paths
+
+    def test_the_two_sport_vision_shops_do_not_share_a_list(self):
+        """Unlike apparel, and not by a little.
+
+        sportreality names forty-eight equipment sections against
+        sportvision's nineteen, and spells several of them differently:
+        `kacketi-i-kapi` on one, `kapa` and `kacket` on the other.
+        """
+        sv = {f.label for f in
+              as_facets(ACCESSORY_FACET_PLANS["sportvision"].categories)}
+        sr = {f.label for f in
+              as_facets(ACCESSORY_FACET_PLANS["sportreality"].categories)}
+        assert "kacketi-i-kapi" in sv and "kacketi-i-kapi" not in sr
+        assert "kacket" in sr and "kacket" not in sv
+        assert len(sr) > len(sv)
+
+    def test_sportreality_names_the_sections_its_offers_sit_in(self):
+        """Built from ingested URLs, not from a candidate list.
+
+        The first version named eight sections and left 326 of 609 offers on
+        the umbrella, because a probe can only confirm what it is asked. Each
+        of these carries ten or more offers and none was in that list.
+        """
+        labels = {f.label for f in
+                  as_facets(ACCESSORY_FACET_PLANS["sportreality"].categories)}
+        for section in ("kapa", "ranec", "vreka-za-trening", "kufer",
+                        "golmanski-rakavici", "rakavici", "kostobran"):
+            assert section in labels, section
+
+    def test_the_umbrella_comes_last(self):
+        """Discovery keeps the first facet to claim a URL, so a catch-all
+        placed earlier would swallow every leaf behind it."""
+        for slug in ("sportvision", "sportreality", "buzz"):
+            labels = [f.label for f in
+                      as_facets(ACCESSORY_FACET_PLANS[slug].categories)]
+            assert labels[-1] == "oprema", slug
+
+    def test_the_excluded_subgroups_are_not_walked(self):
+        """Pets, Funko, bicycles and watches. Leaving them out of the plan is
+        half of it; `taxonomy.is_excluded` is the other half, because the
+        Спецификации parser reads subgroups off the product page."""
+        for slug in ("sizeer", "sportm"):
+            paths = " ".join(f.path for f in
+                             as_facets(ACCESSORY_FACET_PLANS[slug].categories))
+            for code in ("798", "742", "649", "740"):
+                assert f"PodGrupa={code}" not in paths, (slug, code)

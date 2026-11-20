@@ -802,3 +802,89 @@ class TestProductImages:
         assert "M20325" not in (product_image(html, "GX6394",
                                               "https://www.sport-m.com.mk") or "")
         assert product_image(html, "", "https://x.mk") is None
+
+
+class TestSportMSpecifications:
+    """The table every Sport-M product page carries, and why it is parsed.
+
+    Their Опрема lives at `/ProductCatalog?Segment=06` with no gender in any
+    URL -- 758 articles the facet walk can categorise and cannot gender --
+    while each page states both outright. Copied verbatim from
+    `ProductID=090238-03`: the stray spaces and the `<b> — </b>` sitting
+    between the two spans are what the regex has to survive.
+    """
+
+    SPECS = """<div id="Opis"><button><h2>Спецификации</h2></button>
+<div id="collapseOpis" class="collapse" style="padding:0"><ul>
+    <li><span class="opis">Возраст</span><b> — </b> <span style="margin-left:30px">За возрасни </span></li>
+    <li><span class="opis">Пол</span><b> — </b> <span style="margin-left:30px">Унисекс </span></li>
+    <li><span class="opis">Боја</span><b> — </b> <span style="margin-left:30px"> Црна </span></li>
+    <li><span class="opis">Подгрупа</span><b> — </b> <span style="margin-left:30px"> Ранци </span> </li>
+    <li><span class="opis">Бренд</span> <b> — </b> <span style="margin-left:30px"> Puma</span> </li>
+</ul></div></div>"""
+
+    def _with(self, age=None, sex=None, subgroup=None):
+        html = self.SPECS
+        if age:
+            html = html.replace("За возрасни", age)
+        if sex:
+            html = html.replace("Унисекс", sex)
+        if subgroup:
+            html = html.replace("Ранци", subgroup)
+        return html
+
+    def test_reads_the_table(self):
+        from mkagg.adapters.aspnet_mk import parse_specifications
+        specs = parse_specifications(self.SPECS)
+        assert specs["Пол"] == "Унисекс"
+        assert specs["Подгрупа"] == "Ранци"
+        assert specs["Бренд"] == "Puma"
+
+    def test_an_explicit_unisex_reaches_the_offer(self):
+        """The 758 articles this exists for."""
+        from mkagg.adapters.aspnet_mk import parse_specifications, spec_gender
+        assert spec_gender(parse_specifications(self.SPECS)) == "unisex"
+
+    def test_a_childs_age_outranks_its_sex(self):
+        """The disagreement that makes the order matter.
+
+        A Speedo swim cap reads "За бебиња (до 3 год.)" and "Пол — Машки".
+        Reading Пол alone files an infant's cap in the men's department, and
+        kids mixed with an adult department resolves to no gender at all
+        further down the pipeline.
+        """
+        from mkagg.adapters.aspnet_mk import parse_specifications, spec_gender
+        baby = self._with(age="За бебиња (до 3 год.)", sex="Машки")
+        teen = self._with(age="За тинејџери (од 8-16 год.)", sex="Женски")
+        assert spec_gender(parse_specifications(baby)) == "kids"
+        assert spec_gender(parse_specifications(teen)) == "kids"
+
+    def test_an_adult_keeps_its_sex(self):
+        from mkagg.adapters.aspnet_mk import parse_specifications, spec_gender
+        assert spec_gender(parse_specifications(self._with(sex="Машки"))) == "men"
+        assert spec_gender(parse_specifications(self._with(sex="Женски"))) == "women"
+
+    def test_the_subgroup_becomes_a_leaf(self):
+        from mkagg.adapters.aspnet_mk import (parse_specifications,
+                                              spec_category)
+        for subgroup, expected in (("Ранци", "bags_backpacks"),
+                                   ("Капи за пливање", "swim_gear"),
+                                   ("Тротинети", "skates_scooters"),
+                                   ("Чорапи", "socks")):
+            specs = parse_specifications(self._with(subgroup=subgroup))
+            assert spec_category(specs) == expected, subgroup
+
+    def test_a_page_without_the_table_says_nothing(self):
+        """Silence is not a gender."""
+        from mkagg.adapters.aspnet_mk import (parse_specifications,
+                                              spec_category, spec_gender)
+        assert parse_specifications("<html><body>x</body></html>") == {}
+        assert spec_gender({}) is None
+        assert spec_category({}) is None
+
+    def test_an_unmappable_subgroup_is_not_forced(self):
+        """A leaf we do not carry stays unclaimed rather than guessed."""
+        from mkagg.adapters.aspnet_mk import (parse_specifications,
+                                              spec_category)
+        specs = parse_specifications(self._with(subgroup="Функо фигури"))
+        assert spec_category(specs) is None

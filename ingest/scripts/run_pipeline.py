@@ -249,7 +249,7 @@ def main() -> int:
                             "vertical, so a footwear sweep cannot touch "
                             "apparel")
         p.add_argument("--vertical", default="footwear",
-                       choices=("footwear", "apparel"),
+                       choices=("footwear", "apparel", "accessory"),
                        help="discover/facets: which vertical to walk. An "
                             "apparel sweep opens its run as apparel_parse, "
                             "so its gate and baseline stay separate from "

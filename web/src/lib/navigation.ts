@@ -131,6 +131,38 @@ export function byAlphaLadder(a: string, b: string): number {
   return rank(a) - rank(b) || a.localeCompare(b);
 }
 
+/**
+ * The Опрема leaves, as V23 seeded them.
+ *
+ * `hidden` keeps a leaf out of the menu and the sidebar while it exists in
+ * the database. Four of these draw on only two or three shops and may come
+ * in under a hundred products; an entry serving six percent of the stock
+ * reads as an empty site rather than an unfinished one. The data still has
+ * somewhere truthful to go, the URL still works, and flipping one on after
+ * the first sweep is a one-line change with no migration.
+ *
+ * `genders` is unused here, unlike apparel. Equipment has no leaf that one
+ * department does not stock: sports bras had zero men's products, while a
+ * backpack is a backpack.
+ */
+export const ACCESSORY_CATEGORIES: ReadonlyArray<{
+  slug: string;
+  label: string;
+  hidden?: boolean;
+}> = [
+  { slug: "bags_backpacks", label: "Торби и ранци" },
+  { slug: "caps_hats", label: "Капи, качкети и бандани" },
+  { slug: "socks", label: "Чорапи" },
+  { slug: "protective_gear", label: "Кациги, наочари и ракавици" },
+  { slug: "balls_training", label: "Топки и фитнес опрема" },
+  { slug: "skates_scooters", label: "Ролери и тротинети" },
+  { slug: "swim_gear", label: "Опрема за пливање", hidden: true },
+  { slug: "bottles_thermos", label: "Шишиња и термоси", hidden: true },
+  { slug: "wallets", label: "Паричници", hidden: true },
+  { slug: "shoe_care_laces", label: "Врвки и нега на обувки", hidden: true },
+  { slug: "other_accessories", label: "Друго", hidden: true },
+];
+
 export type Vertical = {
   /** `category_kind` on the API side. */
   kind: string;
@@ -160,7 +192,24 @@ export type Vertical = {
     slug: string;
     label: string;
     genders?: ReadonlyArray<GenderSlug>;
+    hidden?: boolean;
   }>;
+  /**
+   * Whether the menu splits into Мажи / Жени / Деца columns.
+   *
+   * True for shoes and clothing, where the departments hold different
+   * stock. False for Опрема, where they would not: 55 percent of Sport
+   * Vision's equipment is unisex and 66 percent of Sport Reality's, and
+   * since a men's listing already includes unisex, the two adult columns
+   * would be roughly 85 percent the same links. Two of the six shops do not
+   * gender their equipment section at all -- Sport Reality's sits outside
+   * the gender tabs entirely, and Sport-M publishes 758 articles with no
+   * gender in any URL.
+   *
+   * Kids is the one cut that earns its place -- ролери, тротинети, кациги
+   * are a different shelf -- so it gets a link rather than a column.
+   */
+  genderColumns?: boolean;
 };
 
 export const VERTICALS: ReadonlyArray<Vertical> = [
@@ -171,6 +220,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     icon: Footprints,
     allLabel: "Сите обувки",
     categories: FOOTWEAR_CATEGORIES,
+    genderColumns: true,
   },
   {
     kind: "apparel",
@@ -179,8 +229,20 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     icon: Shirt,
     allLabel: "Сета облека",
     categories: APPAREL_CATEGORIES,
+    genderColumns: true,
   },
-  { kind: "equipment", label: "Опрема", status: "soon", icon: Backpack },
+  {
+    // `accessory`, not `equipment`: V23 folded the two kinds into one and
+    // kept the larger. The label is unchanged, because it was never the
+    // slug that shoppers read.
+    kind: "accessory",
+    label: "Опрема",
+    status: "live",
+    icon: Backpack,
+    allLabel: "Сета опрема",
+    categories: ACCESSORY_CATEGORIES,
+    genderColumns: false,
+  },
 ];
 
 /**
@@ -193,9 +255,18 @@ export function categoriesFor(
   kind: string | undefined,
   gender?: GenderSlug,
 ): ReadonlyArray<{ slug: string; label: string }> {
-  const categories = VERTICALS.find((v) => v.kind === kind)?.categories ?? [];
+  const categories = (
+    VERTICALS.find((v) => v.kind === kind)?.categories ?? []
+  ).filter((c) => !c.hidden);
   if (!gender) return categories;
   return categories.filter((c) => !c.genders || c.genders.includes(gender));
+}
+
+/** Every leaf of a vertical, hidden ones included, for titling a listing. */
+export function allCategoriesFor(
+  kind: string | undefined,
+): ReadonlyArray<{ slug: string; label: string }> {
+  return VERTICALS.find((v) => v.kind === kind)?.categories ?? [];
 }
 
 export const COMING_SOON = "Наскоро";
@@ -256,9 +327,11 @@ export function listingTitle(params: ListingParams): string {
   // Both trees, because a listing can be either vertical now. Looked up by
   // slug across all of them rather than by `params.kind`, so a link that
   // carries a category but no kind still gets its real heading.
-  const category = [...FOOTWEAR_CATEGORIES, ...APPAREL_CATEGORIES].find(
-    (c) => c.slug === params.category,
-  )?.label;
+  const category = [
+    ...FOOTWEAR_CATEGORIES,
+    ...APPAREL_CATEGORIES,
+    ...ACCESSORY_CATEGORIES,
+  ].find((c) => c.slug === params.category)?.label;
   const vertical = VERTICALS.find((v) => v.kind === params.kind)?.label;
   const gender = GENDER_COLUMNS.find(
     (g) => g.slug === params.gender,

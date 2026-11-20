@@ -143,7 +143,46 @@ export function MobileNav() {
                   </div>
                 )}
 
-                {expanded && !soon && (
+                {/* The same split the desktop menu makes: a vertical whose
+                    departments hold the same stock lists its categories
+                    directly instead of three gender toggles that would open
+                    onto near-identical lists. */}
+                {expanded && !soon && vertical.genderColumns === false && (
+                  <div className="pb-2 pl-3">
+                    <ul>
+                      {categoriesFor(vertical.kind).map((category) => (
+                        <li key={category.slug}>
+                          <Link
+                            href={listingHref({
+                              kind: vertical.kind,
+                              category: category.slug,
+                            })}
+                            onClick={close}
+                            className="block py-1.5 text-sm text-muted-foreground"
+                          >
+                            {category.label}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    <Link
+                      href={listingHref({ kind: vertical.kind, gender: "kids" })}
+                      onClick={close}
+                      className="mt-1 block border-t py-1.5 text-sm font-medium"
+                    >
+                      {vertical.label} за деца
+                    </Link>
+                    <Link
+                      href={listingHref({ kind: vertical.kind })}
+                      onClick={close}
+                      className="block py-1.5 text-sm font-medium"
+                    >
+                      {vertical.allLabel}
+                    </Link>
+                  </div>
+                )}
+
+                {expanded && !soon && vertical.genderColumns !== false && (
                   <div className="pb-2 pl-3">
                     <Link
                       href={listingHref({ kind: vertical.kind })}

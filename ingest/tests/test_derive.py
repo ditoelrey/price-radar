@@ -24,7 +24,7 @@ import pytest
 
 from mkagg.derive import (OfferEvidence, derive_category, derive_gender)
 from mkagg.discover import FACET_CATEGORY, FACET_PLANS, as_facets
-from mkagg.taxonomy import FOOTWEAR_SLUGS, KNOWN_GENDERS
+from mkagg.taxonomy import FACET_GENDERS, FOOTWEAR_SLUGS, KNOWN_GENDERS
 
 
 def offer(merchant="sportvision", path=None, gender=None, title=None,
@@ -255,7 +255,7 @@ class TestFacetPlans:
         them and must never be asserted by one."""
         for slug, plan in FACET_PLANS.items():
             for facet in as_facets(plan.categories):
-                assert facet.gender in KNOWN_GENDERS, (slug, facet.gender)
+                assert facet.gender in FACET_GENDERS, (slug, facet.gender)
 
     def test_labels_that_repeat_across_shops_agree(self):
         """"patiki" is a label on both Sport Vision and megasport.
@@ -604,3 +604,60 @@ class TestAPersonOutranksBothSources:
                             ORDER BY p.slug""")
             assert cur.fetchall() == [("p-kept", "tshirts"),
                                       ("p-moved", "cleats")]
+
+
+class TestAnExplicitUnisexFacetIsEvidence:
+    """A department that says Унисекс outright.
+
+    Until Опрема, unisex could only ever be *inferred*: an article listed in
+    both `maski+unisex` and `unisex+zenski` resolves to unisex because it was
+    found in two departments. That is all the footwear and apparel plans can
+    produce, and it is fine for them -- footwear is 4.2 percent unisex and
+    apparel 0.2.
+
+    Equipment is 55 to 66 percent unisex on the two shops that count it, and
+    Sport Reality's section carries no men's or women's URL at all for those
+    404 articles -- only a Унисекс filter. Inference has nothing to work
+    with there, so the facet has to be allowed to say it.
+    """
+
+    def test_one_offer_can_carry_it(self, clean_db):
+        from mkagg.derive import rederive
+        pid = _product(clean_db, slug="u1")
+        _offer(clean_db, pid, path="ranci", gender="unisex")
+        clean_db.commit()
+
+        rederive(clean_db)
+
+        with clean_db.cursor() as cur:
+            cur.execute("""SELECT gender::text, gender_source FROM product
+                            WHERE id = %s""", (pid,))
+            assert cur.fetchone() == ("unisex", "facet")
+
+    def test_it_agrees_with_the_inferred_kind(self, clean_db):
+        """An explicit unisex and a men's listing are not a contradiction.
+
+        Both say "adults, not only one department", so they collapse the
+        same way two opposing departments would.
+        """
+        from mkagg.derive import rederive
+        pid = _product(clean_db, slug="u2")
+        _offer(clean_db, pid, merchant="sportvision", path="ranci",
+               gender="unisex")
+        _offer(clean_db, pid, merchant="megasport", path="ranci",
+               gender="men")
+        clean_db.commit()
+
+        rederive(clean_db)
+
+        with clean_db.cursor() as cur:
+            cur.execute("SELECT gender::text FROM product WHERE id = %s",
+                        (pid,))
+            assert cur.fetchone()[0] == "unisex"
+
+    def test_a_title_still_cannot_claim_it(self):
+        """The narrower promise, unchanged: only a department may say this."""
+        from mkagg.taxonomy import KNOWN_GENDERS, classify_gender
+        assert "unisex" not in KNOWN_GENDERS
+        for title in ("adidas Ранец Unisex", "Nike Backpack unisex adult"):
+            assert classify_gender(title) != "unisex"

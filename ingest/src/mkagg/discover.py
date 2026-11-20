@@ -785,6 +785,350 @@ for _plan in APPAREL_FACET_PLANS.values():
             FACET_CATEGORY.setdefault(_facet.label, _facet.category)
 
 
+# -----------------------------------------------------------------------------
+# Опрема facets (V23)
+# -----------------------------------------------------------------------------
+#: The third vertical. Every slug below was confirmed by
+#: `tools/probe_accessory_slugs.py` rather than transliterated and hoped for,
+#: and the probe is the reason this list looks the way it does.
+#:
+#: **The shops drop the `h`.** `chorapi` 404s and `corapi` answers, on all
+#: three Sport Vision family shops; so do `kacketi-i-kapi`, `sise-za-voda`,
+#: `naocari-za-plivanje` and `oprema-za-cistenje`. The transliterator
+#: produces the other spelling, which is how `/mk/sorc/` once held 835 offers
+#: no rule could read.
+#:
+#: **sportvision and sportreality do not share a list**, unlike
+#: apparel. One writes `kacketi-i-kapi` and the other `kapa` and
+#: `kacket` both; sportreality names forty-eight sections where
+#: sportvision names nineteen. (`ranci` 404s on sportreality --
+#: `ranec` does not, and an earlier note here said otherwise.)
+#:
+#: **Unisex is walked explicitly**, which the other two verticals never do.
+#: Equipment is 55 percent unisex on sportvision and 66 on sportreality,
+#: against 4.2 percent of footwear, and discovery collects every department a
+#: URL was found in -- so a bare `unisex/vozrasni` alongside the two bundled
+#: suffixes resolves those articles to `unisex` outright instead of leaving
+#: it to be inferred. It costs a fourth walk per category and is the only
+#: thing that genders Sport Reality's 404 unisex articles correctly.
+_SV_ACC_GENDERS = _SV_GENDERS + (("unisex", "unisex/vozrasni"),)
+_BUZZ_ACC_GENDERS = _BUZZ_GENDERS + (("unisex", "unisex/za-vozrasni"),)
+
+#: (slug, canonical category, departments that stock it).
+_SV_ACCESSORY = (
+    ("corapi", "socks", None),
+    ("kacketi-i-kapi", "caps_hats", None),
+    ("ranec", "bags_backpacks", None),
+    ("sise-za-voda", "bottles_thermos", None),
+    ("oprema-za-plivanje", "swim_gear", None),
+    ("naocari-za-plivanje", "swim_gear", None),
+    ("topka", "balls_training", None),
+    ("podloga", "balls_training", None),
+    ("oprema-za-trening", "balls_training", None),
+    ("golmanski-rakavici", "protective_gear", None),
+    ("kaciga", "protective_gear", None),
+    ("roleri", "skates_scooters", None),
+    ("pribor-i-dodatoci-za-obuvki", "shoe_care_laces", None),
+    # Sport-specific shelves that mix leaves -- a football one holds balls,
+    # shin guards and gloves together -- so the parent is the truest answer
+    # rather than a shrug.
+    ("oprema-za-fudbal", "accessories", None),
+    ("oprema-za-ping-pong", "accessories", None),
+    ("oprema-za-planinarenje", "accessories", None),
+    ("oprema-za-skijanje", "accessories", None),
+    ("ostanata-oprema", "accessories", None),
+    # The umbrella last: discovery keeps the first facet to claim a URL, so
+    # anything above wins and this picks up only what none of them covered.
+    ("oprema", "accessories", None),
+)
+
+#: sportreality, rebuilt from the sections its own offers sit in rather than
+#: from a candidate list.
+#:
+#: The first version of this was built from recon labels, probed, and still
+#: wrong: 326 of its 609 offers arrived through the `oprema` umbrella because
+#: the list named eight sections and the shop uses forty-eight. The probe
+#: confirmed everything it was asked about and could not say a word about
+#: what it was never asked -- `kapa` with 92 offers, `ranec` with 60,
+#: `vreka-za-trening` with 11, which an earlier note here called unlocated.
+#:
+#: So these come from the URL sections of products already ingested, which is
+#: the only source that cannot omit anything the shop actually sells.
+#:
+#: Five are deliberately absent. `set`, `potnik`, `traka`, `rosuli` and
+#: `rakav` are genuinely ambiguous and the umbrella is the honest answer for
+#: them; `velosiped` is excluded outright.
+_SR_ACCESSORY = (
+    ("corapi", "socks", None),
+    ("stucni", "socks", None),
+    ("kapa", "caps_hats", None),
+    ("kacket", "caps_hats", None),
+    ("podkapa", "caps_hats", None),
+    ("sal", "caps_hats", None),
+    ("traka-za-glava", "caps_hats", None),
+    ("grejac-za-vrat", "caps_hats", None),
+    ("ranec", "bags_backpacks", None),
+    ("torbi", "bags_backpacks", None),
+    ("torbica", "bags_backpacks", None),
+    ("kufer", "bags_backpacks", None),
+    ("vreka-za-trening", "bags_backpacks", None),
+    ("paricnik", "wallets", None),
+    ("golmanski-rakavici", "protective_gear", None),
+    ("rakavici", "protective_gear", None),
+    ("kostobran", "protective_gear", None),
+    ("stitnik", "protective_gear", None),
+    ("stitnik-za-zabi", "protective_gear", None),
+    ("bandazer", "protective_gear", None),
+    ("stegac", "protective_gear", None),
+    ("suspenzor", "protective_gear", None),
+    ("kaciga", "protective_gear", None),
+    ("naocari-za-skijanje", "protective_gear", None),
+    ("topka", "balls_training", None),
+    ("pumpa", "balls_training", None),
+    ("jaze-za-skokanje", "balls_training", None),
+    ("podloga", "balls_training", None),
+    ("pomagalo-za-sklekovi", "balls_training", None),
+    ("fitnes-rekvizit", "balls_training", None),
+    ("sise-za-voda", "bottles_thermos", None),
+    ("kapa-za-plivanje", "swim_gear", None),
+    ("naocari-za-plivanje", "swim_gear", None),
+    ("maska-i-perai", "swim_gear", None),
+    ("cepovi-za-usi", "swim_gear", None),
+    ("stipka-za-nos", "swim_gear", None),
+    ("vloski", "shoe_care_laces", None),
+    ("sprej", "shoe_care_laces", None),
+    ("roleri", "skates_scooters", None),
+    ("trotinet", "skates_scooters", None),
+    ("ostrica-za-klizalki", "skates_scooters", None),
+    ("ostanata-oprema", "accessories", None),
+    # Last, so it picks up only what none of the above claimed.
+    ("oprema", "accessories", None),
+)
+
+#: buzz, rebuilt from its own offers' URL sections after run 39.
+#:
+#: Its tree really is simpler than sportreality's -- 21 sections against 48,
+#: and the catch-all held only 4.3 percent of the sweep rather than 54. But
+#: the first list was still wrong about the biggest thing on the shop: it
+#: named `kacketi-i-kapi`, which answers and holds almost nothing, while
+#: `kapa` (138 offers) and `kacket` (45) are where the hats are.
+_BUZZ_ACCESSORY = (
+    ("corapi", "socks", None),
+    ("kapa", "caps_hats", None),
+    ("kacket", "caps_hats", None),
+    ("kacketi-i-kapi", "caps_hats", None),
+    ("traka-za-kosa", "caps_hats", None),
+    ("ranec", "bags_backpacks", None),
+    ("torbica", "bags_backpacks", None),
+    ("torba", "bags_backpacks", None),
+    ("kufer", "bags_backpacks", None),
+    ("vreka-za-trening", "bags_backpacks", None),
+    ("paricnik", "wallets", None),
+    ("rakavici", "protective_gear", None),
+    ("sise-za-voda", "bottles_thermos", None),
+    ("sprej", "shoe_care_laces", None),
+    ("vloski", "shoe_care_laces", None),
+    ("vrvci", "shoe_care_laces", None),
+    ("oprema-za-cistenje", "shoe_care_laces", None),
+    ("ukras", "other_accessories", None),
+    ("privezok", "other_accessories", None),
+    ("ostanata-oprema", "accessories", None),
+    # Last, so it picks up only what none of the above claimed. `set` and
+    # `kapsuli` are deliberately unnamed -- both are ambiguous and this is
+    # the honest answer for them. `pet-ogrlica` is excluded outright.
+    ("oprema", "accessories", None),
+)
+
+#: megasport repeats the gender inside the slug -- the habit its apparel plan
+#: already records -- so these are full paths rather than a slug crossed with
+#: a suffix. Read off its own navigation, because it soft-404s: a slug that
+#: cannot exist answers 200 with the same 54 products as a real one, so
+#: nothing about this shop can be confirmed by asking whether a URL answers.
+#:
+#: `torbi-ranci-i-parichnici` is one facet for bags, backpacks *and* wallets.
+#: It resolves to the broader leaf, and a title naming a wallet still wins --
+#: see the `wallets` rule in `mkagg.taxonomy`.
+_MEGA_ACCESSORY = (
+    ("/kategorija/mazhi/oprema-mazhi/chorapi-oprema-mazhi/", "socks", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/kapi/", "caps_hats", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/ski-bandana/", "caps_hats", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/torbi-ranci-i-parichnici/",
+     "bags_backpacks", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/rakavici-oprema-mazhi/",
+     "protective_gear", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/kacigi-oprema-mazhi/",
+     "protective_gear", "men"),
+    ("/kategorija/mazhi/oprema-mazhi/naochari/", "protective_gear", "men"),
+    ("/kategorija/zheni/oprema-zheni/torbici/", "bags_backpacks", "women"),
+    ("/kategorija/zheni/oprema-zheni/rakavici-oprema-zheni/",
+     "protective_gear", "women"),
+    ("/kategorija/zheni/oprema-zheni/kacigi-oprema-zheni/",
+     "protective_gear", "women"),
+    ("/kategorija/zheni/oprema-zheni/ski-bandana-oprema-zheni/",
+     "caps_hats", "women"),
+    ("/kategorija/deca/oprema-deca/ranec/", "bags_backpacks", "kids"),
+    ("/kategorija/deca/oprema-deca/rakavici/", "protective_gear", "kids"),
+    ("/kategorija/deca/oprema-deca/kacigi-oprema-deca/",
+     "protective_gear", "kids"),
+    # Outside the gender tree entirely, and absent from recon. Sixteen
+    # products, no department: the facet carries no gender rather than
+    # guessing one.
+    ("/kategorija/ski-oprema/naochari-za-skijane/", "protective_gear", None),
+)
+
+#: The department pages themselves, which hold most of the stock.
+#:
+#: Run 40 found 334 products against a recon count of 579, and enumerating
+#: the subtree explained the gap rather than closing it: those fifteen paths
+#: really are every child megasport publishes. The shop simply does not
+#: subdivide most of its equipment -- `/oprema-mazhi/` carries far more than
+#: its seven children do between them.
+#:
+#: `label=None` is the load-bearing part, and it is not an oversight. A
+#: labelled facet feeds `FACET_CATEGORY`, and `derive_category` takes a facet
+#: over a title every time -- so an umbrella label would pin all 245 of these
+#: to the parent and no later pass could improve on it. Without one, the
+#: offer still carries `category_hint="accessories"` (which is what picks the
+#: run kind, and must be right) while the *leaf* is left to the title.
+#:
+#: That is worth doing only because megasport's titles are unusually good:
+#: they lead with the Macedonian category word, as this shop's entries in
+#: `mkagg.taxonomy.classify` have documented since V17 -- "GH0331 Чорапи ACT
+#: CORE MID CREW SOCK 3P - Megasport". The Sport Vision family's titles do
+#: not, which is why their umbrellas stay labelled.
+_MEGA_ACCESSORY_UMBRELLAS = (
+    ("/kategorija/mazhi/oprema-mazhi/", "accessories", "men"),
+    ("/kategorija/zheni/oprema-zheni/", "accessories", "women"),
+    ("/kategorija/deca/oprema-deca/", "accessories", "kids"),
+    # A second kids tree lives beside the first. Its two children duplicate
+    # `oprema-deca`'s, but the department page is distinct and the URL
+    # dedupe in discovery handles any overlap.
+    ("/kategorija/deca/oprema/", "accessories", "kids"),
+    ("/kategorija/ski-oprema/", "accessories", None),
+)
+
+#: The aspnet subgroup dictionary, accessory half. Both shops publish the
+#: whole list on every catalogue page, so these codes were read rather than
+#: guessed.
+#:
+#: Four codes are deliberately absent -- 798 pets, 742 Funko, 649 bicycles,
+#: 740 watches. Leaving them out of the walk is half the exclusion; the other
+#: half is `mkagg.taxonomy.is_excluded`, because the Спецификации parser
+#: reads subgroups off the product page and would otherwise let them in by a
+#: different door.
+_PODGRUPA_ACCESSORY = {
+    "096": ("protective_gear", "Наочари"),
+    "106": ("skates_scooters", "Ролери"),
+    "107": ("skates_scooters", "Скироли"),
+    "111": ("skates_scooters", "Тротинети"),
+    "277": ("swim_gear", "Капи за пливање"),
+    "487": ("protective_gear", "Голмански ракавици"),
+    "489": ("other_accessories", "Друго"),
+    "493": ("caps_hats", "Капи"),
+    "494": ("protective_gear", "Костобрани"),
+    "497": ("swim_gear", "Наочари за пливање"),
+    "507": ("bags_backpacks", "Ранци"),
+    "512": ("bags_backpacks", "Торби"),
+    "518": ("socks", "Чорапи"),
+    "519": ("bottles_thermos", "Шишиња"),
+    "548": ("shoe_care_laces", "Средство за заштита од влага"),
+    "550": ("shoe_care_laces", "Средство за отстранување на миризби"),
+    "560": ("shoe_care_laces", "Комбинирана четка за велур кожа"),
+    "591": ("caps_hats", "Бандани"),
+    "607": ("shoe_care_laces", "Врвки"),
+    "628": ("balls_training", "Држачи за склекови"),
+    "638": ("shoe_care_laces", "Средство за чистење на обувки"),
+    "667": ("balls_training", "Баланс топка"),
+    "678": ("bottles_thermos", "Термос"),
+    "704": ("other_accessories", "Заштитна маска за лице"),
+    "761": ("bags_backpacks", "Торбички"),
+    "782": ("caps_hats", "Зимски капи"),
+}
+
+
+def _sv_accessory_facets(categories, genders) -> tuple[Facet, ...]:
+    """Slug crossed with department, umbrella last."""
+    return tuple(
+        Facet(path=f"/mk/{cat}/{suffix}", category=canonical, gender=gender,
+              label=cat)
+        for cat, canonical, only in categories
+        for gender, suffix in genders
+        if only is None or gender in only)
+
+
+def _aspnet_accessory_facets(departments) -> tuple[Facet, ...]:
+    """Subgroups first, then each department as a catch-all.
+
+    ``gender=None`` is a real entry here, not an oversight. Sport-M sells its
+    Опрема at `Segment=06` with no department anywhere in the URL -- 758
+    articles -- and the Спецификации table on each product page is what
+    genders them. A facet claiming a gender it cannot see would be worse than
+    none, because `resolve_departments` would then have two answers to
+    reconcile instead of one to find.
+    """
+    out = []
+    for segment, gender, codes in departments:
+        for code in codes:
+            canonical, label = _PODGRUPA_ACCESSORY[code]
+            out.append(Facet(
+                path=f"/ProductCatalog?Segment={segment}&Grupa=03"
+                     f"&PodGrupa={code}",
+                category=canonical, gender=gender, label=label))
+    for segment, gender, _codes in departments:
+        out.append(Facet(
+            path=f"/ProductCatalog?Segment={segment}&Grupa=03",
+            category="accessories", gender=gender, label="Додатоци"))
+    return tuple(out)
+
+
+#: Every code either shop publishes. Walking one with nothing in it costs a
+#: single request and returns an empty page, which is cheaper than keeping a
+#: per-segment list correct as the shops restock.
+_ASPNET_ACC_CODES = tuple(sorted(_PODGRUPA_ACCESSORY))
+
+ACCESSORY_FACET_PLANS: dict[str, PaginatedPlan] = {
+    "sportvision": PaginatedPlan(
+        categories=_sv_accessory_facets(_SV_ACCESSORY, _SV_ACC_GENDERS)),
+    "sportreality": PaginatedPlan(
+        categories=_sv_accessory_facets(_SR_ACCESSORY, _SV_ACC_GENDERS)),
+    "buzz": PaginatedPlan(
+        categories=_sv_accessory_facets(_BUZZ_ACCESSORY, _BUZZ_ACC_GENDERS)),
+    "megasport": PaginatedPlan(
+        categories=(
+            tuple(Facet(path=path, category=cat, gender=gender,
+                        label=path.rstrip("/").rsplit("/", 1)[-1])
+                  for path, cat, gender in _MEGA_ACCESSORY)
+            # Umbrellas last, and unlabelled. Discovery keeps the first facet
+            # to claim a URL, so every child above wins first.
+            + tuple(Facet(path=path, category=cat, gender=gender)
+                    for path, cat, gender in _MEGA_ACCESSORY_UMBRELLAS)),
+        page_suffix="page/{page}/"),
+    "sizeer": PaginatedPlan(categories=_aspnet_accessory_facets((
+        ("51", "men", _ASPNET_ACC_CODES),
+        ("52", "women", _ASPNET_ACC_CODES),
+        ("53", "kids", _ASPNET_ACC_CODES),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+    "sportm": PaginatedPlan(categories=_aspnet_accessory_facets((
+        ("03", "men", _ASPNET_ACC_CODES),
+        ("04", "women", _ASPNET_ACC_CODES),
+        ("05", "kids", _ASPNET_ACC_CODES),
+        # The standalone Опрема section. No gender in any URL, so none is
+        # claimed; `mkagg.adapters.aspnet_mk.spec_gender` fills it in from
+        # the product page.
+        ("06", None, _ASPNET_ACC_CODES),
+    )), page_suffix="&Page={page}", walk_until_empty=True, max_pages=120),
+}
+
+#: Folded into the same label mapping the other two verticals use.
+#: `setdefault`, because a label shared with an earlier vertical must keep
+#: its first meaning -- "Капи" and "Чорапи" appear in both aspnet
+#: dictionaries and mean the same thing in each.
+for _plan in ACCESSORY_FACET_PLANS.values():
+    for _facet in as_facets(_plan.categories):
+        if _facet.label and _facet.category:
+            FACET_CATEGORY.setdefault(_facet.label, _facet.category)
+
+
 #: Search-based sweep for the sampled platform, used when the facet taxonomy
 #: misses a brand. Verified term-sensitive: "zzzznonsense" returns 0 results
 #: while "adidas" returns matches.
@@ -847,6 +1191,8 @@ def sweep_plan(merchant_slug: str, adapter: str,
     """
     if vertical == "apparel":
         return APPAREL_FACET_PLANS.get(merchant_slug)
+    if vertical == "accessory":
+        return ACCESSORY_FACET_PLANS.get(merchant_slug)
     if vertical != "footwear":
         return None
     # The shop's own plan first: on a white-label platform the adapter says
@@ -859,6 +1205,8 @@ def facet_plan(merchant_slug: str,
     """The plan a *labelling walk* reads. See :func:`sweep_plan`."""
     if vertical == "apparel":
         return APPAREL_FACET_PLANS.get(merchant_slug)
+    if vertical == "accessory":
+        return ACCESSORY_FACET_PLANS.get(merchant_slug)
     if vertical != "footwear":
         return None
     return FACET_PLANS.get(merchant_slug)
