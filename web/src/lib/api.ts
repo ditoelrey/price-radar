@@ -105,6 +105,11 @@ export type OfferVariant = {
    * them. 2 479 NS variants exist and not one is in stock.
    */
   sizeSystem: string | null;
+  /**
+   * The upper letter when the shop's label names a span ("M/L"), with
+   * `sizeAlpha` the lower. Null for an ordinary single letter.
+   */
+  sizeAlphaMax?: string | null;
   price: Money | null;
   listPrice: Money | null;
   shipping: Money | null;

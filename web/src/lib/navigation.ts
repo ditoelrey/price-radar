@@ -156,7 +156,10 @@ export const ACCESSORY_CATEGORIES: ReadonlyArray<{
   { slug: "protective_gear", label: "Кациги, наочари и ракавици" },
   { slug: "balls_training", label: "Топки и фитнес опрема" },
   { slug: "skates_scooters", label: "Ролери и тротинети" },
-  { slug: "swim_gear", label: "Опрема за пливање", hidden: true },
+  // Shown from 2026-11-21: 106 products, once sport-m and Sport Vision
+  // completed the Опрема vertical. The threshold this clears is the comment
+  // above -- a leaf under a hundred products reads as an empty site.
+  { slug: "swim_gear", label: "Опрема за пливање" },
   { slug: "bottles_thermos", label: "Шишиња и термоси", hidden: true },
   { slug: "wallets", label: "Паричници", hidden: true },
   { slug: "shoe_care_laces", label: "Врвки и нега на обувки", hidden: true },

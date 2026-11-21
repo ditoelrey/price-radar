@@ -109,3 +109,33 @@ export function stockLabel(stock: StockState): {
       return { text: "Stock not published", tone: "unknown" };
   }
 }
+
+/**
+ * The one universal-size label, whatever the shop called it.
+ *
+ * Six shops print at least eight spellings of "no size": "Унив." on the
+ * Sport Vision family, "Една големина" on sizeer and sport-m, and the brand
+ * codes their widgets carry -- NS, OS, ONE, ONESZ, UNSZ, ONE SIZE. They are
+ * one thing to a shopper, and showing them as eight chips on one product
+ * invites a choice that does not exist. `size_system` already says they are
+ * the same thing, so the label follows it rather than the raw word.
+ *
+ * The raw label stays in the database. This is a display rule, and the shop's
+ * own word is what a size probe has to send back to the shop.
+ */
+export const ONE_SIZE_LABEL = "Унив.";
+
+export function sizeDisplayLabel(variant: {
+  sizeSystem: string | null;
+  sizeAlpha?: string | null;
+  sizeAlphaMax?: string | null;
+  sizeLabel: string;
+}): string {
+  if (variant.sizeSystem === "one_size") return ONE_SIZE_LABEL;
+  // A label naming two sizes is shown as the shop prints it. `sizeAlpha`
+  // holds only the lower end, so rendering it would turn "M/L" into "M" --
+  // a size the shopper would then look for on the shop and not find under
+  // that name. The range is for filtering; the label is for reading.
+  if (variant.sizeAlphaMax) return variant.sizeLabel;
+  return variant.sizeAlpha ?? variant.sizeLabel;
+}

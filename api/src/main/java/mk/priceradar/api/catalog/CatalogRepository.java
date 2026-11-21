@@ -339,8 +339,18 @@ public class CatalogRepository {
      * rather than as an error.
      */
     static String sizeMatch(boolean byEu) {
+        // The letter side is a range test, not an equality, because a label
+        // can name two sizes: "M/L" is stored as size_alpha M with
+        // size_alpha_max L, and has to answer a shopper filtering either.
+        // coalesce collapses the ordinary single-letter row to M..M, so the
+        // same expression serves both and there is no second code path to
+        // keep in step. A NULL size_alpha ranks NULL and matches nothing,
+        // which is what a variant with no letter size should do.
         return byEu ? "ov.size_eu = CAST(:sizeEu AS numeric)"
-                    : "ov.size_alpha = CAST(:sizeAlpha AS text)";
+                    : "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
+                      + "alpha_size_rank(ov.size_alpha) AND "
+                      + "alpha_size_rank(coalesce(ov.size_alpha_max, "
+                      + "ov.size_alpha))";
     }
 
     private Dtos.ProductCard mapCard(ResultSet rs, boolean sizeSpecific) throws SQLException {
@@ -428,7 +438,7 @@ public class CatalogRepository {
                        -- garment page, so the raw labels include 2XLS, M-T
                        -- and YXS. `size_alpha` is what V18's parser could
                        -- actually place on the ladder.
-                       ov.size_alpha, ov.size_system,
+                       ov.size_alpha, ov.size_alpha_max, ov.size_system,
                        -- Carried only so the ORDER BY below can reach them:
                        -- an age or height size has no place on the alpha
                        -- ladder and sorts on its own normalised number.
@@ -517,6 +527,7 @@ public class CatalogRepository {
                         rs.getString("size_label"),
                         nullableDouble(rs, "size_eu"),
                         rs.getString("size_alpha"),
+                        rs.getString("size_alpha_max"),
                         rs.getString("size_system"),
                         // nullableLong, not getLong: a sold-out offer whose
                         // shop publishes no price has price_minor NULL, and
@@ -558,7 +569,8 @@ public class CatalogRepository {
                                   Integer deliveryDaysMin, Integer deliveryDaysMax,
                                   String relatedMerchantSlug, long variantId,
                                   String sizeLabel, Double sizeEu,
-                                  String sizeAlpha, String sizeSystem,
+                                  String sizeAlpha, String sizeAlphaMax,
+                                  String sizeSystem,
                                   Long priceMinor, Long listPriceMinor,
                                   long shippingMinor, Long totalMinor,
                                   Long offerFromPriceMinor,

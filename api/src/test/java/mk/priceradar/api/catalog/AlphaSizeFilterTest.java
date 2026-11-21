@@ -22,8 +22,15 @@ class AlphaSizeFilterTest {
     void predicatePerAxis() {
         assertThat(CatalogRepository.sizeMatch(true))
                 .isEqualTo("ov.size_eu = CAST(:sizeEu AS numeric)");
-        assertThat(CatalogRepository.sizeMatch(false))
-                .isEqualTo("ov.size_alpha = CAST(:sizeAlpha AS text)");
+        // A range test, not an equality: "M/L" is stored as size_alpha M
+        // with size_alpha_max L and has to answer either letter. coalesce
+        // collapses a single-letter row to M..M, so one expression serves
+        // both cases.
+        assertThat(CatalogRepository.sizeMatch(false)).isEqualTo(
+                "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
+                + "alpha_size_rank(ov.size_alpha) AND "
+                + "alpha_size_rank(coalesce(ov.size_alpha_max, "
+                + "ov.size_alpha))");
     }
 
     @Test
@@ -79,6 +86,22 @@ class AlphaSizeFilterTest {
     }
 
     @Test
+    @DisplayName("a span chip matches the shop's own label")
+    void spanMatchesPrintedLabel() {
+        // The page shows "M/L" for a span rather than either end, because
+        // that is what the shop prints and what the shopper reads there.
+        // sameLabel has to accept it, or a visible chip filters to nothing.
+        var span = new CatalogRepository.OfferVariantRow(
+                3L, "buzz", "Buzz Sneakers", 4.0, 10, true, 2, 4, null,
+                3L, "M/L", null, "M", "L", "alpha",
+                100L, null, 0L, 100L, 100L, 100L, "MKD", true, 1,
+                java.time.Instant.now(), 0);
+        assertThat(CatalogService.sameLabel(span, "M/L")).isTrue();
+        assertThat(CatalogService.sameLabel(span, "M")).isTrue();
+        assertThat(CatalogService.sameLabel(span, "XL")).isFalse();
+    }
+
+    @Test
     @DisplayName("a kids size matches on its label, having no letter")
     void kidsMatchOnLabel() {
         // "9-10 год." is on no ladder and has no canonical form, so the
@@ -92,7 +115,7 @@ class AlphaSizeFilterTest {
             long id, String label, String alpha) {
         return new CatalogRepository.OfferVariantRow(
                 id, "sportvision", "Sport Vision", 4.0, 10, true, 2, 4, null,
-                id, label, null, alpha, "alpha",
+                id, label, null, alpha, null, "alpha",
                 100L, null, 0L, 100L, 100L, 100L, "MKD", true, 1,
                 java.time.Instant.now(), 0);
     }

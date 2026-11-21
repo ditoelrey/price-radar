@@ -132,6 +132,13 @@ public final class Dtos {
              */
             String sizeAlpha,
             /**
+             * The upper letter when the shop's label names a span ("M/L"),
+             * with {@code sizeAlpha} the lower. NULL for a single letter.
+             * The storefront shows the shop's own label for a span rather
+             * than either end of it.
+             */
+            String sizeAlphaMax,
+            /**
              * Which ladder this size is on: {@code alpha}, {@code age},
              * {@code height}, {@code numeric}, or null.
              *

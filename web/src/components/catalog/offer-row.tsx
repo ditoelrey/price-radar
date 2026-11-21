@@ -6,6 +6,7 @@ import {
   formatCheckedAt,
   formatMoney,
   formatSizeEu,
+  sizeDisplayLabel,
   stockLabel,
 } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -52,7 +53,9 @@ export function OfferRow({
   // "EU" in front of that label would put the wrong number back on the page
   // after the ingestion side went to the trouble of removing it.
   const sizeText =
-    variant.sizeEu !== null ? `EU ${variant.sizeLabel}` : variant.sizeLabel;
+    variant.sizeEu !== null
+      ? `EU ${variant.sizeLabel}`
+      : sizeDisplayLabel(variant);
   const buyable = variant.stock !== "SOLD_OUT";
   // Some shops take the price down with the stock: megasport publishes none
   // at all once every size of a product is gone. The offer is still worth
@@ -254,5 +257,7 @@ export function offerVariantsSorted(offer: Offer): OfferVariant[] {
 }
 
 export function formatVariantSize(variant: OfferVariant): string {
-  return variant.sizeEu !== null ? formatSizeEu(variant.sizeEu) : variant.sizeLabel;
+  return variant.sizeEu !== null
+    ? formatSizeEu(variant.sizeEu)
+    : sizeDisplayLabel(variant);
 }

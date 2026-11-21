@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { ChevronRight, ImageIcon, Info, Store } from "lucide-react";
 
 import { getProduct, type Offer } from "@/lib/api";
-import { formatMoney, formatSizeEu } from "@/lib/format";
+import { formatMoney, formatSizeEu, sizeDisplayLabel } from "@/lib/format";
 import { OfferRow } from "@/components/catalog/offer-row";
 import { LabelSizePicker } from "@/components/catalog/label-size-picker";
 import { SizePicker } from "@/components/catalog/size-picker";
@@ -197,7 +197,7 @@ export default async function ProductDetailPage({
   const otherSizes: string[] = [];
   const otherInStock = new Set<string>();
   for (const variant of labelled) {
-    const label = variant.sizeAlpha ?? variant.sizeLabel;
+    const label = sizeDisplayLabel(variant);
     if (!otherSizes.includes(label)) otherSizes.push(label);
     if (variant.stock !== "SOLD_OUT") otherInStock.add(label);
   }

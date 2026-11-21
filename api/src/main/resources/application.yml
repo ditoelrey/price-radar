@@ -60,7 +60,14 @@ price-radar:
   freshness:
     # Above this, the UI must soften "in stock" to "listed". Matches the
     # honest-UI rule: never assert availability we cannot currently support.
-    stale-after-minutes: ${STALE_AFTER_MINUTES:180}
+    #
+    # 36 hours, and the number is the crawl cadence plus room for a late
+    # run. At 3 hours it was shorter than the interval between sweeps, so
+    # every true "in stock" in the catalogue aged into "Was in stock" before
+    # the next crawl could refresh it -- the softening fired on the freshest
+    # data we are capable of holding, which told a shopper nothing. Shorten
+    # this again only alongside a probe pass that actually runs that often.
+    stale-after-minutes: ${STALE_AFTER_MINUTES:2160}
 
 logging:
   level:
