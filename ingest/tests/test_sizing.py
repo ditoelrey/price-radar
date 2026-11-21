@@ -142,6 +142,39 @@ class TestOneSize:
     def test_articles_without_a_size(self, label):
         assert read_size(label).system == "one_size"
 
+    @pytest.mark.parametrize("label", [
+        # Every spelling the six shops actually print, with the number of
+        # offers each was found on. They read as `numeric` until 2026-11-21,
+        # and `numeric` is the system for "a number we could not place" --
+        # so the size picker, which hides numeric rows on purpose, hid the
+        # only size these articles have.
+        "Унив.",      # 1 496, Sport Vision family
+        "УНИВ",
+        "UNIV",
+        "Една големина",   # 643, sizeer and sport-m
+        "NS",            # 2 821, "no size"
+        "UNSZ",          # 232
+        "ONESZ",         # 49
+        "ONE",           # 93
+        "OS",            # 143
+    ])
+    def test_the_universal_spellings_the_shops_use(self, label):
+        assert read_size(label).system == "one_size"
+
+    @pytest.mark.parametrize("label", ["OSFA", "OSFM", "OSFL", "OSFW", "OSFY"])
+    def test_one_size_fits_whom_is_left_alone(self, label):
+        """All, most, large, women, youth -- listed side by side on one
+        product, so collapsing them would merge a real choice."""
+        assert read_size(label).system != "one_size"
+
+    @pytest.mark.parametrize("label,system", [
+        ("1", "numeric"), ("S", "alpha"), ("42", "eu_shoe"), ("140", "height"),
+    ])
+    def test_real_sizes_are_untouched(self, label, system):
+        """"1" is the trap: it is a size on some shops and sits next to
+        ONE and NS in the same widget."""
+        assert read_size(label).system == system
+
 
 class TestTwoLabelShops:
     """sport-m and sizeer state two labels per size, in one record."""
@@ -175,3 +208,54 @@ class TestTwoLabelShops:
         assert read_pair("XL", None).alpha == "XL"
         assert read_pair(None, "XL").alpha == "XL"
         assert read_pair(None, None).is_empty
+
+
+class TestCombinedLetterSizes:
+    """"M/L" is one article sold across two rungs of the ladder.
+
+    It used to read as `numeric`, so the letter rail and the `size` filter
+    -- both of which work from `size_alpha` -- could not reach 1 382
+    garments by any letter at all, including the two printed on the label.
+    """
+
+    @pytest.mark.parametrize("label,lo,hi", [
+        ("XS/S", "XS", "S"),
+        ("S/M", "S", "M"),
+        ("M/L", "M", "L"),
+        ("L/XL", "L", "XL"),
+        ("XL/2XL", "XL", "XXL"),
+        ("2XS/XS", "XXS", "XS"),
+        # Wider than one rung, and the shops do print these.
+        ("XS/L", "XS", "L"),
+        ("S/XL", "S", "XL"),
+    ])
+    def test_a_span_keeps_both_ends(self, label, lo, hi):
+        read = read_size(label)
+        assert (read.system, read.alpha, read.alpha_max) == ("alpha", lo, hi)
+
+    @pytest.mark.parametrize("label", [
+        # A size and a *length*, not a range. These shops write the same
+        # slash for both, and reading "L/S" as L..S asks for a range that
+        # runs backwards -- which is exactly the test that rejects it.
+        "L/S", "M/S", "XL/S", "2XL/S",
+        # Small-Short. Equal ends, so it would collapse to a span of one.
+        "S/S",
+        # Tall. Dashes are refused outright: "XS-S" does climb the ladder
+        # and is still XS-Short, in a run with S-S, M-S, L-S and XL-S.
+        "L-T", "2XL-T", "4XL-T", "XS-S", "M-S",
+        # A bra band and a cup range.
+        "S A-C", "XS A-C",
+    ])
+    def test_a_lookalike_is_not_a_span(self, label):
+        assert read_size(label).alpha_max is None
+
+    def test_a_plain_letter_has_no_upper_end(self):
+        """So a reader that ignores `alpha_max` is never misled."""
+        read = read_size("M")
+        assert (read.alpha, read.alpha_max) == ("M", None)
+
+    def test_an_age_range_is_still_an_age(self):
+        """The dash rules must not have eaten "8-16г."."""
+        read = read_size("8-16г.")
+        assert read.system == "age"
+        assert (read.age_min_months, read.age_max_months) == (96, 192)

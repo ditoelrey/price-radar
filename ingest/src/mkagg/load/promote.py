@@ -431,13 +431,14 @@ WITH prior AS (
 upserted AS (
     INSERT INTO offer_variant (
             offer_id, size_label, size_eu, size_uk, size_cm,
-            size_system, size_alpha, size_height_cm,
+            size_system, size_alpha, size_alpha_max, size_height_cm,
             size_age_min_months, size_age_max_months,
             merchant_variant_id, price_minor, list_price_minor, currency_code,
             shipping_cost_minor, in_stock, stock_qty,
             last_checked_at, last_changed_at)
          VALUES (%(offer)s, %(label)s, %(eu)s, %(uk)s, %(cm)s,
-                 %(system)s::size_system, %(alpha)s, %(height)s,
+                 %(system)s::size_system, %(alpha)s, %(alpha_max)s,
+                 %(height)s,
                  %(age_lo)s, %(age_hi)s, %(vid)s,
                  %(price)s, %(list)s, %(currency)s, %(ship)s, %(in_stock)s,
                  %(qty)s, now(), now())
@@ -447,6 +448,7 @@ upserted AS (
                 size_cm             = EXCLUDED.size_cm,
                 size_system         = EXCLUDED.size_system,
                 size_alpha          = EXCLUDED.size_alpha,
+                size_alpha_max      = EXCLUDED.size_alpha_max,
                 size_height_cm      = EXCLUDED.size_height_cm,
                 size_age_min_months = EXCLUDED.size_age_min_months,
                 size_age_max_months = EXCLUDED.size_age_max_months,
@@ -513,8 +515,14 @@ SELECT %(pid)s, 'MK',
        -- in a subquery rather than with a FILTER: the array has to come out
        -- in ladder order (XXS, XS, S ... 5XL), and DISTINCT inside
        -- array_agg will only order by the expression it is de-duplicating.
+       -- A label naming two sizes contributes both, so "M/L" answers a
+       -- shopper filtering M and one filtering L. `alpha_size_span` is the
+       -- ladder walk; it returns just the one letter when there is no span.
        coalesce((SELECT array_agg(a ORDER BY alpha_size_rank(a), a)
-                   FROM (SELECT DISTINCT size_alpha AS a FROM v
+                   FROM (SELECT DISTINCT unnest(
+                                    alpha_size_span(size_alpha,
+                                                    size_alpha_max)) AS a
+                           FROM v
                           WHERE size_alpha IS NOT NULL
                             AND in_stock IS NOT FALSE) t), '{}'),
        -- The best saving any shop advertises on this product, so the listing
@@ -664,6 +672,7 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                     "uk": None if apparel else variant.size_uk,
                     "cm": None if apparel else variant.size_cm,
                     "system": size.system, "alpha": size.alpha,
+                    "alpha_max": size.alpha_max,
                     "height": size.height_cm or variant.size_height_cm,
                     "age_lo": size.age_min_months,
                     "age_hi": size.age_max_months,

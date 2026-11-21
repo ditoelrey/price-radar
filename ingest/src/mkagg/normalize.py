@@ -89,9 +89,22 @@ _VULGAR_FRACTIONS = {
 }
 
 # Labels that mean "this article has no size".
+#
+# The second line is what the six shops actually print, counted over the live
+# catalogue: "Унив." on the Sport Vision family (1 496 offers), "Една
+# големина" on sizeer and sport-m (643), and the brand codes the same widgets
+# carry -- NS "no size" (2 821), UNSZ, ONESZ, ONE and OS. Without them a cap
+# read as `numeric`, which is the system for "a number we could not place",
+# and a universal size is not a number at all.
+#
+# `OSFA`, `OSFM`, `OSFL`, `OSFW` and `OSFY` are deliberately absent. They mean
+# one size fits *all*, *most*, *large*, *women*, *youth* -- the shops list
+# several of them side by side on one product, so collapsing them to a single
+# label would merge options a shopper has to choose between.
 _NO_SIZE = {
     "bez velicina", "bez veličina", "bez golemina",
     "one size", "onesize", "uni", "universal", "u", "no size", "-",
+    "univ", "unsz", "onesz", "one", "os", "ns", "edna golemina",
 }
 
 #: The range an EU *footwear* size can plausibly occupy. EU 16 is roughly a

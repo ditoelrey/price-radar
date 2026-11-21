@@ -89,6 +89,11 @@ class SizeReading:
     """
     system: str | None = None
     alpha: str | None = None
+    #: The upper letter when the label names a *span* of two sizes, as
+    #: "M/L" does. None for an ordinary single letter, where `alpha` is the
+    #: whole answer -- so a reader that ignores this field still gets the
+    #: smaller end rather than nothing.
+    alpha_max: str | None = None
     height_cm: int | None = None
     age_min_months: int | None = None
     age_max_months: int | None = None
@@ -106,6 +111,40 @@ def _flatten(label: str) -> str:
     words.
     """
     return " ".join(translit_mk(label or "").lower().split())
+
+
+def _alpha_span(flat: str) -> tuple[str, str] | None:
+    """Read "M/L" as the span M..L, and refuse every lookalike.
+
+    One separator, on purpose. These shops write a slash for two different
+    things and a dash for a third::
+
+        M/L   L/XL   XS/S   2XS/XS     a span of two sizes
+        L/S   M/S    XL/S   S/S        a size and a *length* -- Short
+        L-T   2XL-T  4XL-T             a size and a length -- Tall
+        S A-C XS A-C                   a bra band and a cup range
+
+    Only the first group is a span, and what separates it from the second is
+    not the punctuation but the ladder: a span climbs it. "L/S" is Large in
+    a short leg, and reading it as L..S asks for a range that runs backwards.
+    "S/S" is Small-Short and would collapse to a span of one. Both are
+    rejected by requiring the right-hand size to rank strictly above the
+    left.
+
+    Dashes are left out entirely. "XS-S" climbs the ladder and is still
+    XS-Short, sitting in a run of S-S, M-S, L-S and XL-S that no rule about
+    order can tell apart from it.
+    """
+    if "/" not in flat:
+        return None
+    head, _, tail = flat.partition("/")
+    lo = _ALPHA.get(head.strip().replace(" ", ""))
+    hi = _ALPHA.get(tail.strip().replace(" ", ""))
+    if not lo or not hi:
+        return None
+    if ALPHA_LADDER.index(lo) >= ALPHA_LADDER.index(hi):
+        return None
+    return lo, hi
 
 
 def read_size(label: str | None, *, apparel: bool = False,
@@ -142,6 +181,10 @@ def read_size(label: str | None, *, apparel: bool = False,
     alpha = _ALPHA.get(flat.replace(" ", "")) or _ALPHA.get(flat)
     if alpha:
         return SizeReading(system="alpha", alpha=alpha)
+
+    span = _alpha_span(flat)
+    if span:
+        return SizeReading(system="alpha", alpha=span[0], alpha_max=span[1])
 
     m = _MONTH_RANGE.match(flat)
     if m:

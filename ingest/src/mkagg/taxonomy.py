@@ -49,9 +49,20 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # shorts; "Долен дел тренерки" is trousers and not a tracksuit; "Ски
     # панталони" is trousers. The narrower phrase has to be tried first, the
     # same rule the socks entry above follows for the same reason.
+    # "swim" on its own belongs here and not with the gear, which is where it
+    # used to live -- below `underwear`, so "PUMA SWIM WOMEN HIGH WAIST BRIEF
+    # 1P" matched `brief` first and nine swimsuits were filed as underwear.
+    # Measured over 31 976 live title/URL pairs, moving it here changes 109
+    # of them and 107 are corrections: 62 swim shorts that were plain shorts,
+    # 38 swimsuits ("4F SWIM SUIT", "Champion Lady Swim One Piece") that were
+    # filed as *accessories*, and the nine briefs. The gear keeps the words
+    # that only ever mean gear -- goggles, masks, fins, ear plugs.
+    #
+    # The two it costs are both "J2C Swim", a title naming neither a garment
+    # nor a piece of gear. That is a question for a person, not a rule.
     ("swimwear", ("kostim za kapenje", "kostimi za kapenje",
                   "shorcevi za plivanje", "shorc za plivanje", "kupakji",
-                  "bikini", "swimsuit", "swim short", "swim trunk")),
+                  "bikini", "swimsuit", "swim short", "swim trunk", "swim")),
     # Tracksuit *bottoms* before tracksuits, and jeans and ski pants with
     # them: all four are the thing you put your legs in.
     ("trousers", ("dolen del trenerki", "dolni delovi trenerki",
@@ -133,7 +144,13 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                    "naocari za plivanje", "naochari za plivanje",
                    "maska i perai", "perai", "chepovi za ushi",
                    "cepovi za usi", "shtipka za nos", "stipka za nos",
-                   "swim", "swimming", "goggles")),
+                   # Bare "swim" is gone, to `swimwear` above: this rule runs
+                   # after every garment rule, so the word only ever reached
+                   # here on titles no garment rule had already claimed --
+                   # and 38 of those were swimsuits. "swimming" stays; it is
+                   # how the gear is written ("swimming goggles"), and no
+                   # live garment title uses it.
+                   "swimming", "goggles")),
     # Wallets before bags, and that ordering is the whole reason the leaf can
     # exist: megasport publishes one facet, "Ранци и Паричници", for both. A
     # wallet is only ever recognisable there by its own name.

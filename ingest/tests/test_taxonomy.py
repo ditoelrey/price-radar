@@ -832,3 +832,68 @@ class TestWhatTheCatalogueDoesNotCarry:
         assert classify("Nike Ранец Elemental") == "bags_backpacks"
         assert classify("adidas Топка Champions League") == "balls_training"
         assert classify("Патики Nike Air Max") == "sneakers"
+
+
+class TestSwimIsAGarmentWordNotAGearWord:
+    """Where bare "swim" sits in the rule order, and why it moved.
+
+    It used to live with `swim_gear`, which runs after every garment rule.
+    So a title only reached it when no garment rule had claimed the title
+    first -- and `underwear` claimed "PUMA SWIM WOMEN HIGH WAIST BRIEF 1P"
+    on `brief`, filing nine swimsuits as underwear. Moving the word to
+    `swimwear`, above `underwear`, changed 109 of 31 976 live title/URL
+    pairs; 107 were corrections.
+    """
+
+    @pytest.mark.parametrize("title", [
+        # The nine reported, and what they were filed as.
+        "PUMA SWIM WOMEN HIGH WAIST BRIEF 1P",
+        "PUMA SWIM WOMEN V-SHAPE BRIEF 1P",
+        # Filed as plain shorts: 62 of them.
+        "Karl Kani Retro Striped Swim Shorts light blue/white/blue",
+        "7269-4XP-99 Шорцеви за капење MENS SWIM.SHORTS - Megasport",
+        # Filed as accessories, under swim *gear*: 38 of them.
+        "4F SWIM SUIT",
+        "Champion Lady Swim One Piece",
+        "Colmar Swim Trunks",
+        "PUMA SWIM MEN WAVE AOP SHORT SHORTS 1P",
+    ])
+    def test_a_swim_garment_is_swimwear(self, title):
+        assert classify(title) == "swimwear"
+
+    @pytest.mark.parametrize("title", [
+        # The words that only ever mean gear keep it, and they are what the
+        # shops actually write.
+        "Капа за пливање Arena",
+        "Наочари за пливање Speedo",
+        "Опрема за пливање Arena",
+        "Arena Swimming Goggles",
+        "Маска и пераи Arena",
+    ])
+    def test_gear_is_still_gear(self, title):
+        assert classify(title) == "swim_gear"
+
+    def test_english_gear_titles_were_always_silent(self):
+        """Not a regression, and worth stating so it is not read as one.
+
+        "J2C SET MASK, SNORKEL AND FINS" names its gear in English, which no
+        keyword here carries -- the list is Macedonian because that is what
+        the shops write. It was silent before this change and still is; the
+        live product is `swim_gear` on the strength of its shelf,
+        `maska-i-perai`, which is the source that should decide anyway.
+        """
+        assert classify("J2C SET MASK, SNORKEL AND FINS") is None
+
+    def test_a_brief_with_no_swim_is_still_underwear(self):
+        """The rule that was winning is not weakened, only out-ordered."""
+        assert classify("PUMA WOMEN HIGH WAIST BRIEF 1P") == "underwear"
+        assert classify("Долна облека Puma") == "underwear"
+
+    def test_swim_does_not_reach_past_a_narrower_garment(self):
+        """`shorcevi za plivanje` is still read as the phrase it is.
+
+        Rule order inside the apparel block is load-bearing -- the file says
+        so -- and this is the pair that proves bare "swim" did not flatten it.
+        """
+        assert classify("Шорцеви за пливање Speedo") == "swimwear"
+        assert classify("Костим за капење Arena") == "swimwear"

@@ -182,7 +182,7 @@ class SportVisionAdapter(Adapter):
         block = re.sub(r">\s+<", "><", block)
 
         variants: list[RawVariant] = []
-        seen: set[str] = set()
+        seen: dict[str, int] = {}
         for attrs, combid, inner in _SIZE_LI.findall(block):
             eu = _EUR_SIZE.search(inner)
             orig = _ORIG_SIZE.search(inner)
@@ -197,9 +197,22 @@ class SportVisionAdapter(Adapter):
             # size filter shows 35.5 twice.
             size_eu = normalize_size(label)
             key = str(size_eu) if size_eu is not None else label
+            in_stock = "disabled" not in attrs
+            # First-wins was wrong, and quietly: these shops print one <li>
+            # per size *code* and several codes can share a displayed label.
+            # The Slazenger silicone cap offers ONE, 1 and NS, all three
+            # shown as "Унив." -- and only NS, the last of them, is in
+            # stock. Keeping the first said "sold out" about a cap the shop
+            # was selling. An available size is the truer answer about the
+            # same shelf label, so it replaces a sold-out twin.
             if key in seen:
-                continue
-            seen.add(key)
+                kept = variants[seen[key]]
+                if not in_stock or kept.in_stock:
+                    continue
+                variants.pop(seen[key])
+                seen = {k: (i - 1 if i > seen[key] else i)
+                        for k, i in seen.items() if k != key}
+            seen[key] = len(variants)
 
             # Pre-discount price, per size, when the shop says one applies.
             list_price = None
@@ -230,7 +243,7 @@ class SportVisionAdapter(Adapter):
                 price_minor=price_minor if price_minor is not None else 0,
                 currency_code=currency,
                 # "disabled" on the <li> is the sold-out marker.
-                in_stock="disabled" not in attrs,
+                in_stock=in_stock,
             ))
         return variants
 

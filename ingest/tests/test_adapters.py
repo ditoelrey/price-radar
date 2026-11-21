@@ -979,3 +979,82 @@ class TestTheClothingUmbrella:
             load_bytes("sportm_stansmith.html").decode("utf-8", "replace"))
         assert offer.category_path == specs.get("Подгрупа")
         assert offer.category_path
+
+
+class TestAUniversalSizeThatIsInStock:
+    """The Slazenger silicone cap, and the dedupe that called it sold out.
+
+    Taken from the live sportreality page. These shops print one ``<li>``
+    per size *code* and several codes can carry the same displayed label:
+    this cap offers ONE, 1 and NS, all three shown as "Унив.", and only NS
+    -- the last of the three -- is in stock. Dedupe was first-wins, so the
+    catalogue kept a disabled twin and the storefront said "Sold out" about
+    a cap the shop was selling.
+
+    The page is also why the storefront showed crossed-out S / M / L: of the
+    twenty codes, only those three read as a letter size, and every other
+    one was typed `numeric`, which the size picker deliberately hides.
+    """
+
+    FIXTURE = "sportreality_slazenger_cap.html"
+    URL = ("https://www.sportreality.mk/mk/kapa-za-plivanje/"
+           "3431-slazenger-silicone-cap")
+
+    def variants(self):
+        adapter = get_adapter("sportvision")
+        offer = adapter.parse_product(
+            load_bytes(self.FIXTURE), self.URL, "sportreality")
+        return offer.variants
+
+    def test_the_universal_size_survives_as_in_stock(self):
+        univ = [v for v in self.variants() if v.size_label == "Унив."]
+        assert len(univ) == 1, [v.size_label for v in self.variants()]
+        assert univ[0].in_stock is True
+
+    def test_it_is_the_only_size_in_stock(self):
+        live = [v.size_label for v in self.variants() if v.in_stock]
+        assert live == ["Унив."]
+
+    def test_the_sold_out_codes_are_still_recorded(self):
+        """Dropping them would hide that the shop lists them at all."""
+        labels = {v.size_label for v in self.variants()}
+        assert {"S", "M", "L", "OS", "OSFA", "YTH"} <= labels
+
+    def test_the_in_stock_twin_wins_whichever_order_it_arrives_in(self):
+        """The rule is "in stock wins", not "last wins"."""
+        from mkagg.adapters.sportvision import SportVisionAdapter
+        html = (
+            '<div class="product-size-tabs-new"><ul class="product-attributes">'
+            '<li data-productsize-combid="1" class="disabled">'
+            '<span class="eur-size">Унив.</span></li>'
+            '<li data-productsize-combid="2">'
+            '<span class="eur-size">Унив.</span></li>'
+            '</ul></div>')
+        out = SportVisionAdapter._parse_sizes(html, 1000, "MKD")
+        assert [(v.size_label, v.in_stock, v.merchant_variant_id)
+                for v in out] == [("Унив.", True, "2")]
+
+        flipped = (
+            '<div class="product-size-tabs-new"><ul class="product-attributes">'
+            '<li data-productsize-combid="2">'
+            '<span class="eur-size">Унив.</span></li>'
+            '<li data-productsize-combid="1" class="disabled">'
+            '<span class="eur-size">Унив.</span></li>'
+            '</ul></div>')
+        out = SportVisionAdapter._parse_sizes(flipped, 1000, "MKD")
+        assert [(v.size_label, v.in_stock, v.merchant_variant_id)
+                for v in out] == [("Унив.", True, "2")]
+
+    def test_a_sold_out_duplicate_never_replaces_another(self):
+        """Two sold-out twins stay one row, and keep the first id."""
+        from mkagg.adapters.sportvision import SportVisionAdapter
+        html = (
+            '<div class="product-size-tabs-new"><ul class="product-attributes">'
+            '<li data-productsize-combid="7" class="disabled">'
+            '<span class="eur-size">Унив.</span></li>'
+            '<li data-productsize-combid="8" class="disabled">'
+            '<span class="eur-size">Унив.</span></li>'
+            '</ul></div>')
+        out = SportVisionAdapter._parse_sizes(html, 1000, "MKD")
+        assert [(v.in_stock, v.merchant_variant_id) for v in out] == [
+            (False, "7")]
