@@ -68,7 +68,7 @@ class PromotionReport:
 STAGED_SQL = """
 SELECT so.id, so.merchant_sku, so.raw_mpn, so.raw_title, so.raw_brand,
        so.product_url, so.image_url, so.currency_code, so.extractors,
-       so.category_hint, so.gender_hint
+       so.category_hint, so.gender_hint, so.category_path
   FROM stage_offer so
  WHERE so.ingest_run_id = %(run)s
  ORDER BY so.id
@@ -89,7 +89,7 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
         cur.execute(STAGED_SQL, {"run": run_id})
         rows = cur.fetchall()
         for (stage_id, sku, mpn, title, brand, url, image, currency,
-             extractors, category_hint, gender_hint) in rows:
+             extractors, category_hint, gender_hint, category_path) in rows:
             cur.execute(STAGED_VARIANTS_SQL, {"offer": stage_id})
             variants = [
                 RawVariant(
@@ -104,7 +104,7 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
                 raw_title=title, raw_brand=brand, product_url=url,
                 image_url=image, currency_code=currency, variants=variants,
                 extractors=extractors or {}, category_hint=category_hint,
-                gender_hint=gender_hint)
+                gender_hint=gender_hint, category_path=category_path)
 
 
 # -----------------------------------------------------------------------------
@@ -388,12 +388,20 @@ def resolve_offer(conn, offer: RawOffer, merchant_id: int, *,
 UPSERT_OFFER_SQL = """
 INSERT INTO merchant_offer (merchant_id, product_id, merchant_sku, raw_mpn,
                             raw_title, raw_brand, product_url, image_url,
+                            merchant_category_path,
                             match_method, match_confidence, status, last_seen_at)
      VALUES (%(merchant)s, %(product)s, %(sku)s, %(mpn)s, %(title)s, %(brand)s,
-             %(url)s, %(image)s, %(method)s, %(confidence)s, %(status)s, now())
+             %(url)s, %(image)s, %(category_path)s,
+             %(method)s, %(confidence)s, %(status)s, now())
 ON CONFLICT (merchant_id, merchant_sku) DO UPDATE
         SET product_id       = COALESCE(EXCLUDED.product_id,
                                         merchant_offer.product_id),
+            -- The page's own shelf, when it states one. COALESCE and not
+            -- assignment: adapters that read no shelf send NULL, and a NULL
+            -- must never wipe what the facet walk wrote.
+            merchant_category_path = COALESCE(
+                                        EXCLUDED.merchant_category_path,
+                                        merchant_offer.merchant_category_path),
             raw_mpn          = EXCLUDED.raw_mpn,
             raw_title        = EXCLUDED.raw_title,
             raw_brand        = EXCLUDED.raw_brand,
@@ -607,6 +615,7 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                 "sku": offer.merchant_sku, "mpn": offer.raw_mpn,
                 "title": offer.raw_title[:500], "brand": offer.raw_brand,
                 "url": offer.product_url, "image": offer.image_url,
+                "category_path": offer.category_path,
                 "method": result.method if product_id else None,
                 "confidence": result.confidence if product_id else None,
                 "status": "active" if product_id else "unmatched"})

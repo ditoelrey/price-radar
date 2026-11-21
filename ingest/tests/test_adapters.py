@@ -888,3 +888,94 @@ class TestSportMSpecifications:
                                               spec_category)
         specs = parse_specifications(self._with(subgroup="Функо фигури"))
         assert spec_category(specs) is None
+
+    def test_the_subgroup_is_kept_verbatim_on_the_offer(self):
+        """The shelf in the shop's words, not just the slug it maps to.
+
+        `spec_category` throws away everything `classify` cannot place, and
+        for a while that was the only thing read off this row. Keeping the
+        raw value means a subgroup we have no rule for yet -- "Заштитен сет
+        за дожд" is a real one -- is recorded against the offer instead of
+        vanishing, and a later rule can pick it up without a re-crawl.
+        """
+        from mkagg.adapters.aspnet_mk import parse_specifications
+        specs = parse_specifications(self._with(subgroup="Заштитен сет за дожд"))
+        assert specs["Подгрупа"] == "Заштитен сет за дожд"
+
+
+class TestTheClothingUmbrella:
+    """Why 1,010 products sat in the parent bucket, in four parts.
+
+    sport-m and sizeer publish a department umbrella, `?Segment=NN&Grupa=02`,
+    that names no garment. Products reachable only through it were labelled
+    "Текстил" and could be called nothing more precise than clothing -- while
+    their own pages said "Градник", "Дресови-фудбал", "Костим за капење".
+    Each assertion below is one link in that chain.
+    """
+
+    def test_the_umbrella_label_means_clothing(self):
+        """It classified to None, so the label read as no evidence at all."""
+        from mkagg.taxonomy import PARENT_SLUGS, classify
+        assert classify("Текстил") == "apparel"
+        assert classify("Текстил") in PARENT_SLUGS
+
+    def test_the_subgroups_the_navigation_never_links(self):
+        """The nav exposes 18 codes; the sidebar counts 27 subgroups.
+
+        These nine have no `PodGrupa` code to address them by, which is why
+        extending the code map could not have reached them. Read off the
+        product pages instead, they all place.
+        """
+        from mkagg.taxonomy import classify
+        assert classify("Градник") == "sports_bras"
+        assert classify("Пододело") == "underwear"
+        assert classify("Долна облека") == "underwear"
+        assert classify("Дресови") == "tshirts"
+        assert classify("Дресови-фудбал") == "tshirts"
+        assert classify("Дресови-кошарка") == "tshirts"
+        assert classify("Шорцеви-кошарка") == "shorts"
+        assert classify("Ски Панталони") == "trousers"
+        assert classify("Летни комплети") == "tracksuits"
+
+    def test_a_parent_hint_does_not_overwrite_a_stated_leaf(self):
+        """The bug itself: the umbrella's "apparel" over the page's leaf."""
+        from mkagg.worker import resolve_category_hint
+        assert resolve_category_hint("apparel", "sports_bras") == "sports_bras"
+        assert resolve_category_hint("accessories", "socks") == "socks"
+        assert resolve_category_hint("footwear", "sneakers") == "sneakers"
+
+    def test_a_specific_listing_still_wins(self):
+        """What the overwrite exists for, and must keep doing.
+
+        Discovery knows the department a title omits. A men's t-shirt facet
+        outranks whatever the page's own table happens to say, because the
+        shelf the shopper clicked is the stronger claim.
+        """
+        from mkagg.worker import resolve_category_hint
+        assert resolve_category_hint("tshirts", "hoodies") == "tshirts"
+        assert resolve_category_hint("cleats", None) == "cleats"
+
+    def test_a_parent_still_beats_silence(self):
+        """"Clothing, kind unspecified" is a real answer when nothing else is."""
+        from mkagg.worker import resolve_category_hint
+        assert resolve_category_hint("apparel", None) == "apparel"
+        assert resolve_category_hint(None, "sports_bras") == "sports_bras"
+        assert resolve_category_hint(None, None) is None
+
+    def test_the_page_shelf_reaches_the_offer(self):
+        """End to end on the real fixture: parsed, carried, ready to store."""
+        from mkagg.adapters import get_adapter
+        adapter = get_adapter("aspnet_mk")
+        offer = adapter.parse_product(
+            load_bytes("sportm_stansmith.html"),
+            "https://www.sport-m.com.mk/ProductCatalog/"
+            "ProductDetails?ProductID=M20325",
+            "sportm")
+        assert offer is not None
+        # Whatever this fixture's own table says, it must arrive verbatim
+        # and agree with what the spec parser read.
+        from mkagg.adapters.aspnet_mk import parse_specifications
+        specs = parse_specifications(
+            load_bytes("sportm_stansmith.html").decode("utf-8", "replace"))
+        assert offer.category_path == specs.get("Подгрупа")
+        assert offer.category_path

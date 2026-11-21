@@ -783,3 +783,68 @@ class TestFacetsCarryGender:
         back = FetchJob.from_json(job.to_json())
         assert back.category_hint == "cleats"
         assert back.gender_hint == "kids"
+
+
+class TestAspNetUrlsLoseTheirListing:
+    """One article, one URL — on a platform that writes three.
+
+    aspnet links carry the department the shopper clicked from:
+    `?ProductID=KD8253&Segment=52&Grupa=03&PodGrupa=518`. Discovery
+    deduplicates on the URL, so the same article under the men's, women's and
+    kids' segments was three separate products as far as it could tell.
+
+    Three things broke at once, and only the third was visible. The page was
+    fetched three times; the per-URL gender union that is the only way
+    `unisex` is ever found never happened; and whichever segment staged last
+    decided the offer's department. Sizeer's first accessory sweep came back
+    461 women against 1 man.
+    """
+
+    HTML = (
+        '<a href="/ProductCatalog/ProductDetails?ProductID=KD8253'
+        '&amp;Segment=51&amp;Grupa=03&amp;PodGrupa=518">men</a>'
+        '<a href="/ProductCatalog/ProductDetails?ProductID=KD8253'
+        '&amp;Segment=52&amp;Grupa=03&amp;PodGrupa=518">women</a>'
+        '<a href="/ProductCatalog/ProductDetails?ProductID=JV7402'
+        '&amp;Segment=52&amp;Grupa=03">other</a>'
+    )
+    BASE = "https://sizeer.com.mk"
+
+    def _pattern(self):
+        from mkagg.discover import PRODUCT_URL_PATTERNS
+        return PRODUCT_URL_PATTERNS["aspnet_mk"]
+
+    def test_the_segment_comes_off(self):
+        from mkagg.discover import extract_links
+        links = extract_links(self.HTML, self._pattern(), self.BASE,
+                              canonical=True)
+        assert links == [
+            f"{self.BASE}/ProductCatalog/ProductDetails?ProductID=KD8253",
+            f"{self.BASE}/ProductCatalog/ProductDetails?ProductID=JV7402",
+        ]
+
+    def test_one_article_is_one_url(self):
+        """The whole point: two segments, two hrefs, one product."""
+        from mkagg.discover import extract_links
+        links = extract_links(self.HTML, self._pattern(), self.BASE,
+                              canonical=True)
+        assert len(links) == 2
+
+    def test_without_the_flag_they_stay_apart(self):
+        """The old behaviour, kept for every other platform."""
+        from mkagg.discover import extract_links
+        assert len(extract_links(self.HTML, self._pattern(), self.BASE)) == 3
+
+    def test_only_aspnet_opts_in(self):
+        """magento matches a suffix and sportvision a path; keeping only the
+        matched span would truncate one and lose the host of the other."""
+        from mkagg.discover import CANONICALISE_MATCH
+        assert CANONICALISE_MATCH == {"aspnet_mk"}
+
+    def test_a_sportvision_link_is_untouched(self):
+        from mkagg.discover import PRODUCT_URL_PATTERNS, extract_links
+        html = '<a href="/mk/corapi/51378-puma-caven-2-0">x</a>'
+        links = extract_links(html, PRODUCT_URL_PATTERNS["sportvision"],
+                              "https://www.sportvision.mk")
+        assert links == [
+            "https://www.sportvision.mk/mk/corapi/51378-puma-caven-2-0"]

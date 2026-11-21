@@ -352,6 +352,11 @@ class AspNetMkAdapter(Adapter):
             variants=variants,
             category_hint=spec_category(specs),
             gender_hint=spec_gender(specs),
+            # The shelf in the shop's own words, kept verbatim rather than
+            # classified: `derive` runs the same `classify` over it that
+            # every other shop's path goes through, so a subgroup we cannot
+            # map yet is recorded instead of discarded.
+            category_path=specs.get("Подгрупа") or None,
             extractors={"mpn": "url", "price": "css",
                         "sizes": "api" if sizes_payload is not None else "none",
                         "specs": "css" if specs else "none"},

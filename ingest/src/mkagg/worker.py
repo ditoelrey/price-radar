@@ -35,6 +35,7 @@ from .fetch.ratelimit import BreakerWait, Priority
 from .fetch.scheduler import mark_checked, record_observation
 from .load import ingest, run_kind_for
 from .models import RawOffer
+from .taxonomy import PARENT_SLUGS
 
 #: A probe whose price moves further than this is treated as suspect rather
 #: than believed. Real sales do not usually halve a price between two checks,
@@ -299,6 +300,32 @@ def apply_probe(conn, offer: RawOffer, job: FetchJob,
 # The loop
 # -----------------------------------------------------------------------------
 
+def resolve_category_hint(job_hint: str | None,
+                          page_hint: str | None) -> str | None:
+    """Which shelf an offer carries when the listing and the page disagree.
+
+    Discovery's hint normally wins. It records where the product was found,
+    which is context the page cannot supply and the title routinely omits.
+
+    It loses in exactly one case: when it names a whole vertical and the
+    page named a leaf. sport-m and sizeer publish a department umbrella,
+    `?Segment=NN&Grupa=02`, which queues everything it finds as "apparel",
+    while the product page says "Градник" or "Дресови-фудбал" outright in
+    its Спецификации table. Taking "apparel" there is a downgrade, and it
+    is how 1,010 products came to sit in the parent bucket -- a quarter of
+    all the clothing those two shops sell.
+
+    Nine of those subgroups have no `PodGrupa` code anywhere in the shop's
+    navigation, so no facet plan could have reached them. The page is the
+    only place they are stated.
+    """
+    if not job_hint:
+        return page_hint
+    if page_hint and job_hint in PARENT_SLUGS:
+        return page_hint
+    return job_hint
+
+
 def merchants_by_slug(conn) -> dict[str, dict]:
     with conn.cursor() as cur:
         cur.execute("""SELECT slug, id, adapter, base_url, publishes_stock
@@ -421,7 +448,8 @@ def run_once(conn, fetcher, queue, *, max_jobs: int = 500,
         # discovery found the product, which is the context its title omits.
         if job.category_hint:
             for parsed in offers:
-                parsed.category_hint = job.category_hint
+                parsed.category_hint = resolve_category_hint(
+                    job.category_hint, parsed.category_hint)
         if job.gender_hint:
             for parsed in offers:
                 parsed.gender_hint = job.gender_hint

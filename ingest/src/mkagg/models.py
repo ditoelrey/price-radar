@@ -74,6 +74,21 @@ class RawOffer:
     #: of cases and EU sizes cannot tell men from women at all.
     gender_hint: str | None = None
 
+    #: The shop's own shelf for *this product*, in the shop's words, read
+    #: off the product page rather than the listing it was found in. The
+    #: aspnet platform prints it as `Подгрупа` in its Спецификации table;
+    #: other adapters leave it None.
+    #:
+    #: It exists because the listing is not always specific. sport-m and
+    #: sizeer publish a department umbrella (`?Segment=NN&Grupa=02`) that
+    #: carries no garment, and 1,010 products were reachable only through
+    #: it -- so `merchant_category_path` read "Текстил" and the catalogue
+    #: could say no more than "clothing". The page itself said "Градник",
+    #: "Дресови-фудбал", "Костим за капење". Per-product and from the shop,
+    #: it is at least as strong as the listing, so it is stored in the same
+    #: column and `derive` reads it without needing to know the difference.
+    category_path: str | None = None
+
     @property
     def min_price_minor(self) -> int | None:
         prices = [v.price_minor for v in self.variants if v.price_minor is not None]

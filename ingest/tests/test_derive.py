@@ -661,3 +661,79 @@ class TestAnExplicitUnisexFacetIsEvidence:
         assert "unisex" not in KNOWN_GENDERS
         for title in ("adidas Ранец Unisex", "Nike Backpack unisex adult"):
             assert classify_gender(title) != "unisex"
+
+
+class TestTheShelfThePageStates:
+    """A shelf no facet can name, and an umbrella that names no garment.
+
+    Two vocabularies reach ``merchant_category_path``. A facet label comes
+    from a plan the crawler walked, so the plan already holds its meaning.
+    A shelf read off the product page does not: sport-m's sidebar counts 27
+    apparel subgroups and its navigation links 18, so nine of them -- Градник,
+    Пододело, Дресови-фудбал among them -- are addressable by no `PodGrupa`
+    code, and the page is the only place they are stated. 919 products were
+    reachable only through the department umbrella, which reads "Текстил".
+    """
+
+    def test_a_facet_label_still_wins_outright(self):
+        """The dict comes first: it is checked across shops by its own test."""
+        assert derive_category([offer(path="Патики-ниски")]) == (
+            "sneakers", "facet")
+
+    def test_a_shelf_no_plan_names_is_classified(self):
+        """Not one of these nine has a facet, so the dict cannot hold it."""
+        for path, expected in (("Градник", "sports_bras"),
+                               ("Пододело", "underwear"),
+                               ("Дресови-фудбал", "tshirts"),
+                               ("Дресови-кошарка", "tshirts"),
+                               ("Шорцеви-кошарка", "shorts"),
+                               ("Ски Панталони", "trousers"),
+                               ("Долна облека", "underwear"),
+                               ("Бициклистички", "leggings")):
+            assert derive_category([offer(path=path)]) == (expected, "facet")
+
+    def test_a_shelf_is_facet_evidence_not_a_title(self):
+        """It is the shop naming its own shelf, so it outranks any title."""
+        assert derive_category([
+            offer(path="Градник", title="Puma Wardrobe Essentials Tee"),
+        ]) == ("sports_bras", "facet")
+
+    def test_an_umbrella_does_not_outrank_a_title(self):
+        """"Clothing" and "маица" do not conflict; the second refines it.
+
+        This is what freed sizeer, whose product pages state no subgroup at
+        all: 64 of its 91 umbrella products had titles that named the garment
+        and were being outranked by a shelf that named only the vertical.
+        """
+        assert derive_category([
+            offer(path="Текстил", title="Nike Маица Sportswear Club"),
+        ]) == ("tshirts", "title")
+
+    def test_a_leaf_shelf_beats_an_umbrella_on_another_shop(self):
+        assert derive_category([
+            offer("sizeer", path="Текстил"),
+            offer("sportm", path="Градник"),
+        ]) == ("sports_bras", "facet")
+
+    def test_an_umbrella_still_beats_silence(self):
+        """Weakest honest answer, and better than NULL."""
+        assert derive_category([offer(path="Текстил")]) == (
+            "apparel", "facet")
+
+    def test_an_umbrella_survives_titles_that_disagree(self):
+        """Two shops arguing over the leaf have not unsaid the vertical."""
+        assert derive_category([
+            offer("a", path="Текстил", title="Nike Маица Club"),
+            offer("b", path="Текстил", title="Nike Панталони Club"),
+        ]) == ("apparel", "facet")
+
+    def test_a_shelf_the_tree_has_no_row_for_stays_in_the_parent(self):
+        """`Топ` is not a rule, on purpose.
+
+        Keywords match whole words, and ``top`` is a whole word in "Converse
+        Chuck Taylor All Star High Top" -- a shoe. Sixteen products across
+        three shelves sit in the parent bucket rather than buy them with a
+        rule that would misfile sneakers as bras.
+        """
+        for path in ("Заштитен сет за дожд", "Комбинезони", "Топ"):
+            assert derive_category([offer(path=path)]) == (None, None)

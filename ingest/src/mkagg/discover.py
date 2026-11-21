@@ -127,14 +127,43 @@ def parse_last_page_link(html: str) -> int | None:
     return max(pages) if pages else None
 
 
-def extract_links(html: str, pattern: re.Pattern[str], base_url: str) -> list[str]:
-    """Absolute, de-duplicated URLs matching ``pattern``, order preserved."""
+#: Adapters whose product links carry the listing they were found in, which
+#: has to come off before anything deduplicates on the URL.
+#:
+#: aspnet writes them as
+#: ``/ProductCatalog/ProductDetails?ProductID=KD8253&Segment=52&Grupa=03&...``
+#: -- the department the shopper clicked from, baked into the href. So one
+#: article is three different URLs across the men's, women's and kids'
+#: segments, and three things went wrong at once: the same page was fetched
+#: three times, the per-URL gender union that is the *only* way `unisex` is
+#: ever found never happened, and whichever segment staged last silently
+#: decided the offer's department.
+#:
+#: Sizeer's first accessory sweep came back **461 women against 1 man** --
+#: 1,096 URLs for 570 articles. The segments really do differ (14 of 18 caps
+#: shared between men's and women's, checked directly); nothing could see it.
+#:
+#: For this platform the matched span *is* the canonical URL, and the bare
+#: form serves the same page byte for byte -- verified on three products.
+#: Other adapters match only part of their URL, so this is opt-in.
+CANONICALISE_MATCH = frozenset({"aspnet_mk"})
+
+
+def extract_links(html: str, pattern: re.Pattern[str], base_url: str,
+                  canonical: bool = False) -> list[str]:
+    """Absolute, de-duplicated URLs matching ``pattern``, order preserved.
+
+    ``canonical`` keeps only the matched span, for the platforms listed in
+    :data:`CANONICALISE_MATCH`.
+    """
     seen: dict[str, None] = {}
     for raw in re.findall(r'href=["\']([^"\']+)["\']', html, re.I):
         candidate = raw.replace("&amp;", "&").strip()
-        if not pattern.search(candidate):
+        found = pattern.search(candidate)
+        if not found:
             continue
-        seen.setdefault(urljoin(base_url, candidate), None)
+        link = found.group(0) if canonical else candidate
+        seen.setdefault(urljoin(base_url, link), None)
     return list(seen)
 
 
@@ -1281,14 +1310,17 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
 
     def harvest(text: str, facet: Facet | None = None) -> int:
         before = len(found)
-        for url in extract_links(text, pattern, base_url):
+        canonical = adapter in CANONICALISE_MATCH
+        for url in extract_links(text, pattern, base_url, canonical):
             found.setdefault(url, None)
             note(url, facet)
         # Sitemaps carry <loc> rather than href.
         for loc, _lastmod in parse_sitemap_urls(text):
-            if pattern.search(loc):
-                found.setdefault(loc, None)
-                note(loc, facet)
+            match = pattern.search(loc)
+            if match:
+                link = urljoin(base_url, match.group(0)) if canonical else loc
+                found.setdefault(link, None)
+                note(link, facet)
         return len(found) - before
 
     def done() -> bool:

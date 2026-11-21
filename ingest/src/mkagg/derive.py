@@ -33,8 +33,8 @@ from collections import Counter
 from dataclasses import dataclass
 
 from .discover import FACET_CATEGORY
-from .taxonomy import (FOOTWEAR_SLUGS, classify, classify_gender,
-                       resolve_departments)
+from .taxonomy import (FOOTWEAR_SLUGS, PARENT_SLUGS, classify,
+                       classify_gender, resolve_departments)
 
 #: What a tie resolves to when every candidate is a footwear leaf. The parent
 #: row means "a shoe, kind unspecified", which is exactly true of a product
@@ -53,10 +53,23 @@ class OfferEvidence:
 
     @property
     def facet_category(self) -> str | None:
-        """The canonical category this shop's own facet implies, if any."""
-        if not self.merchant_category_path:
+        """The canonical category this shop's own shelf implies, if any.
+
+        Two vocabularies arrive in this column. A *facet label* comes from
+        the plan the crawler walked, so :data:`FACET_CATEGORY` -- built from
+        those same plans -- already holds its meaning. A shelf read off the
+        product page does not: nine of sport-m's subgroups are linked by no
+        listing at all, so no plan can name them, and "Дресови-фудбал"
+        reaches us as a word the catalogue has never seen.
+
+        It is still the shop naming its own shelf, which is what makes this
+        facet evidence and not a title. Classifying it is the only way to
+        read it.
+        """
+        path = self.merchant_category_path
+        if not path:
             return None
-        return FACET_CATEGORY.get(self.merchant_category_path)
+        return FACET_CATEGORY.get(path) or classify(path)
 
     @property
     def title_category(self) -> str | None:
@@ -91,10 +104,18 @@ def derive_category(offers: list[OfferEvidence]) -> tuple[str | None, str | None
     A tie between footwear leaves resolves to the parent rather than to one
     of them: "we know it is a shoe and the shops disagree on which kind" is a
     true statement, and picking a side is not.
+
+    An umbrella shelf is ranked below a title for the same reason. A shop
+    that files a garment under "Текстил" and nothing narrower has told us
+    the vertical, not the garment; a title reading "маица" names the garment.
+    Those two do not conflict, so the second refines the first rather than
+    being outranked by it -- and the umbrella is still the answer when no
+    title says anything.
     """
     facets = [o.facet_category for o in offers if o.facet_category]
-    if facets:
-        winner = _majority(facets)
+    leaves = [f for f in facets if f not in PARENT_SLUGS]
+    if leaves:
+        winner = _majority(leaves)
         if winner:
             return winner, "facet"
         # The facets tie. Before giving up on a leaf, ask the title: two
@@ -108,22 +129,27 @@ def derive_category(offers: list[OfferEvidence]) -> tuple[str | None, str | None
             return from_title, "title"
         # Nothing to break the tie with. The parent is honest only while
         # every candidate really is footwear.
-        if all(f in FOOTWEAR_SLUGS for f in facets):
+        if all(f in FOOTWEAR_SLUGS for f in leaves):
             return UNSPECIFIED_FOOTWEAR, "facet"
         return None, None
 
-    titles = [o.title_category for o in offers if o.title_category]
-    if titles:
-        winner = _majority(titles)
-        if winner:
-            return winner, "title"
-        if all(t in FOOTWEAR_SLUGS for t in titles):
-            return UNSPECIFIED_FOOTWEAR, "title"
-        # Shops disagree about whether this is even a shoe. That is a question
-        # for a human, not something to average.
-        return None, None
+    # No shelf names a garment. Whatever the titles say now stands, and an
+    # umbrella shelf -- "clothing, kind unspecified" -- catches what is left.
+    umbrella = (_majority(facets), "facet") if facets else (None, None)
 
-    return None, None
+    titles = [o.title_category for o in offers if o.title_category]
+    winner = _majority(titles) if titles else None
+    if winner and winner not in PARENT_SLUGS:
+        return winner, "title"
+    if titles and all(t in FOOTWEAR_SLUGS for t in titles):
+        return UNSPECIFIED_FOOTWEAR, "title"
+    # Shops disagree about whether this is even a shoe. That is a question
+    # for a human, not something to average -- but a shelf that has already
+    # placed it in a vertical is not undone by a disagreement about leaves,
+    # and a shelf outranks a title when both can say only the vertical.
+    if umbrella[0]:
+        return umbrella
+    return (winner, "title") if winner else (None, None)
 
 
 def derive_gender(offers: list[OfferEvidence]) -> tuple[str | None, str | None]:
@@ -175,6 +201,11 @@ class DeriveReport:
     #: separately from `kept_facet` so the number is visible: a manual
     #: category that silently stopped being honoured would look exactly like
     #: one that was never set.
+    #:
+    #: Once per product, on either axis. It used to be counted in the
+    #: category branch alone, so a manually set *gender* was honoured and
+    #: never counted -- and this counter is the only place the drift it
+    #: guards against would have shown.
     kept_manual: int = 0
 
     def summary(self) -> str:
@@ -251,7 +282,6 @@ def rederive(conn, *, dry_run: bool = False,
         # bucket on every pass, for ever.
         if cat_src == "manual":
             category, category_source = cur_cat, cat_src
-            report.kept_manual += 1
         elif cat_src == "facet" and not any(o.facet_category for o in offers):
             category, category_source = cur_cat, cat_src
             report.kept_facet += 1
@@ -260,6 +290,8 @@ def rederive(conn, *, dry_run: bool = False,
         elif gender_src == "facet" and not any(o.merchant_gender
                                                for o in offers):
             gender, gender_source = cur_gender, gender_src
+        if "manual" in (cat_src, gender_src):
+            report.kept_manual += 1
 
         if (category, category_source, gender, gender_source) == \
                 (cur_cat, cat_src, cur_gender, gender_src):
@@ -372,13 +404,27 @@ def walk_facets(conn, fetcher, merchant_slug: str, adapter: str,
             # Neither can clear a label for a product that has left every
             # facet -- that row keeps where we last saw it, which is a weaker
             # claim than it looks.
-            cur.execute(
-                """UPDATE merchant_offer
-                      SET merchant_category_path = COALESCE(%s,
-                              merchant_category_path),
-                          merchant_gender = %s
-                    WHERE merchant_id = %s AND product_url = %s""",
-                (path, gender, merchant_id, url))
+            #
+            # One exception, and it is the whole reason products sat in the
+            # parent bucket. A department umbrella ("Текстил") classifies to
+            # a parent slug: true, but the weakest true thing sayable. The
+            # product page may already have supplied the shop's actual shelf
+            # ("Градник"), and overwriting that with the umbrella would lose
+            # the better answer on every walk, for ever. So an umbrella fills
+            # a gap and never overwrites; a real shelf still overwrites.
+            if path and classify(path) in PARENT_SLUGS:
+                sql = """UPDATE merchant_offer
+                            SET merchant_category_path = COALESCE(
+                                    merchant_category_path, %s),
+                                merchant_gender = %s
+                          WHERE merchant_id = %s AND product_url = %s"""
+            else:
+                sql = """UPDATE merchant_offer
+                            SET merchant_category_path = COALESCE(%s,
+                                    merchant_category_path),
+                                merchant_gender = %s
+                          WHERE merchant_id = %s AND product_url = %s"""
+            cur.execute(sql, (path, gender, merchant_id, url))
             if cur.rowcount:
                 report.matched += cur.rowcount
             else:

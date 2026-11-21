@@ -171,13 +171,14 @@ def clean_db(conn):
 
 
 def offer(sku="392290-02", price=2863, merchant="sportvision", sizes=("42", "43"),
-          title="Patiki Puma Caven 2.0", brand="Puma", mpn=None):
+          title="Patiki Puma Caven 2.0", brand="Puma", mpn=None,
+          category_path=None):
     return RawOffer(
         merchant_slug=merchant, merchant_sku=sku,
         raw_mpn=mpn if mpn is not None else sku,
         raw_title=title, raw_brand=brand,
         product_url=f"https://www.{merchant}.mk/mk/patiki/{sku}",
-        currency_code="MKD",
+        currency_code="MKD", category_path=category_path,
         variants=[RawVariant(size_label=s, size_eu=Decimal(s),
                              price_minor=price, currency_code="MKD",
                              in_stock=True, merchant_variant_id=f"{sku}-{s}")
@@ -686,3 +687,54 @@ class TestApparelSizesReachTheDatabase:
         rows = self._sizes(conn)
         assert all(r[1] == "eu_shoe" for r in rows), rows
         assert all(r[6] is not None for r in rows), rows
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestThePageShelfIsStored:
+    """`merchant_category_path` from the product page, not just the walk.
+
+    The facet walk was the column's only writer, so a product reachable
+    only through a department umbrella could be filed no more precisely
+    than "clothing" -- while its own Спецификации table named the shelf.
+    These check the storing half of that fix.
+    """
+
+    def test_the_shelf_lands_on_the_offer(self, conn):
+        from mkagg.load import ingest
+
+        ingest(conn, "sportvision",
+               [offer(category_path="Градник")], requests=1)
+        with conn.cursor() as cur:
+            cur.execute("SELECT merchant_category_path FROM merchant_offer")
+            assert cur.fetchone()[0] == "Градник"
+
+    def test_a_silent_adapter_never_wipes_the_walk(self, conn):
+        """The COALESCE, and why it is not decoration.
+
+        Four of six shops state no shelf on the page. If their NULL were
+        written as an assignment, every sweep would erase what the facet
+        walk had established -- and the walk only runs when asked.
+        """
+        from mkagg.load import ingest
+
+        ingest(conn, "sportvision", [offer(category_path="Маици")],
+               requests=1)
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE merchant_offer
+                              SET merchant_category_path = 'Дресови'""")
+        ingest(conn, "sportvision", [offer(category_path=None)], requests=1)
+        with conn.cursor() as cur:
+            cur.execute("SELECT merchant_category_path FROM merchant_offer")
+            assert cur.fetchone()[0] == "Дресови"
+
+    def test_a_later_sweep_follows_the_shop(self, conn):
+        """A shop that re-shelves a product is believed, not argued with."""
+        from mkagg.load import ingest
+
+        ingest(conn, "sportvision", [offer(category_path="Маици")],
+               requests=1)
+        ingest(conn, "sportvision", [offer(category_path="Дресови-фудбал")],
+               requests=1)
+        with conn.cursor() as cur:
+            cur.execute("SELECT merchant_category_path FROM merchant_offer")
+            assert cur.fetchone()[0] == "Дресови-фудбал"

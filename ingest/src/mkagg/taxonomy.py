@@ -104,7 +104,17 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # Clothing whose kind the title does not narrow. Last of the apparel
     # rules, and still a real answer: the parent category means "clothing,
     # kind unspecified", exactly as `footwear` does for shoes.
-    ("apparel", ("obleka", "aktivna obleka", "vesta", "apparel")),
+    #
+    # "Текстил" is the aspnet shops' word for the whole clothing department.
+    # It was missing here, and its absence was not harmless: the umbrella
+    # facet wrote "Текстил" into `merchant_category_path`, `classify` read
+    # it as nothing at all, and 1,010 products kept the parent category they
+    # were created with while appearing to rest on no evidence. Naming it
+    # makes the umbrella say what it means -- the weakest true answer rather
+    # than silence -- which is also what lets the walk recognise it as a
+    # parent and decline to write it over a leaf.
+    ("apparel", ("obleka", "aktivna obleka", "vesta", "apparel",
+                 "tekstil", "textile")),
     # "Штитник" (shin guard) earns its place by having been misread: the
     # title "Штитник TIRO SG EU CLB" fell through to the footwear rules and
     # the SG there -- soft-ground studs on a football boot -- made a shin
@@ -318,6 +328,18 @@ KNOWN_SLUGS = frozenset({
 FOOTWEAR_SLUGS = frozenset({
     "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
 })
+
+#: The three rows with no parent: a whole vertical, naming no garment, shoe
+#: or accessory. They are honest answers -- "clothing, kind unspecified" is
+#: true, and better than NULL -- but they are the *weakest* honest answer,
+#: and that distinction has to be expressible.
+#:
+#: A department umbrella yields one of these, and a product reachable only
+#: through the umbrella used to end there for good: 1,010 of them read
+#: "Текстил" while their own pages said "Градник" or "Дресови-фудбал". So
+#: anything that would write a parent over a leaf must check this set first
+#: and decline. A parent may fill a gap; it may never overwrite.
+PARENT_SLUGS = frozenset({"footwear", "apparel", "accessories"})
 
 #: Gender values this module can return, matching the ``gender_t`` enum. Note
 #: what is missing: ``classify_gender`` never returns ``unisex``. A title
