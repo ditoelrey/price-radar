@@ -39,6 +39,7 @@ from mkagg.fetch import (CircuitBreaker, Fetcher, FetcherConfig,  # noqa: E402
                          Priority, assign_tiers, enqueue_due)
 from mkagg.fetch.http import DEFAULT_USER_AGENT, HttpxTransport  # noqa: E402
 from mkagg.derive import rederive, walk_facets  # noqa: E402
+from mkagg import review  # noqa: E402
 from mkagg.media import ImageStore, fetch_product_images  # noqa: E402
 from mkagg.worker import run_forever, run_once  # noqa: E402
 
@@ -141,6 +142,30 @@ def cmd_facets(args) -> int:
     return 0
 
 
+def cmd_review(args) -> int:
+    """Export the manual-review tail, or apply a reviewed file back."""
+    if not args.export and not args.apply:
+        print("review: pass --export PATH or --apply PATH")
+        return 2
+    with psycopg.connect(DSN) as conn:
+        if args.export:
+            report = review.export(
+                conn, args.export, limit=args.limit,
+                include_accessory_gender=args.include_accessory_gender)
+            print(f"  {report.summary()}")
+        if args.apply:
+            report = review.apply(conn, args.apply, dry_run=args.dry_run)
+            for problem in report.errors:
+                print(f"  ! {problem}")
+            if report.errors:
+                print(f"  nothing written: {len(report.errors)} rows need "
+                      f"fixing first")
+                return 1
+            print(f"  {report.summary()}"
+                  + ("  (dry run, nothing written)" if args.dry_run else ""))
+    return 0
+
+
 def cmd_derive(args) -> int:
     """Recompute every product's category and gender from its offers."""
     with psycopg.connect(DSN) as conn:
@@ -223,7 +248,8 @@ def main() -> int:
 
     for name, fn in (("discover", cmd_discover), ("probe", cmd_probe),
                      ("images", cmd_images), ("serve", cmd_serve),
-                     ("facets", cmd_facets), ("derive", cmd_derive)):
+                     ("facets", cmd_facets), ("derive", cmd_derive),
+                     ("review", cmd_review)):
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         p.add_argument("-m", "--merchant", action="append",
@@ -254,6 +280,17 @@ def main() -> int:
                             "apparel sweep opens its run as apparel_parse, "
                             "so its gate and baseline stay separate from "
                             "footwear's")
+
+        if name == "review":
+            p.add_argument("--export", metavar="PATH",
+                           help="write the open questions to this CSV")
+            p.add_argument("--apply", metavar="PATH",
+                           help="read answers back from this CSV and record "
+                                "them as manual, which derive never revises")
+            p.add_argument("--include-accessory-gender", action="store_true",
+                           help="also ask about accessory gender. Off by "
+                                "default: a football has no gender, and NULL "
+                                "is the true answer rather than a question")
 
     args = ap.parse_args()
     return args.fn(args)
