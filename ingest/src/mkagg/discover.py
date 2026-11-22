@@ -35,7 +35,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from typing import NamedTuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from .fetch.queue import FetchJob
 from .fetch.ratelimit import Priority
@@ -157,7 +157,7 @@ def extract_links(html: str, pattern: re.Pattern[str], base_url: str,
     :data:`CANONICALISE_MATCH`.
     """
     seen: dict[str, None] = {}
-    for raw in re.findall(r'href=["\']([^"\']+)["\']', html, re.I):
+    for raw in _candidate_links(html):
         candidate = raw.replace("&amp;", "&").strip()
         found = pattern.search(candidate)
         if not found:
@@ -165,6 +165,26 @@ def extract_links(html: str, pattern: re.Pattern[str], base_url: str,
         link = found.group(0) if canonical else candidate
         seen.setdefault(urljoin(base_url, link), None)
     return list(seen)
+
+
+#: A product URL inside a JSON listing rather than an HTML one. The
+#: WooCommerce Store API states each product's own canonical address in
+#: `permalink`, with the slashes escaped as JSON requires::
+#:
+#:     "permalink":"https:\/\/e-elixir.mk\/shop\/valentino-donna-edp\/"
+#:
+#: Reading it is what lets one discovery driver walk an API listing and an
+#: HTML category page alike. The alternative -- a second driver for JSON --
+#: would have to re-implement pagination, facet labelling and the
+#: saturation rules, none of which differ.
+_JSON_LINK = re.compile(r'"(?:permalink|link)"\s*:\s*"([^"]+)"')
+
+
+def _candidate_links(body: str) -> list[str]:
+    """Every URL a listing body offers, HTML or JSON."""
+    links = re.findall(r'href=["\']([^"\']+)["\']', body, re.I)
+    links += [m.replace(r"\/", "/") for m in _JSON_LINK.findall(body)]
+    return links
 
 
 # -----------------------------------------------------------------------------
@@ -183,6 +203,8 @@ PRODUCT_URL_PATTERNS: dict[str, re.Pattern[str]] = {
     "woocommerce_html": re.compile(r"/p/[^/]+/?$", re.I),
     # /ProductCatalog/ProductDetails?ProductID=M20325
     "aspnet_mk": re.compile(r"/ProductCatalog/ProductDetails\?ProductID=[\w.-]+", re.I),
+    # e-elixir, the WooCommerce Store API: /shop/valentino-donna-edp/
+    "woocommerce": re.compile(r"/shop/[^/?#]+/?$", re.I),
 }
 
 
@@ -1158,6 +1180,51 @@ for _plan in ACCESSORY_FACET_PLANS.values():
             FACET_CATEGORY.setdefault(_facet.label, _facet.category)
 
 
+# -----------------------------------------------------------------------------
+# Fragrances (V27)
+# -----------------------------------------------------------------------------
+#: e-elixir, walked through its own Store API rather than its category
+#: pages. Two facets, not one, and the overlap is the point: Женски мириси
+#: holds 661 products and Машки мириси 516, which is 1 177 against a
+#: Мириси root of 987. The 190 counted twice are the unisex ones, and
+#: membership of both departments is the only evidence any shop here
+#: publishes for unisex -- the same inference `resolve_departments` already
+#: draws on the Sport Vision shops.
+#:
+#: Walking the 987-product root instead would be one request in three
+#: cheaper and would lose that, leaving every fragrance to be read as men's
+#: or women's by its shelf alone.
+#:
+#: `per_page=100` is the Store API's maximum. Category ids rather than
+#: slugs because the endpoint takes ids; they are stable and were read from
+#: /products/categories.
+_EELIXIR_FRAGRANCE = (
+    ("/wp-json/wc/store/v1/products?category=4419&per_page=100",
+     "perfume", "women", "zhenski-mirisi"),
+    ("/wp-json/wc/store/v1/products?category=4420&per_page=100",
+     "perfume", "men", "mashki-mirisi"),
+)
+
+FRAGRANCE_FACET_PLANS: dict[str, PaginatedPlan] = {
+    "eelixir": PaginatedPlan(
+        categories=tuple(Facet(path=path, category=cat, gender=gender,
+                               label=label)
+                         for path, cat, gender, label in _EELIXIR_FRAGRANCE),
+        # The Store API paginates on `page`, and the listing is already a
+        # query string, so the suffix joins with & rather than opening one.
+        page_suffix="&page={page}",
+        # The endpoint advertises no total in its body -- the count is in a
+        # header this driver never sees -- so the only honest stop is a page
+        # that comes back with nothing on it.
+        walk_until_empty=True, max_pages=20),
+}
+
+for _plan in FRAGRANCE_FACET_PLANS.values():
+    for _facet in as_facets(_plan.categories):
+        if _facet.label and _facet.category:
+            FACET_CATEGORY.setdefault(_facet.label, _facet.category)
+
+
 #: Search-based sweep for the sampled platform, used when the facet taxonomy
 #: misses a brand. Verified term-sensitive: "zzzznonsense" returns 0 results
 #: while "adidas" returns matches.
@@ -1222,6 +1289,8 @@ def sweep_plan(merchant_slug: str, adapter: str,
         return APPAREL_FACET_PLANS.get(merchant_slug)
     if vertical == "accessory":
         return ACCESSORY_FACET_PLANS.get(merchant_slug)
+    if vertical == "fragrance":
+        return FRAGRANCE_FACET_PLANS.get(merchant_slug)
     if vertical != "footwear":
         return None
     # The shop's own plan first: on a white-label platform the adapter says
@@ -1236,6 +1305,8 @@ def facet_plan(merchant_slug: str,
         return APPAREL_FACET_PLANS.get(merchant_slug)
     if vertical == "accessory":
         return ACCESSORY_FACET_PLANS.get(merchant_slug)
+    if vertical == "fragrance":
+        return FRAGRANCE_FACET_PLANS.get(merchant_slug)
     if vertical != "footwear":
         return None
     return FACET_PLANS.get(merchant_slug)
@@ -1439,10 +1510,33 @@ def discover(fetcher, merchant_slug: str, adapter: str, base_url: str, *,
     return report
 
 
+def store_api_url(product_url: str) -> str:
+    """The Store API record for a product whose public page is this URL.
+
+    e-elixir is discovered through its API and its products are *addressed*
+    by their shop page -- that is what `permalink` states, and what a
+    shopper has to be sent to. The two are not interchangeable: fetching
+    the shop page returns HTML to an adapter that parses JSON.
+
+    So the public URL is what the catalogue stores, and this is what the
+    crawler asks for. The adapter closes the loop by reading `permalink`
+    back out of the payload, so the offer still carries the clickable
+    address rather than the endpoint we happened to use.
+    """
+    slug = urlsplit(product_url).path.rstrip("/").rsplit("/", 1)[-1]
+    return urljoin(product_url, f"/wp-json/wc/store/v1/products?slug={slug}")
+
+
+#: Adapters whose product jobs address an endpoint rather than the page.
+PRODUCT_FETCH_REWRITES = {"woocommerce": store_api_url}
+
+
 def product_jobs(report: DiscoveryReport, kind: str = "catalog_parse",
                  priority: Priority = Priority.COLD) -> list[FetchJob]:
     """Turn discovered URLs into fetch jobs for the worker."""
-    return [FetchJob(merchant_slug=report.merchant_slug, url=url, kind=kind,
+    rewrite = PRODUCT_FETCH_REWRITES.get(report.adapter)
+    return [FetchJob(merchant_slug=report.merchant_slug,
+                     url=rewrite(url) if rewrite else url, kind=kind,
                      priority=priority,
                      category_hint=report.category_hints.get(url),
                      gender_hint=report.gender_hints.get(url))

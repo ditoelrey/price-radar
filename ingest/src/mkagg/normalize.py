@@ -302,6 +302,51 @@ def parse_price_minor(raw: str | float | int | None, minor_unit: int = 0) -> int
     return int(scaled.to_integral_value(rounding="ROUND_HALF_UP"))
 
 
+def parse_api_price_minor(raw: str | float | int | None, *,
+                          source_minor_unit: int,
+                          target_minor_unit: int = 0) -> int | None:
+    """Rescale a price an API states in *its own* minor units.
+
+    This is not :func:`parse_price_minor`, and the difference is a factor of
+    one hundred. That function reads a price as a human was shown it --
+    ``"6.799,00 ден."`` -- and scales it up. A WooCommerce Store API sends
+    an integer that has already been scaled, by a factor the same payload
+    declares in ``prices.currency_minor_unit``:
+
+    ==========  ==================  ==========  ===============
+    shop        currency_minor_unit raw         means
+    ==========  ==================  ==========  ===============
+    megasport   0                   ``"3199"``  3 199 ден
+    e-elixir    2                   ``"424000"``  4 240 ден
+    ==========  ==================  ==========  ===============
+
+    Same software, same currency, same country -- only the shop's own decimal
+    setting differs. So the unit has to travel with the number. Assuming one
+    shop's setting holds for the next is how a 4 240 denar perfume gets
+    stored, and sorted, as 424 000.
+
+    ``target_minor_unit`` is ours, from ``currency.minor_unit`` -- 0 for MKD.
+    A value that does not divide cleanly is rounded the same way
+    :func:`parse_price_minor` rounds, rather than silently truncated.
+
+    A string that is not a bare number yields None. It is not re-read as a
+    displayed price: falling back to the other parser is exactly the
+    confusion this function exists to prevent, and an unknown price is
+    recoverable where a wrong one is not.
+    """
+    if raw is None:
+        return None
+    if source_minor_unit < 0 or target_minor_unit < 0:
+        raise ValueError("minor units are powers of ten, never negative")
+    try:
+        dec = Decimal(str(raw).strip())
+    except InvalidOperation:
+        return None
+
+    scaled = dec * (Decimal(10) ** (target_minor_unit - source_minor_unit))
+    return int(scaled.to_integral_value(rounding="ROUND_HALF_UP"))
+
+
 # -----------------------------------------------------------------------------
 # Text, for the fuzzy fallback matcher
 # -----------------------------------------------------------------------------

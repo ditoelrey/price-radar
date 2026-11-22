@@ -432,14 +432,14 @@ upserted AS (
     INSERT INTO offer_variant (
             offer_id, size_label, size_eu, size_uk, size_cm,
             size_system, size_alpha, size_alpha_max, size_height_cm,
-            size_age_min_months, size_age_max_months,
+            size_age_min_months, size_age_max_months, size_ml,
             merchant_variant_id, price_minor, list_price_minor, currency_code,
             shipping_cost_minor, in_stock, stock_qty,
             last_checked_at, last_changed_at)
          VALUES (%(offer)s, %(label)s, %(eu)s, %(uk)s, %(cm)s,
                  %(system)s::size_system, %(alpha)s, %(alpha_max)s,
                  %(height)s,
-                 %(age_lo)s, %(age_hi)s, %(vid)s,
+                 %(age_lo)s, %(age_hi)s, %(ml)s, %(vid)s,
                  %(price)s, %(list)s, %(currency)s, %(ship)s, %(in_stock)s,
                  %(qty)s, now(), now())
     ON CONFLICT (offer_id, size_label) DO UPDATE
@@ -452,6 +452,7 @@ upserted AS (
                 size_height_cm      = EXCLUDED.size_height_cm,
                 size_age_min_months = EXCLUDED.size_age_min_months,
                 size_age_max_months = EXCLUDED.size_age_max_months,
+                size_ml             = EXCLUDED.size_ml,
                 merchant_variant_id = COALESCE(EXCLUDED.merchant_variant_id,
                                                offer_variant.merchant_variant_id),
                 price_minor         = EXCLUDED.price_minor,
@@ -501,7 +502,7 @@ INSERT INTO product_price_summary (
         product_id, country_code, min_price_minor, min_price_variant_id,
         max_price_minor, currency_code, offer_count, merchant_count,
         in_stock_offer_count, available_sizes_eu, available_sizes_alpha,
-        max_discount_pct, updated_at)
+        available_volumes_ml, max_discount_pct, updated_at)
 SELECT %(pid)s, 'MK',
        min(price_minor),
        (SELECT id FROM v ORDER BY price_minor LIMIT 1),
@@ -525,6 +526,13 @@ SELECT %(pid)s, 'MK',
                            FROM v
                           WHERE size_alpha IS NOT NULL
                             AND in_stock IS NOT FALSE) t), '{}'),
+       -- And the third rail, for bottles. A FILTER is enough here where the
+       -- letters needed a subquery: DISTINCT inside array_agg orders by the
+       -- expression it de-duplicates, and for millilitres that is already
+       -- the order a shopper reads -- 30, 50, 100.
+       coalesce(array_agg(DISTINCT size_ml)
+                FILTER (WHERE size_ml IS NOT NULL AND in_stock IS NOT FALSE),
+                '{}'),
        -- The best saving any shop advertises on this product, so the listing
        -- can sort by discount without joining the variants. A maximum, not an
        -- average: a shopper asking "where is this most reduced" is asking
@@ -555,6 +563,7 @@ ON CONFLICT (product_id) DO UPDATE SET
         in_stock_offer_count = EXCLUDED.in_stock_offer_count,
         available_sizes_eu   = EXCLUDED.available_sizes_eu,
         available_sizes_alpha = EXCLUDED.available_sizes_alpha,
+        available_volumes_ml = EXCLUDED.available_volumes_ml,
         max_discount_pct     = EXCLUDED.max_discount_pct,
         updated_at           = now()
 """
@@ -575,12 +584,14 @@ def refresh_summary(conn, product_id: int) -> None:
 #: asserts the two never drift apart.
 APPAREL_RUN_KIND = "apparel_parse"
 ACCESSORY_RUN_KIND = "accessory_parse"
+FRAGRANCE_RUN_KIND = "fragrance_parse"
 
 #: Which category kind a run may retire. The whole point of keeping the run
 #: kinds apart: a complete equipment sweep must not be able to touch a shoe.
 _RUN_KIND_VERTICAL = {
     APPAREL_RUN_KIND: "apparel",
     ACCESSORY_RUN_KIND: "accessory",
+    FRAGRANCE_RUN_KIND: "fragrance",
 }
 
 
@@ -676,6 +687,7 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                     "height": size.height_cm or variant.size_height_cm,
                     "age_lo": size.age_min_months,
                     "age_hi": size.age_max_months,
+                    "ml": size.volume_ml,
                     "vid": variant.merchant_variant_id,
                     "price": variant.price_minor,
                     "list": variant.list_price_minor,

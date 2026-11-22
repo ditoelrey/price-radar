@@ -19,7 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..models import RawOffer
-from ..taxonomy import ACCESSORY_SLUGS, APPAREL_SLUGS
+from ..taxonomy import (ACCESSORY_SLUGS, APPAREL_SLUGS,
+                        FRAGRANCE_SLUGS)
 from .promote import PromotionReport, apply_delistings, promote_run
 from .staging import (StagedRun, clear_stage, merchant_id_for, open_run,
                       record_decision, stage_offers)
@@ -83,6 +84,10 @@ class IngestOutcome:
 CATALOG_KIND = "catalog_parse"
 APPAREL_KIND = "apparel_parse"
 ACCESSORY_KIND = "accessory_parse"
+#: Fragrances, V27. Separate for the same reason as the others: its offer
+#: counts and fill rates have nothing to do with footwear's, and two shops
+#: selling nothing but perfume would drag every band they shared.
+FRAGRANCE_KIND = "fragrance_parse"
 
 
 def run_kind_for(offer: RawOffer) -> str:
@@ -102,6 +107,8 @@ def run_kind_for(offer: RawOffer) -> str:
         return APPAREL_KIND
     if offer.category_hint in ACCESSORY_SLUGS:
         return ACCESSORY_KIND
+    if offer.category_hint in FRAGRANCE_SLUGS:
+        return FRAGRANCE_KIND
     return CATALOG_KIND
 
 

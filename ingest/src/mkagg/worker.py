@@ -26,6 +26,7 @@ import functools
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from urllib.parse import urljoin
 
 from .adapters import get_adapter
 from .adapters.aspnet_mk import sizes_request
@@ -35,7 +36,7 @@ from .fetch.ratelimit import BreakerWait, Priority
 from .fetch.scheduler import mark_checked, record_observation
 from .load import ingest, run_kind_for
 from .models import RawOffer
-from .taxonomy import PARENT_SLUGS
+from .taxonomy import FRAGRANCE_SLUGS, PARENT_SLUGS
 
 #: A probe whose price moves further than this is treated as suspect rather
 #: than believed. Real sales do not usually halve a price between two checks,
@@ -46,6 +47,16 @@ IMPLAUSIBLE_MOVE = 0.70
 #: sport-m and sizeer render an unrendered Razor placeholder where the sizes
 #: belong, so the size run only exists behind POST /GetVelicini/.
 COMPANION_FETCH_ADAPTERS = frozenset({"aspnet_mk"})
+
+#: Adapters that take a `vertical` and behave differently per vertical. The
+#: WooCommerce one drops gift sets, candles and mists when it is reading
+#: fragrances, and must not when it is reading a shop that sells shoes.
+VERTICAL_AWARE_ADAPTERS = frozenset({"woocommerce"})
+
+#: Where a WooCommerce product's per-variant prices live. A parent payload
+#: carries one price and a range; this is the only endpoint that prices each
+#: bottle, and for fragrances the volume rail is the product.
+WOO_VARIATIONS_PATH = "/wp-json/wc/store/v1/products?type=variation&parent={id}"
 
 
 @dataclass
@@ -109,12 +120,45 @@ def _companion_sizes(fetcher, job: FetchJob, merchant_sku: str,
     return result.body if result.ok else None
 
 
+def _woo_volumes(fetcher, adapter, job: FetchJob, offer: RawOffer,
+                 base_url: str, waiter: BreakerWait | None = None) -> RawOffer:
+    """Replace a fragrance offer's single price with its volume rail.
+
+    A listing payload states one price for a bottle sold in three sizes and
+    does not say which size it belongs to, so the adapter refuses to guess
+    and emits an unsized variant. This fetches the endpoint that prices each
+    volume and swaps the rail in.
+
+    Patient, and failure is survivable the same way the aspnet size fetch
+    is: losing this request leaves the offer priced but unsized, which is a
+    product a shopper cannot filter -- not a product that vanishes.
+    """
+    if not offer.merchant_sku:
+        return offer
+    url = urljoin(base_url, WOO_VARIATIONS_PATH.format(id=offer.merchant_sku))
+    probe = fetch_patiently(fetcher, FetchJob(
+        merchant_slug=job.merchant_slug, url=url, kind=job.kind,
+        priority=job.priority), waiter)
+    if not probe.ok:
+        return offer
+    sized = adapter.parse_stock(probe.body, offer.product_url,
+                                job.merchant_slug)
+    if sized and sized.variants:
+        offer.variants = sized.variants
+    return offer
+
+
 def parse_result(fetcher, result: FetchResult, merchant: dict, *,
                  waiter: BreakerWait | None = None) -> list[RawOffer]:
     """Turn one successful fetch into offers, using the merchant's adapter."""
     adapter_slug = merchant["adapter"]
     adapter = get_adapter(adapter_slug)
     job = result.job
+    # Taken from the facet the product was discovered through, exactly as
+    # `load.run.run_kind_for` takes the run's kind -- so a drain carrying
+    # several verticals treats each one as what it is.
+    vertical = ("fragrance" if job.category_hint in FRAGRANCE_SLUGS else None)
+    extra = {"vertical": vertical} if adapter_slug in VERTICAL_AWARE_ADAPTERS else {}
 
     if adapter_slug in COMPANION_FETCH_ADAPTERS:
         if job.method == "POST":
@@ -137,11 +181,19 @@ def parse_result(fetcher, result: FetchResult, merchant: dict, *,
     # Platforms whose listing endpoints return many records at once.
     if hasattr(adapter, "parse_many") and job.kind != "stock_probe":
         offers = adapter.parse_many(result.body, merchant["base_url"],
-                                    job.merchant_slug)
+                                    job.merchant_slug, **extra)
         if offers:
+            if vertical == "fragrance":
+                offers = [_woo_volumes(fetcher, adapter, job, o,
+                                       merchant["base_url"], waiter)
+                          for o in offers]
             return offers
 
-    offer = adapter.parse_product(result.body, job.url, job.merchant_slug)
+    offer = adapter.parse_product(result.body, job.url, job.merchant_slug,
+                                  **extra)
+    if offer and vertical == "fragrance":
+        offer = _woo_volumes(fetcher, adapter, job, offer,
+                             merchant["base_url"], waiter)
     return [offer] if offer else []
 
 

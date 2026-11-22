@@ -328,6 +328,103 @@ class TestWooCommerceAdapter:
                 # A sneaker is hundreds or thousands of denars, never 10^5+.
                 assert 100 < offer.min_price_minor < 100_000, offer.min_price_minor
 
+    def test_a_second_shop_on_the_same_platform_counts_in_cents(self):
+        """e-elixir runs the same Store API and scales its prices by 100.
+
+        Captured live: Valentino Donna Eau de parfum, 30ml at 4 240 den
+        reduced from 5 650. The payload says ``currency_minor_unit: 2`` and
+        sends ``"424000"``. The adapter was written against megasport, which
+        says 0 -- so until the declared unit was actually read, this product
+        would have been stored, listed and sorted at 424 000 den.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_product(
+            load_json("eelixir_store_valentino_donna_edp.json"),
+            "https://e-elixir.mk/shop/valentino-donna-edp/", "eelixir")
+
+        assert offer is not None
+        assert offer.min_price_minor == 4240
+        assert offer.currency_code == "MKD"
+        assert all(v.list_price_minor == 5650 for v in offer.variants)
+
+    def test_a_perfume_is_priced_like_a_perfume(self):
+        """The shape of the bug, independent of the exact number.
+
+        A 100x error does not look like a typo in a listing -- it looks like
+        a plausible price for something else. This is the bound that would
+        have caught it.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_product(
+            load_json("eelixir_store_valentino_donna_edp.json"),
+            "https://e-elixir.mk/shop/valentino-donna-edp/", "eelixir")
+        assert 100 < offer.min_price_minor < 100_000, offer.min_price_minor
+
+    def test_a_bottle_is_sized_by_volume(self):
+        """The fragrance axis, captured live from e-elixir.
+
+        A parent payload carries one price and a range, never a price per
+        volume -- so the volumes themselves come from the variation
+        endpoint, which is the only place each bottle is priced.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_stock(
+            load_json("eelixir_store_valentino_variations.json"),
+            "https://e-elixir.mk/shop/valentino-donna-edp/", "eelixir")
+
+        priced = {v.size_label: v.price_minor for v in offer.variants}
+        assert priced == {"30ml": 4240, "50ml": 6040}
+        assert all(v.list_price_minor for v in offer.variants), (
+            "the reduced-from price is on each variation and is what the "
+            "discount badge reads")
+
+    def test_a_sold_out_volume_is_not_offered(self):
+        """Presence in the payload does not mean buyable.
+
+        It did on megasport, and the adapter said so in a comment as though
+        it were a fact about WooCommerce. e-elixir returns sold-out
+        variations too: Ralph Lauren Polo 67 comes back with three volumes
+        and the 75ml out of stock. Marking it buyable would quote a price
+        for a bottle nobody can put in a basket.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_stock(
+            load_json("eelixir_store_polo67_variations.json"),
+            "https://e-elixir.mk/shop/ralph-lauren-polo-67/", "eelixir")
+
+        stock = {v.size_label: v.in_stock for v in offer.variants}
+        assert stock == {"40ml": True, "75ml": False, "125ml": True}
+
+    def test_the_brand_and_the_shelf_travel_with_the_offer(self):
+        """Neither is in the title, and both decide the product's identity.
+
+        The shelf states the gender and the concentration; the brand
+        taxonomy is populated on 969 of e-elixir's 987 fragrances, while
+        megasport leaves it empty and keeps a manufacturer code in `sku`.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_product(
+            load_json("eelixir_store_valentino_donna_edp.json"),
+            "https://e-elixir.mk/shop/valentino-donna-edp/", "eelixir")
+
+        assert offer.raw_brand == "Valentino"
+        assert offer.category_path == "Женски Eau de parfum"
+
+    def test_a_multi_volume_listing_claims_no_volume(self):
+        """`prices.price` is the cheapest bottle, and which one is unstated.
+
+        Usually the smallest -- but "usually" would print a 30ml price on a
+        100ml listing every time it is not, so the listing contributes a
+        price and no volume. The rail arrives with the variation fetch.
+        """
+        adapter = get_adapter("woocommerce")
+        offer = adapter.parse_product(
+            load_json("eelixir_store_valentino_donna_edp.json"),
+            "https://e-elixir.mk/shop/valentino-donna-edp/", "eelixir")
+
+        assert [v.size_label for v in offer.variants] == [""]
+        assert offer.min_price_minor == 4240
+
     def test_size_spellings_reconcile(self):
         """terms say "37.5", variations say "37-5"; both must normalise equal.
 

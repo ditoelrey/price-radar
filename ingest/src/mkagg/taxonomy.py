@@ -39,6 +39,21 @@ from .normalize import translit_mk
 #: sock in a sneaker-shaped category tree, so the sock rule has to win. The
 #: first matching rule decides.
 _RULES: list[tuple[str, tuple[str, ...]]] = [
+    # --- fragrances (V27), first because nothing else can claim these -----
+    # The two perfumeries shelve by gender *and* strength -- "Женски Eau de
+    # parfum", "Машки Eau de toilette", "Fragrances / Women" -- and that
+    # shelf lands in `merchant_category_path`, where `derive` reads it.
+    # Without a rule here it resolves to nothing, so a fragrance keeps
+    # whatever category its creation happened to set and no later pass can
+    # affirm or improve it.
+    #
+    # Deliberately *not* here: "elixir", "intense", "extrait". They name a
+    # fragrance rather than the article type, and `mkagg.fragrance` keeps
+    # them in the line name for exactly that reason.
+    ("perfume", ("eau de parfum", "eau de toilette", "eau de cologne",
+                 "toaletna voda", "kolonska voda", "parfimirana voda",
+                 "parfem", "parfemi", "parfumi", "mirisi", "miris",
+                 "fragrance", "fragrances", "edp", "edt")),
     # --- not footwear, but sold alongside it and easily mistaken for it ----
     ("socks", ("chorapi", "corapi", "shtuci", "stuci", "shtucni", "stucni",
                "sok 3p", "crew sock", "ankle sock",
@@ -333,12 +348,18 @@ ACCESSORY_SLUGS = frozenset({
     "skates_scooters", "shoe_care_laces", "other_accessories",
 })
 
+#: The fragrance vertical, added in V27. One leaf so far: a bottle of
+#: perfume. Gift sets, scented candles and body mists all sit inside both
+#: shops' fragrance shelves and are all excluded at ingest, so they get no
+#: slug here -- a set is not a volume of the bottle it contains.
+FRAGRANCE_SLUGS = frozenset({"fragrances", "perfume"})
+
 #: Category slugs this module can return. Kept in step with V4 + V10 + V17 +
-#: V18 + V23 so a typo here fails a test rather than silently nulling a
+#: V18 + V23 + V27 so a typo here fails a test rather than silently nulling a
 #: category.
 KNOWN_SLUGS = frozenset({
     "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
-}) | APPAREL_SLUGS | ACCESSORY_SLUGS
+}) | APPAREL_SLUGS | ACCESSORY_SLUGS | FRAGRANCE_SLUGS
 
 #: Which of those are footwear, i.e. the MVP's storefront. ``footwear`` itself
 #: is in here: it is the parent row, and means "a shoe, kind unspecified".
@@ -346,8 +367,8 @@ FOOTWEAR_SLUGS = frozenset({
     "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
 })
 
-#: The three rows with no parent: a whole vertical, naming no garment, shoe
-#: or accessory. They are honest answers -- "clothing, kind unspecified" is
+#: The rows with no parent: a whole vertical, naming no garment, shoe,
+#: accessory or bottle. They are honest answers -- "clothing, kind unspecified" is
 #: true, and better than NULL -- but they are the *weakest* honest answer,
 #: and that distinction has to be expressible.
 #:
@@ -356,7 +377,8 @@ FOOTWEAR_SLUGS = frozenset({
 #: "Текстил" while their own pages said "Градник" or "Дресови-фудбал". So
 #: anything that would write a parent over a leaf must check this set first
 #: and decline. A parent may fill a gap; it may never overwrite.
-PARENT_SLUGS = frozenset({"footwear", "apparel", "accessories"})
+PARENT_SLUGS = frozenset({"footwear", "apparel", "accessories",
+                          "fragrances"})
 
 #: Gender values this module can return, matching the ``gender_t`` enum. Note
 #: what is missing: ``classify_gender`` never returns ``unisex``. A title

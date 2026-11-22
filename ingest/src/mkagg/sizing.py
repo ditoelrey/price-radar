@@ -97,6 +97,9 @@ class SizeReading:
     height_cm: int | None = None
     age_min_months: int | None = None
     age_max_months: int | None = None
+    #: Bottle volume in millilitres, the fragrance axis. Set only when the
+    #: label states a volume outright; a bare number is never read as one.
+    volume_ml: int | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -147,6 +150,22 @@ def _alpha_span(flat: str) -> tuple[str, str] | None:
     return lo, hi
 
 
+#: A stated bottle volume. Both shops write it attached to the number and
+#: `_flatten` has already turned Cyrillic "30мл" into "30ml", so one pattern
+#: reads every spelling either of them uses.
+#:
+#: Grams are deliberately absent. e-elixir shelves scented candles inside its
+#: Мириси tree -- 180g, 425g, 1260g -- and a candle is not a smaller
+#: bottle of perfume. They stay `numeric`, which is the honest reading of a
+#: number this module cannot place on any axis it knows.
+_VOLUME = re.compile(r"^(\d{1,4})\s*ml$")
+
+#: What a bottle can plausibly hold. 5ml samples and 500ml refills both
+#: exist; four digits of millilitres does not, and a label that reads that
+#: way is more likely a weight or a code than a volume.
+_VOLUME_MIN_ML, _VOLUME_MAX_ML = 1, 2000
+
+
 def read_size(label: str | None, *, apparel: bool = False,
               kids: bool = False) -> SizeReading:
     """Read one size label.
@@ -162,6 +181,9 @@ def read_size(label: str | None, *, apparel: bool = False,
         read_size("42")                       -> eu_shoe 42
         read_size("42", apparel=True)         -> numeric
         read_size("7", apparel=True, kids=True) -> age 84..96 months
+        read_size("30ml")                     -> volume_ml 30
+        read_size("100мл")                    -> volume_ml 100
+        read_size("180g")                     -> numeric, not a volume
         read_size("BEZ VELICINA")             -> one_size
 
     ``apparel`` and ``kids`` come from the facet a product was discovered
@@ -177,6 +199,14 @@ def read_size(label: str | None, *, apparel: bool = False,
 
     if flat in _NO_SIZE or flat.rstrip(".") in _NO_SIZE:
         return SizeReading(system="one_size")
+
+    # Before every numeric rule: "100ml" would otherwise reach the height
+    # band and the EU-shoe bound as a bare 100, and both would take it.
+    m = _VOLUME.match(flat)
+    if m:
+        ml = int(m.group(1))
+        if _VOLUME_MIN_ML <= ml <= _VOLUME_MAX_ML:
+            return SizeReading(system="volume_ml", volume_ml=ml)
 
     alpha = _ALPHA.get(flat.replace(" ", "")) or _ALPHA.get(flat)
     if alpha:

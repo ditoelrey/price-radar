@@ -12,7 +12,8 @@ import pytest
 
 from mkagg.normalize import clean_model_name
 from mkagg.taxonomy import (FOOTWEAR_SLUGS, KNOWN_GENDERS, KNOWN_SLUGS,
-                            classify, classify_gender, is_footwear)
+                            PARENT_SLUGS, classify, classify_gender,
+                            is_footwear)
 
 
 class TestClassifyRealTitles:
@@ -182,12 +183,12 @@ class TestFourCanonicalBuckets:
 
     def test_known_slugs_are_exactly_the_seeded_ones(self):
         """Every slug this module may return, matching V4 + V10 + V17 + V18
-        + V23.
+        + V23 + V27.
 
-        The apparel leaves joined in V18, the Опрема ones in V23. `equipment`
-        left in the same migration: that kind was folded into `accessory` and
-        its one leaf deleted, so a rule still returning it would null the
-        category rather than set it.
+        The apparel leaves joined in V18, the Опрема ones in V23, the
+        fragrance pair in V27. `equipment` left in V23: that kind was folded
+        into `accessory` and its one leaf deleted, so a rule still returning
+        it would null the category rather than set it.
         """
         assert KNOWN_SLUGS == {
             "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
@@ -198,7 +199,19 @@ class TestFourCanonicalBuckets:
             "protective_gear", "swim_gear", "balls_training",
             "bottles_thermos", "skates_scooters", "shoe_care_laces",
             "other_accessories",
+            "fragrances", "perfume",
         }
+
+    def test_every_vertical_has_a_parent_this_module_will_not_overwrite(self):
+        """PARENT_SLUGS is the guard that keeps an umbrella off a leaf.
+
+        A vertical whose root is missing from the set would let a department
+        page overwrite a product's real category -- the 1 010-product
+        Текстил bug. Fragrances joined in V27 and needs the same guard.
+        """
+        assert PARENT_SLUGS == {"footwear", "apparel", "accessories",
+                                "fragrances"}
+        assert PARENT_SLUGS < KNOWN_SLUGS
 
     def test_the_retired_equipment_slug_is_gone(self):
         """V23 deleted the category row, so returning it would set NULL."""

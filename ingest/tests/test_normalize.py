@@ -10,7 +10,8 @@ from decimal import Decimal
 import pytest
 
 from mkagg.normalize import (clean_model_name, normalize_size, normalize_sku,
-                             parse_price_minor, sku_base, slugify, translit_mk)
+                             parse_api_price_minor, parse_price_minor,
+                             sku_base, slugify, translit_mk)
 
 
 class TestNormalizeSku:
@@ -158,3 +159,73 @@ class TestText:
 
     def test_slugify_cyrillic(self):
         assert slugify("Патики Puma Caven 2.0") == "patiki-puma-caven-2-0"
+
+
+class TestApiPricesCarryTheirOwnScale:
+    """Two WooCommerce shops, one currency, two different scales.
+
+    megasport configures MKD with 0 decimals and sends "3199" for 3 199 den.
+    e-elixir configures the same currency with 2 and sends "424000" for
+    4 240 den. The raw strings are not comparable; only the pair
+    (value, currency_minor_unit) is. Reading one shop's numbers with the
+    other's setting is a factor of 100 on every price in the catalogue.
+    """
+
+    def test_a_shop_that_counts_whole_denars(self):
+        assert parse_api_price_minor("3199", source_minor_unit=0) == 3199
+
+    def test_a_shop_that_counts_cents(self):
+        assert parse_api_price_minor("424000", source_minor_unit=2) == 4240
+        assert parse_api_price_minor("565000", source_minor_unit=2) == 5650
+        assert parse_api_price_minor("604000", source_minor_unit=2) == 6040
+
+    def test_the_scales_are_not_interchangeable(self):
+        """The regression this function exists for.
+
+        Read with the wrong shop's setting, a 4 240 den perfume becomes the
+        most expensive thing in the catalogue -- and it sorts that way.
+        """
+        wrong = parse_api_price_minor("424000", source_minor_unit=0)
+        right = parse_api_price_minor("424000", source_minor_unit=2)
+        assert wrong == 424_000
+        assert right == 4_240
+        assert wrong == right * 100
+
+    def test_a_half_denar_rounds_rather_than_truncates(self):
+        # MKD has no subunit in our model, so something has to give. Rounding
+        # matches parse_price_minor; truncation would under-report a price.
+        assert parse_api_price_minor("424050", source_minor_unit=2) == 4241
+        assert parse_api_price_minor("424049", source_minor_unit=2) == 4240
+
+    def test_a_target_scale_other_than_zero(self):
+        # EUR at minor_unit 2, the moment we add HR/SI: no rescale at all.
+        assert parse_api_price_minor(
+            "8498", source_minor_unit=2, target_minor_unit=2) == 8498
+
+    @pytest.mark.parametrize("raw", [None, "", "   ", "n/a"])
+    def test_unparseable_is_none(self, raw):
+        assert parse_api_price_minor(raw, source_minor_unit=2) is None
+
+    def test_a_displayed_price_is_refused_not_guessed(self):
+        """Never quietly fall back to the other parser.
+
+        If a payload ever carries "4.240,00 den." here, the honest answer is
+        "unknown". Re-reading it as a displayed price is the exact confusion
+        this function was added to prevent, and a wrong price is far harder
+        to notice than a missing one.
+        """
+        assert parse_api_price_minor(
+            "4.240,00 ден.", source_minor_unit=2) is None
+
+    def test_numeric_input_works_too(self):
+        assert parse_api_price_minor(424000, source_minor_unit=2) == 4240
+        assert parse_api_price_minor(3199.0, source_minor_unit=0) == 3199
+
+    def test_a_negative_scale_is_a_bug_not_a_price(self):
+        with pytest.raises(ValueError):
+            parse_api_price_minor("1", source_minor_unit=-1)
+
+    def test_never_returns_float(self):
+        assert isinstance(
+            parse_api_price_minor("424000", source_minor_unit=2), int)
+

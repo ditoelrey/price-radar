@@ -1,0 +1,317 @@
+[
+ {
+  "id": 38515,
+  "name": "Ralph Lauren Polo 67 Eau de toilette",
+  "slug": "ralph-lauren-polo-67-eau-de-parfum-125ml-126",
+  "parent": 38512,
+  "type": "variation",
+  "variation": "милилитража: 125ml",
+  "permalink": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=125ml",
+  "sku": "3605972910240",
+  "short_description": "",
+  "description": "",
+  "on_sale": false,
+  "prices": {
+   "price": "663000",
+   "regular_price": "663000",
+   "sale_price": "663000",
+   "price_range": null,
+   "currency_code": "MKD",
+   "currency_symbol": "ден",
+   "currency_minor_unit": 2,
+   "currency_decimal_separator": ",",
+   "currency_thousand_separator": ".",
+   "currency_prefix": "",
+   "currency_suffix": " ден"
+  },
+  "price_html": "<span class=\"woocommerce-Price-amount amount\">6.630,00&nbsp;<span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&#x434;&#x435;&#x43d;</span></span>",
+  "average_rating": "0",
+  "review_count": 0,
+  "images": [
+   {
+    "id": 38516,
+    "src": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "thumbnail": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "sizes": "(max-width: 768px) 100vw, 768px",
+    "thumbnail_srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "thumbnail_sizes": "(max-width: 768px) 100vw, 768px",
+    "name": "Ralph Lauren Polo 67 Eau de toilette",
+    "alt": ""
+   }
+  ],
+  "categories": [],
+  "tags": [],
+  "brands": [],
+  "attributes": [],
+  "variations": [],
+  "grouped_products": [],
+  "has_options": false,
+  "is_purchasable": true,
+  "is_in_stock": true,
+  "is_on_backorder": false,
+  "low_stock_remaining": null,
+  "stock_availability": {
+   "text": "На залиха",
+   "class": "in-stock"
+  },
+  "sold_individually": false,
+  "weight": "",
+  "dimensions": {
+   "length": "",
+   "width": "",
+   "height": ""
+  },
+  "formatted_weight": "Не е достапно",
+  "formatted_dimensions": "Не е достапно",
+  "add_to_cart": {
+   "text": "Додај во кошница",
+   "description": "Add to cart: &ldquo;Ralph Lauren Polo 67 Eau de toilette &#8211; 125ml&rdquo;",
+   "url": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=125ml&#038;variation_id=38515&#038;add-to-cart=38512",
+   "single_text": "Додај во кошница",
+   "minimum": 1,
+   "maximum": 5,
+   "multiple_of": 1
+  },
+  "is_password_protected": false,
+  "extensions": {},
+  "_links": {
+   "self": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38515",
+     "targetHints": {
+      "allow": [
+       "GET"
+      ]
+     }
+    }
+   ],
+   "collection": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products"
+    }
+   ],
+   "up": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38512"
+    }
+   ],
+   "related": [
+    {
+     "embeddable": true,
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products?related=38515&per_page=10"
+    }
+   ]
+  }
+ },
+ {
+  "id": 38514,
+  "name": "Ralph Lauren Polo 67 Eau de toilette",
+  "slug": "ralph-lauren-polo-67-eau-de-parfum-75ml-76",
+  "parent": 38512,
+  "type": "variation",
+  "variation": "милилитража: 75ml",
+  "permalink": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=75ml",
+  "sku": "3605972910264",
+  "short_description": "",
+  "description": "",
+  "on_sale": false,
+  "prices": {
+   "price": "528000",
+   "regular_price": "528000",
+   "sale_price": "528000",
+   "price_range": null,
+   "currency_code": "MKD",
+   "currency_symbol": "ден",
+   "currency_minor_unit": 2,
+   "currency_decimal_separator": ",",
+   "currency_thousand_separator": ".",
+   "currency_prefix": "",
+   "currency_suffix": " ден"
+  },
+  "price_html": "<span class=\"woocommerce-Price-amount amount\">5.280,00&nbsp;<span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&#x434;&#x435;&#x43d;</span></span>",
+  "average_rating": "0",
+  "review_count": 0,
+  "images": [
+   {
+    "id": 38516,
+    "src": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "thumbnail": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "sizes": "(max-width: 768px) 100vw, 768px",
+    "thumbnail_srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "thumbnail_sizes": "(max-width: 768px) 100vw, 768px",
+    "name": "Ralph Lauren Polo 67 Eau de toilette",
+    "alt": ""
+   }
+  ],
+  "categories": [],
+  "tags": [],
+  "brands": [],
+  "attributes": [],
+  "variations": [],
+  "grouped_products": [],
+  "has_options": false,
+  "is_purchasable": true,
+  "is_in_stock": false,
+  "is_on_backorder": false,
+  "low_stock_remaining": null,
+  "stock_availability": {
+   "text": "Нема на залиха",
+   "class": "out-of-stock"
+  },
+  "sold_individually": false,
+  "weight": "",
+  "dimensions": {
+   "length": "",
+   "width": "",
+   "height": ""
+  },
+  "formatted_weight": "Не е достапно",
+  "formatted_dimensions": "Не е достапно",
+  "add_to_cart": {
+   "text": "Прочитај повеќе",
+   "description": "Прочитај повеќе за &ldquo;Ralph Lauren Polo 67 Eau de toilette &#8211; 75ml&rdquo;",
+   "url": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=75ml&#038;variation_id=38514&#038;add-to-cart=38512",
+   "single_text": "Додај во кошница",
+   "minimum": 1,
+   "maximum": 9999,
+   "multiple_of": 1
+  },
+  "is_password_protected": false,
+  "extensions": {},
+  "_links": {
+   "self": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38514",
+     "targetHints": {
+      "allow": [
+       "GET"
+      ]
+     }
+    }
+   ],
+   "collection": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products"
+    }
+   ],
+   "up": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38512"
+    }
+   ],
+   "related": [
+    {
+     "embeddable": true,
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products?related=38514&per_page=10"
+    }
+   ]
+  }
+ },
+ {
+  "id": 38513,
+  "name": "Ralph Lauren Polo 67 Eau de toilette",
+  "slug": "ralph-lauren-polo-67-eau-de-parfum-40ml-41",
+  "parent": 38512,
+  "type": "variation",
+  "variation": "милилитража: 40ml",
+  "permalink": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=40ml",
+  "sku": "3605972910288",
+  "short_description": "",
+  "description": "",
+  "on_sale": false,
+  "prices": {
+   "price": "386000",
+   "regular_price": "386000",
+   "sale_price": "386000",
+   "price_range": null,
+   "currency_code": "MKD",
+   "currency_symbol": "ден",
+   "currency_minor_unit": 2,
+   "currency_decimal_separator": ",",
+   "currency_thousand_separator": ".",
+   "currency_prefix": "",
+   "currency_suffix": " ден"
+  },
+  "price_html": "<span class=\"woocommerce-Price-amount amount\">3.860,00&nbsp;<span class=\"woocommerce-Price-currencySymbol\" dir=\"auto\">&#x434;&#x435;&#x43d;</span></span>",
+  "average_rating": "0",
+  "review_count": 0,
+  "images": [
+   {
+    "id": 38516,
+    "src": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "thumbnail": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg",
+    "srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "sizes": "(max-width: 768px) 100vw, 768px",
+    "thumbnail_srcset": "https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette.jpg 768w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-640x640.jpg 640w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-400x400.jpg 400w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-560x560.jpg 560w, https://e-elixir.mk/wp-content/uploads/2026/11/ralph-lauren-polo-67-eau-de-toilette-367x367.jpg 367w",
+    "thumbnail_sizes": "(max-width: 768px) 100vw, 768px",
+    "name": "Ralph Lauren Polo 67 Eau de toilette",
+    "alt": ""
+   }
+  ],
+  "categories": [],
+  "tags": [],
+  "brands": [],
+  "attributes": [],
+  "variations": [],
+  "grouped_products": [],
+  "has_options": false,
+  "is_purchasable": true,
+  "is_in_stock": true,
+  "is_on_backorder": false,
+  "low_stock_remaining": null,
+  "stock_availability": {
+   "text": "На залиха",
+   "class": "in-stock"
+  },
+  "sold_individually": false,
+  "weight": "",
+  "dimensions": {
+   "length": "",
+   "width": "",
+   "height": ""
+  },
+  "formatted_weight": "Не е достапно",
+  "formatted_dimensions": "Не е достапно",
+  "add_to_cart": {
+   "text": "Додај во кошница",
+   "description": "Add to cart: &ldquo;Ralph Lauren Polo 67 Eau de toilette &#8211; 40ml&rdquo;",
+   "url": "https://e-elixir.mk/shop/ralph-lauren-polo-67-eau-de-toilette/?attribute_pa_mililitraza=40ml&#038;variation_id=38513&#038;add-to-cart=38512",
+   "single_text": "Додај во кошница",
+   "minimum": 1,
+   "maximum": 11,
+   "multiple_of": 1
+  },
+  "is_password_protected": false,
+  "extensions": {},
+  "_links": {
+   "self": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38513",
+     "targetHints": {
+      "allow": [
+       "GET"
+      ]
+     }
+    }
+   ],
+   "collection": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products"
+    }
+   ],
+   "up": [
+    {
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products/38512"
+    }
+   ],
+   "related": [
+    {
+     "embeddable": true,
+     "href": "https://e-elixir.mk/wp-json/wc/store/v1/products?related=38513&per_page=10"
+    }
+   ]
+  }
+ }
+]
