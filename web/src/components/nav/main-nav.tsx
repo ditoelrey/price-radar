@@ -19,6 +19,8 @@ import { ArrowRight, ChevronDown } from "lucide-react";
 
 import {
   COMING_SOON,
+  CONCENTRATIONS,
+  FRAGRANCE_GENDER_COLUMNS,
   GENDER_COLUMNS,
   VERTICALS,
   categoriesFor,
@@ -89,7 +91,60 @@ function CategoryMenu({ vertical }: { vertical: Vertical }) {
   );
 }
 
+function FragranceMenu({ vertical }: { vertical: Vertical }) {
+  return (
+    <div className="grid grid-cols-3 gap-8">
+      {FRAGRANCE_GENDER_COLUMNS.map((gender) => (
+        <section key={gender.slug}>
+          <h3 className="border-b pb-2 text-base font-semibold">
+            {gender.label}
+          </h3>
+          <ul className="mt-3 space-y-1">
+            {CONCENTRATIONS.map((concentration) => (
+              <li key={concentration.value}>
+                <Link
+                  href={listingHref({
+                    kind: vertical.kind,
+                    gender: gender.slug,
+                    concentration: concentration.value,
+                  })}
+                  className="flex items-baseline gap-2 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {/* The abbreviation set apart from the words rather than
+                      folded into one string. "EDP" is what a shopper who
+                      knows fragrances scans for, and "Парфимирани води" is
+                      what the rest read; running them together as one label
+                      makes both groups parse the whole line. Fixed width so
+                      the four Macedonian names start on one edge. */}
+                  <span className="w-11 shrink-0 font-mono text-xs uppercase tracking-tight">
+                    {concentration.short}
+                  </span>
+                  {concentration.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+
+          <Link
+            href={listingHref({ kind: vertical.kind, gender: gender.slug })}
+            className="mt-3 flex items-center gap-1 border-t pt-3 text-sm font-medium transition-colors hover:text-primary"
+          >
+            {vertical.allLabel}
+            <ArrowRight className="size-3.5" />
+          </Link>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 function VerticalMenu({ vertical }: { vertical: Vertical }) {
+  // Strengths rather than leaves, and its own three columns. Checked before
+  // genderColumns because the fragrance vertical has neither category leaves
+  // to draw nor Деца to draw them for.
+  if (vertical.byConcentration) {
+    return <FragranceMenu vertical={vertical} />;
+  }
   if (vertical.genderColumns === false) {
     return <CategoryMenu vertical={vertical} />;
   }

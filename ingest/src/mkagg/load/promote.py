@@ -111,6 +111,21 @@ def _staged_offers(conn, run_id: int, merchant_slug: str):
 # Brand and product resolution
 # -----------------------------------------------------------------------------
 
+#: Words that are never a brand on their own, whichever field a shop puts
+#: them in. "Women" reached the brand table from one sizeer offer titled
+#: "WOMEN MELODY cropped top", and from there matched the "for women" that
+#: ends hundreds of fragrance titles.
+#:
+#: Narrow on purpose: only words that cannot be a brand by themselves. "New"
+#: and "Sport" are NOT here, because New Era and Sport Ring are real brands
+#: whose names begin with them -- that collision is fixed by preferring the
+#: longest match, not by banning the word.
+NOT_A_BRAND = frozenset({
+    "women", "woman", "men", "man", "kids", "kid", "unisex", "uniseks",
+    "boys", "girls", "her", "him", "female", "male", "ladies", "gents",
+    "zhenski", "mashki", "deca", "decaci", "devojcica",
+})
+
 def resolve_brand(conn, raw_brand: str | None, title: str = "") -> int | None:
     """Resolve a shop's brand string to a catalogue brand.
 
@@ -120,6 +135,15 @@ def resolve_brand(conn, raw_brand: str | None, title: str = "") -> int | None:
     brand only there.
     """
     with conn.cursor() as cur:
+        # A gender word is not a brand in any field. Blocked here as well as
+        # in the title scan, because this is the branch that put "Women" to
+        # work in the first place: sizeer sent it as the brand of a cropped
+        # top, and once the row existed every "for women" title could find
+        # it.
+        if raw_brand and (raw_brand.strip().lower() in NOT_A_BRAND
+                          or translit_mk(raw_brand).strip().lower()
+                          in NOT_A_BRAND):
+            raw_brand = None
         if raw_brand:
             needle = translit_mk(raw_brand).strip()
             cur.execute(
@@ -139,11 +163,27 @@ def resolve_brand(conn, raw_brand: str | None, title: str = "") -> int | None:
         if title:
             hay = f" {translit_mk(title)} "
             cur.execute("SELECT id, slug, name, aliases FROM brand")
+            # The LONGEST matching token wins, not the first one the table
+            # happens to return. Row order is arbitrary, and a short brand
+            # name that is also a common word was quietly beating the real
+            # one: 450 New Era products filed under a brand called "New",
+            # 36 Sport Ring ones under "Sport", and 23 fragrances under
+            # "Women" because their titles end "for women".
+            #
+            # A longer match is strictly more evidence -- it is the same
+            # token plus more of it -- so there is no case where preferring
+            # the shorter one is right.
+            best: tuple[int, int] | None = None
             for brand_id, slug, name, aliases in cur.fetchall():
                 for token in {slug, name, *(aliases or [])}:
                     token = translit_mk(str(token)).strip()
-                    if len(token) >= 3 and f" {token} " in hay:
-                        return brand_id
+                    if len(token) < 3 or token.lower() in NOT_A_BRAND:
+                        continue
+                    if f" {token} " in hay and (best is None
+                                                or len(token) > best[0]):
+                        best = (len(token), brand_id)
+            if best:
+                return best[1]
     return None
 
 
@@ -167,6 +207,9 @@ def ensure_brand(conn, raw_brand: str | None, title: str = "") -> int | None:
 
     name = " ".join(raw_brand.split()).strip()
     if not (2 <= len(name) <= 40) or not _BRAND_NAME.match(name):
+        return None
+    # A shop labelling its department as the brand must not mint one.
+    if name.lower() in NOT_A_BRAND or translit_mk(name).lower() in NOT_A_BRAND:
         return None
 
     slug = slugify(name)
@@ -236,13 +279,108 @@ def fuzzy_candidates(conn, brand_id: int, limit: int = 200
         ]
 
 
+def fragrance_identity(conn, offer: RawOffer,
+                       brand_id: int | None) -> tuple[str, str | None] | None:
+    """A fragrance's identity as words: its line name and its strength.
+
+    Returns None for anything that is not a fragrance, or whose title names
+    no fragrance at all -- there is nothing to key on then, and a product
+    keyed on an empty line name would collect every unreadable title the
+    shop has.
+
+    The brand is passed in rather than read from the title again, because
+    stripping it is half the job: Schatze writes "Pour Homme - edt" with
+    Versace only in a Manufacturer field, e-elixir writes "Versace Pour
+    Homme Eau de toilette", and both have to reduce to ("pour homme", EDT).
+    """
+    from ..fragrance import line_name, read_concentration
+    from ..taxonomy import FRAGRANCE_SLUGS
+
+    if offer.category_hint not in FRAGRANCE_SLUGS or brand_id is None:
+        return None
+    with conn.cursor() as cur:
+        cur.execute("SELECT name FROM brand WHERE id = %s", (brand_id,))
+        row = cur.fetchone()
+    brand_name = row[0] if row else None
+
+    line = line_name(offer.raw_title, brand_name)
+    if not line:
+        return None
+    concentration, _ = read_concentration(offer.raw_title)
+    return line, concentration
+
+
+def genders_conflict(a: str | None, b: str | None) -> bool:
+    """Whether two genders describe different articles.
+
+    Only an explicit men-versus-women pair does. `unisex`, `kids` and NULL
+    conflict with nothing, and that asymmetry is the whole point.
+
+    **Why conflict and not equality.** Requiring the genders to match would
+    split a fragrance the two shops shelve differently, and they will:
+    e-elixir marks a bottle `unisex` when it appears in both its
+    departments -- 218 of 690 -- while Schatze files most things under one.
+    Requiring equality there would make two product pages out of one bottle
+    for nearly a third of the catalogue.
+
+    Ignoring gender entirely has the opposite failure, and it is worse: the
+    Arabic houses sell one line in a men's and a women's version, and
+    "Ajmal Amaze Eau de parfum for women" at 2 145 den is not "Ajmal Amaze
+    Eau de parfum for men" at 3 065. Seven products merged that way, each
+    quoting a shopper one bottle's price for a different bottle.
+
+    Conflict refuses exactly those and nothing else.
+    """
+    return {a, b} == {"men", "women"}
+
+
+def find_product_by_identity(conn, brand_id: int, model: str,
+                             concentration: str | None,
+                             gender: str | None = None) -> int | None:
+    """The product this brand, line, strength and audience already name.
+
+    `IS NOT DISTINCT FROM` on the concentration, not `=`: five live
+    e-elixir products state no strength ("Giorgio Armani Code Elixir"), and
+    SQL equality would make every one of them a new product on every crawl.
+    The partial unique index cannot constrain those either -- NULL is never
+    equal to NULL -- so this lookup is the only thing keeping them single.
+
+    Gender is applied as a veto rather than a key, so a candidate is taken
+    unless it conflicts outright. See :func:`genders_conflict`; it is also
+    what keeps this lookup stable while `derive` revises a gender, which it
+    may do on any later crawl.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, gender::text FROM product
+                WHERE brand_id = %s
+                  AND lower(model_name) = lower(%s)
+                  AND concentration IS NOT DISTINCT FROM %s
+                ORDER BY id""",
+            (brand_id, model, concentration))
+        rows = cur.fetchall()
+    for product_id, candidate_gender in rows:
+        if not genders_conflict(candidate_gender, gender):
+            return product_id
+    return None
+
+
 def create_product(conn, offer: RawOffer, brand_id: int,
-                   mpn_norm: str) -> int:
+                   mpn_norm: str | None,
+                   identity: tuple[str, str | None] | None = None) -> int:
     """Create a catalogue product from an offer that matched nothing.
 
     This is how the catalogue bootstraps: the first store to be crawled
     creates the products, and every later store matches into them on the
     article code. No manual data entry at any point.
+
+    ``identity`` is the fragrance case, and it changes both the name and the
+    slug. A shoe is named from its title and slugged with its article code,
+    because two colourways of one silhouette share a name and must stay
+    apart. A fragrance is the opposite: its identity IS brand, line and
+    strength, and the two shops that sell it give it *different* internal
+    codes -- e-elixir says "278", Schatze says 4976. Slugging by code would
+    guarantee they never meet.
     """
     from ..derive import OfferEvidence, derive_category, derive_gender
     from ..normalize import clean_model_name
@@ -289,37 +427,77 @@ def create_product(conn, offer: RawOffer, brand_id: int,
         if category_id is None:
             category_source = None
 
-        model = clean_model_name(offer.raw_title, brand_name,
-                                 mpn=offer.raw_mpn,
-                                 merchant=merchant_name) or offer.raw_title
-        # clean_model_name lowercases for comparison; the catalogue name is
-        # read by people, so title-case it ("caven 2.0" -> "Caven 2.0").
-        model = " ".join(w.capitalize() if w[:1].isalpha() else w
-                         for w in model.split())
-        model = model.strip()[:200] or mpn_norm
-        canonical = f"{brand_name} {model}".strip()
-        # The MPN keeps the slug unique across colourways of one silhouette.
-        slug = f"{slugify(canonical)}-{slugify(mpn_norm)}"[:200]
+        concentration = None
+        if identity is not None:
+            model, concentration = identity
+            # Title-cased for a human reader, same as the shoe path.
+            model = " ".join(w.capitalize() if w[:1].isalpha() else w
+                             for w in model.split()).strip()[:200]
+            # The strength belongs in the displayed name. "Valentino Donna"
+            # alone would appear twice in a listing -- once as the Eau de
+            # Parfum and once as the Eau de Toilette, at different prices
+            # and with nothing on screen to tell them apart.
+            canonical = " ".join(
+                x for x in (brand_name, model, concentration) if x).strip()
+            # No code in the slug: brand, line and strength ARE the
+            # identity, so this is the string both shops must agree on.
+            #
+            # The audience is appended, though, and it has to be. One line
+            # sold to two audiences is two products -- Ajmal Amaze for women
+            # and for men -- and they would otherwise compete for the single
+            # slug `ajmal-amaze-edp`. `ON CONFLICT (slug)` would then hand
+            # the second one the first one's id and silently merge them,
+            # which is exactly the wrong merge the audience veto exists to
+            # prevent: the veto refuses the match and then the slug undoes
+            # the refusal.
+            #
+            # Unconditionally rather than only on collision, so the slug a
+            # product gets does not depend on which shop was crawled first.
+            slug = slugify(" ".join(x for x in (canonical, gender) if x))[:200]
+        else:
+            model = clean_model_name(offer.raw_title, brand_name,
+                                     mpn=offer.raw_mpn,
+                                     merchant=merchant_name) or offer.raw_title
+            # clean_model_name lowercases for comparison; the catalogue name
+            # is read by people, so title-case it ("caven 2.0" -> "Caven 2.0").
+            model = " ".join(w.capitalize() if w[:1].isalpha() else w
+                             for w in model.split())
+            model = model.strip()[:200] or mpn_norm
+            canonical = f"{brand_name} {model}".strip()
+            # The MPN keeps the slug unique across colourways of one
+            # silhouette.
+            slug = f"{slugify(canonical)}-{slugify(mpn_norm)}"[:200]
 
         cur.execute(
             """INSERT INTO product (brand_id, category_id, category_source,
                                     gender, gender_source, model_name,
                                     canonical_name, primary_mpn, image_url,
-                                    slug)
-                    VALUES (%s, %s, %s, %s::gender_t, %s, %s, %s, %s, %s, %s)
+                                    slug, concentration)
+                    VALUES (%s, %s, %s, %s::gender_t, %s, %s, %s, %s, %s, %s,
+                            %s)
                ON CONFLICT (slug) DO UPDATE SET updated_at = now()
                  RETURNING id""",
             (brand_id, category_id, category_source, gender, gender_source,
-             model, canonical, mpn_norm, offer.image_url, slug))
+             model, canonical, mpn_norm, offer.image_url, slug,
+             concentration))
         product_id = cur.fetchone()[0]
 
-        cur.execute(
-            """INSERT INTO product_identifier (product_id, id_type, value_norm,
-                                               source)
-                    VALUES (%s, 'MPN', %s, %s)
-               ON CONFLICT DO NOTHING""",
-            (product_id, mpn_norm,
-             offer.extractors.get("mpn", "unknown")))
+        # An identifier only when the code can carry one. A fragrance's
+        # parent sku is the shop's own row number -- e-elixir sends "278",
+        # "160", "1319" -- and filing that as an MPN would let any other
+        # shop's row 278 match this perfume. Identity is what joins
+        # fragrances; a short internal code joins nothing and risks
+        # everything.
+        identifier_ok = bool(mpn_norm) and (identity is None
+                                            or len(mpn_norm) >= 8)
+        if identifier_ok:
+            cur.execute(
+                """INSERT INTO product_identifier (product_id, id_type,
+                                                   value_norm, source)
+                        VALUES (%s, 'MPN', %s, %s)
+                   ON CONFLICT DO NOTHING""",
+                (product_id, mpn_norm,
+                 offer.extractors.get("mpn", "unknown")))
     return product_id
 
 
@@ -344,6 +522,58 @@ def resolve_offer(conn, offer: RawOffer, merchant_id: int, *,
                                          {"mpn": mpn_norm})
 
     brand_id = ensure_brand(conn, offer.raw_brand, offer.raw_title)
+
+    # -- Fragrances: identity is words, not a code -----------------------
+    # Every other vertical here is matched on a manufacturer code that both
+    # shops print. The two perfumeries print different ones -- an internal
+    # row number each -- so a fragrance is joined on what it IS: brand, line
+    # and strength, matched exactly.
+    #
+    # Exactly, and never fuzzily. These shops stock "Born in Roma", "Born in
+    # Roma Intense", "Born in Roma Extradose" and "Born in Roma Ruby" side
+    # by side at four prices, and a similarity score cannot be trusted to
+    # keep them apart. A near miss here quotes a shopper a price for a
+    # bottle they cannot buy.
+    #
+    # This also rescues the offers no code could reach: 13 live e-elixir
+    # fragrances carry no sku at all, and under the code-only path they
+    # stayed attached to no product.
+    from ..taxonomy import FRAGRANCE_SLUGS
+    if offer.category_hint in FRAGRANCE_SLUGS:
+        identity = fragrance_identity(conn, offer, brand_id)
+        if identity is None:
+            # A fragrance whose title names no fragrance, or whose brand we
+            # cannot place. The code path below would still mint a product
+            # -- named from the raw title and slugged with the shop's row
+            # number -- and that product would be unfindable, uncomparable
+            # and permanent. An unmatched offer is recoverable; a junk
+            # product in the catalogue is not.
+            return None, MatchResult(None, "identity", 0.0,
+                                     {"reason": "no readable identity"})
+        model, concentration = identity
+        # The audience, read the same way `mkagg.fragrance` reads it for the
+        # catalogue: an explicit "for men" in the title overrides the shelf,
+        # because 2 of 672 Schatze products sit on the wrong one.
+        from ..fragrance import read_gender
+        audience = (read_gender(offer.category_path, offer.raw_title)
+                    or offer.gender_hint)
+        existing = find_product_by_identity(conn, brand_id, model,
+                                            concentration, audience)
+        if existing:
+            return existing, MatchResult(existing, "identity", 0.99,
+                                         {"line": model,
+                                          "concentration": concentration})
+        if create_missing:
+            product_id = create_product(conn, offer, brand_id, mpn_norm,
+                                        identity=identity)
+            if report is not None:
+                report.products_created += 1
+            return product_id, MatchResult(product_id, "identity", 0.99,
+                                           {"line": model,
+                                            "concentration": concentration,
+                                            "created": True})
+        return None, MatchResult(None, "identity", 0.0,
+                                 {"reason": "creation disabled"})
 
     # No identifier: try a blocked fuzzy match before giving up.
     if not mpn_norm:

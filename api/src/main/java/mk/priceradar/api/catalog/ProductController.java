@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.List;
 
 /**
  * Read endpoints for the storefront.
@@ -63,14 +64,35 @@ public class ProductController {
             @RequestParam(required = false) String kind,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String gender,
+            @RequestParam(required = false) String concentration,
             @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         boolean isDefaultScope = kind == null || kind.isBlank();
         return catalog.search(q, brand, sizeEu, size, kindsFor(kind),
                 isDefaultScope, normalize(category), normalize(gender),
-                CatalogRepository.Sort.parse(sort),
+                concentration, CatalogRepository.Sort.parse(sort),
                 page, Math.min(pageSize, MAX_PAGE_SIZE));
+    }
+
+    /**
+     * Brands with products under the given scope, commonest first.
+     *
+     * <p>Same parameters as {@code /products} minus the brand itself, so the
+     * sidebar can ask "which brands would this page offer" and get an answer
+     * that matches the page.
+     */
+    @GetMapping("/brands")
+    public List<Dtos.BrandFacet> brands(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String gender,
+            @RequestParam(required = false) String concentration,
+            @RequestParam(defaultValue = "40") @Min(1) @Max(200) int limit) {
+        boolean isDefaultScope = kind == null || kind.isBlank();
+        return catalog.brands(q, kindsFor(kind), isDefaultScope,
+                normalize(category), normalize(gender), concentration, limit);
     }
 
     /**

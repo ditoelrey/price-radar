@@ -13,7 +13,9 @@ import pytest
 
 from mkagg.load import (Baseline, Decision, RunMetrics, Thresholds,
                         validate_run)
+from mkagg.load.promote import ensure_brand, resolve_brand
 from mkagg.models import RawOffer, RawVariant
+from mkagg.normalize import slugify
 
 #: Tests TRUNCATE, so they default to a SEPARATE database. Pointing them at
 #: the development database would wipe it -- which is exactly what happened
@@ -202,6 +204,78 @@ def sold_out_offer(sku="H01551", merchant="megasport"):
         variants=[RawVariant(size_label="", price_minor=None,
                              currency_code="MKD", in_stock=False)],
         extractors={"mpn": "jsonld", "stock": "css"})
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestResolvingABrandFromATitle:
+    """Four shops put the brand only in the title, so this path matters.
+
+    It is also where a short brand name that is also a common word did real
+    damage: 450 New Era products filed under a brand called "New", 36 Sport
+    Ring ones under "Sport", 27 under "Signature", and 23 fragrances under
+    "Women" -- because the table was scanned in whatever order Postgres
+    returned and the first match won.
+    """
+
+    def seed(self, conn, *names):
+        with conn.cursor() as cur:
+            out = {}
+            for name in names:
+                cur.execute(
+                    """INSERT INTO brand (slug, name, aliases)
+                            VALUES (%s, %s, %s)
+                       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+                         RETURNING id""",
+                    (slugify(name), name, [name.lower()]))
+                out[name] = cur.fetchone()[0]
+        conn.commit()
+        return out
+
+    def test_the_longest_match_wins(self, conn):
+        ids = self.seed(conn, "New", "New Balance")
+        assert (resolve_brand(conn, None, "New Balance 574 Patiki")
+                == ids["New Balance"])
+
+    def test_a_longer_brand_beats_a_word_inside_it(self, conn):
+        """The New Era case. Both rows match the title; only one is right."""
+        ids = self.seed(conn, "New", "New Era")
+        assert (resolve_brand(conn, None, "New Era Cord 9twenty 174")
+                == ids["New Era"])
+
+    def test_a_real_brand_beats_a_gender_word(self, conn):
+        """23 fragrances were filed under "Women" because their titles end
+        "for women" and that row happened to be scanned first."""
+        ids = self.seed(conn, "Women", "Moschino")
+        assert (resolve_brand(conn, None,
+                              "Moschino Toy 2 Eau de parfum for women")
+                == ids["Moschino"])
+
+    def test_a_gender_word_alone_resolves_to_nothing(self, conn):
+        """Not to the gender word. An offer with no brand we can name is
+        honestly unmatched; one branded "Women" is silently wrong, and it
+        takes a product page with it."""
+        self.seed(conn, "Women")
+        assert resolve_brand(conn, None, "Toy 2 Eau de parfum for women") is None
+
+    def test_a_shop_labelling_its_department_mints_no_brand(self, conn):
+        """sizeer sent raw_brand "Women" on "WOMEN MELODY cropped top",
+        which is how the row got into the table in the first place."""
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM brand")
+            before = cur.fetchone()[0]
+        assert ensure_brand(conn, "Women", "WOMEN MELODY cropped top") is None
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM brand")
+            assert cur.fetchone()[0] == before, "no brand should have been minted"
+
+    def test_a_real_brand_field_still_creates(self, conn):
+        """The guard must not stop the thing this function is for: the first
+        live run lost "Mont" and "Hoka" to an unseeded brand."""
+        brand_id = ensure_brand(conn, "Hoka", "Hoka Clifton 9")
+        assert brand_id is not None
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM brand WHERE id=%s", (brand_id,))
+            assert cur.fetchone()[0] == "Hoka"
 
 
 @pytest.mark.usefixtures("clean_db")

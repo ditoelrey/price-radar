@@ -65,6 +65,18 @@ CONCENTRATIONS: dict[str, str] = {
     "edc": "EDC",
     "extrait de parfum": "EXTRAIT",
     "extrait": "EXTRAIT",
+    # Brand-specific strengths, and the "de parfum" suffix is what makes
+    # them strengths rather than names. Measured on 987 live titles:
+    # "elixir de parfum" 3, "absolu de parfum" 2.
+    #
+    # Note what is deliberately NOT here: bare "elixir". "Le Male ELIXIR -
+    # Eau de Parfum" is an EDP whose fragrance is called Le Male Elixir,
+    # and "Gucci Guilty Elixir de Parfum" is a Guilty at Elixir strength.
+    # The suffix separates them, and only the suffixed form is read.
+    # They map to their own values rather than to PARFUM, because Gucci
+    # sells Guilty in Absolu, Elixir and Parfum and they are three bottles.
+    "elixir de parfum": "ELIXIR",
+    "absolu de parfum": "ABSOLU",
     "parfum": "PARFUM",
     "parfem": "PARFUM",
     "cologne": "COLOGNE",
@@ -155,6 +167,17 @@ def read_concentration(title: str | None) -> tuple[str | None, str | None]:
 _VOLUME_IN_TITLE = re.compile(r"(?<![a-z0-9])\d{1,4}\s*(?:ml|g)(?![a-z0-9])")
 
 
+#: Who the fragrance is for, in either language, as the shops append it.
+#: Longest first so "za mazhi i zheni" is removed whole rather than leaving
+#: a dangling "i zheni".
+_AUDIENCE = re.compile(
+    r"(?<![a-z0-9])(?:"
+    r"za mazhi i zheni|za zheni i mazhi|for women and men|for men and women"
+    r"|for women|for men|for woman|for man|for her|for him"
+    r"|za mazhi|za zheni|za deca|za unisex"
+    r")(?![a-z0-9])")
+
+
 def line_name(title: str | None, brand: str | None = None) -> str | None:
     """The fragrance's own name: no brand, no strength, no volume.
 
@@ -190,10 +213,15 @@ def line_name(title: str | None, brand: str | None = None) -> str | None:
                       " ", flat)
 
     flat = _VOLUME_IN_TITLE.sub(" ", flat)
-    # "for women" / "for men" are shelf words the shops append; they carry no
-    # fragrance of their own, unlike "pour femme" which is part of a name.
-    flat = re.sub(r"(?<![a-z0-9])for (?:women|men|her|him)(?![a-z0-9])",
-                  " ", flat)
+    # Shelf words the shops append to say who a fragrance is for. They carry
+    # no fragrance of their own -- unlike "pour femme", which is part of a
+    # name -- so they come off before the line name is compared.
+    #
+    # Both languages, because e-elixir uses both for the same bottle: it
+    # lists Gucci Guilty as "Eau de toilette" and as "тоалетна вода за
+    # мажи". Strip only the English half and those two titles reduce to
+    # "guilty" and "guilty za mazhi", which are then two products.
+    flat = _AUDIENCE.sub(" ", flat)
     flat = " ".join(flat.split())
     return flat or None
 

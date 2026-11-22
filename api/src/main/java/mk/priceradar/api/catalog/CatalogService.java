@@ -55,13 +55,26 @@ public class CatalogService {
                                    String category, String gender,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
+        return search(query, brand, sizeEu, size, kinds, includeUnclassified,
+                category, gender, null, sort, page, pageSize);
+    }
+
+    /** As above, narrowed to one fragrance concentration. */
+    public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+                                   String size,
+                                   String[] kinds, boolean includeUnclassified,
+                                   String category, String gender,
+                                   String concentration,
+                                   CatalogRepository.Sort sort,
+                                   int page, int pageSize) {
         String alpha = normalizeAlpha(size);
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
                 country, query, brand, sizeEu, alpha, kinds,
                 includeUnclassified,
-                category, gender, sort, pageSize + 1, page * pageSize);
+                category, gender, normalizeConcentration(concentration),
+                sort, pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
             rows = rows.subList(0, pageSize);
@@ -82,6 +95,50 @@ public class CatalogService {
      * and returns an empty page, which is the truthful answer to a size we
      * do not carry.
      */
+    /**
+     * Brands the given scope actually has products in.
+     *
+     * <p>The sidebar asks this instead of rendering its own fixed list, so a
+     * shopper browsing Опрема is not offered Ajmal and one browsing
+     * Парфеми is not offered Hoka.
+     */
+    public List<Dtos.BrandFacet> brands(String query, String[] kinds,
+                                        boolean includeUnclassified,
+                                        String category, String gender,
+                                        String concentration, int limit) {
+        return repository.brandFacets(country, query, kinds,
+                includeUnclassified, category, gender,
+                normalizeConcentration(concentration), limit);
+    }
+
+    /**
+     * Upper-cases a concentration, because the column is canonical.
+     *
+     * <p>Passed through unknown rather than corrected, the same refusal
+     * {@link #normalizeAlpha} makes: an unrecognised strength matches no row
+     * and an empty page is the truthful answer to a question we cannot
+     * answer. Guessing a near match would price a shopper's basket in a
+     * strength they did not ask for.
+     */
+    static String normalizeConcentration(String concentration) {
+        if (concentration == null || concentration.isBlank()) {
+            return null;
+        }
+        // A comma-separated list, because one menu entry names two
+        // strengths: the shops' Парфеми shelf holds both PARFUM and
+        // EXTRAIT, and a shopper reading that word does not distinguish
+        // them. Split, trimmed and rejoined so "parfum, extrait" and
+        // "PARFUM,EXTRAIT" reach the query identically.
+        var parts = new java.util.ArrayList<String>();
+        for (String part : concentration.split(",")) {
+            String one = part.trim().toUpperCase(java.util.Locale.ROOT);
+            if (!one.isEmpty() && !parts.contains(one)) {
+                parts.add(one);
+            }
+        }
+        return parts.isEmpty() ? null : String.join(",", parts);
+    }
+
     static String normalizeAlpha(String size) {
         if (size == null || size.isBlank()) {
             return null;

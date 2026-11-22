@@ -23,6 +23,8 @@ import { ArrowRight, ChevronDown, Menu, X, type LucideIcon } from "lucide-react"
 
 import {
   COMING_SOON,
+  CONCENTRATIONS,
+  FRAGRANCE_GENDER_COLUMNS,
   GENDER_COLUMNS,
   VERTICALS,
   categoriesFor,
@@ -143,11 +145,57 @@ export function MobileNav() {
                   </div>
                 )}
 
+                {/* Strengths, not leaves. Checked first because the
+                    fragrance vertical has no category leaves at all, so both
+                    branches below would draw empty lists for it. Flat rather
+                    than three nested toggles: twelve links fit a drawer, and
+                    a second level of tapping to reach them would not earn
+                    itself. */}
+                {expanded && !soon && vertical.byConcentration && (
+                  <div className="pb-2 pl-3">
+                    {FRAGRANCE_GENDER_COLUMNS.map((gender) => (
+                      <div key={gender.slug} className="mb-1">
+                        <p className="pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground/70">
+                          {gender.label}
+                        </p>
+                        <ul>
+                          {CONCENTRATIONS.map((concentration) => (
+                            <li key={concentration.value}>
+                              <Link
+                                href={listingHref({
+                                  kind: vertical.kind,
+                                  gender: gender.slug,
+                                  concentration: concentration.value,
+                                })}
+                                onClick={close}
+                                className="flex items-baseline gap-2 py-1.5 text-sm text-muted-foreground"
+                              >
+                                <span className="w-11 shrink-0 font-mono text-xs uppercase">
+                                  {concentration.short}
+                                </span>
+                                {concentration.label}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                    <Link
+                      href={listingHref({ kind: vertical.kind })}
+                      onClick={close}
+                      className="mt-1 block border-t py-1.5 text-sm font-medium"
+                    >
+                      {vertical.allLabel}
+                    </Link>
+                  </div>
+                )}
+
                 {/* The same split the desktop menu makes: a vertical whose
                     departments hold the same stock lists its categories
                     directly instead of three gender toggles that would open
                     onto near-identical lists. */}
-                {expanded && !soon && vertical.genderColumns === false && (
+                {expanded && !soon && !vertical.byConcentration
+                  && vertical.genderColumns === false && (
                   <div className="pb-2 pl-3">
                     <ul>
                       {categoriesFor(vertical.kind).map((category) => (
@@ -182,7 +230,8 @@ export function MobileNav() {
                   </div>
                 )}
 
-                {expanded && !soon && vertical.genderColumns !== false && (
+                {expanded && !soon && !vertical.byConcentration
+                  && vertical.genderColumns !== false && (
                   <div className="pb-2 pl-3">
                     <Link
                       href={listingHref({ kind: vertical.kind })}

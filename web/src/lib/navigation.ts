@@ -24,7 +24,13 @@
  * shopper's filter -- which is exactly what would have happened to `kind`,
  * `category` and `gender` here. One builder, one contract.
  */
-import { Backpack, Footprints, Shirt, type LucideIcon } from "lucide-react";
+import {
+  Backpack,
+  Footprints,
+  Shirt,
+  SprayCan,
+  type LucideIcon,
+} from "lucide-react";
 
 import { type SortKey } from "@/lib/sort";
 
@@ -118,6 +124,48 @@ export const APPAREL_CATEGORIES: ReadonlyArray<{
  * the ladder: a page whose first card is S/M/XL and whose second adds L and
  * XXL yields "S M XL L XXL". So the merged list is ranked here.
  */
+/**
+ * The three departments a fragrance is sold to.
+ *
+ * Not `GENDER_COLUMNS`, and the third column is why: that one ends in Деца,
+ * which no perfumery here has a shelf for, while Унисекс is a real and large
+ * department -- 218 of e-elixir's 697 bottles, and the only one of the three
+ * that the catalogue infers rather than reads (a fragrance listed in both
+ * adult departments).
+ *
+ * Adjective forms, because each heading sits above a noun the shopper
+ * completes: Машки · Тоалетни води.
+ */
+export const FRAGRANCE_GENDER_COLUMNS: ReadonlyArray<{
+  slug: string;
+  label: string;
+}> = [
+  { slug: "men", label: "Машки" },
+  { slug: "women", label: "Женски" },
+  { slug: "unisex", label: "Унисекс" },
+];
+
+/**
+ * The four strengths, as a shopper asks for them.
+ *
+ * `value` is what reaches the API's `?concentration=`, and the last entry
+ * names two: the shops shelve PARFUM and EXTRAIT together under Парфеми and
+ * a shopper reading that word does not separate them. Keeping them apart in
+ * the menu would offer two entries whose difference nobody can act on --
+ * while still keeping them apart in the data, where "Parfum" and "Extrait
+ * de Parfum" are genuinely different bottles at different prices.
+ */
+export const CONCENTRATIONS: ReadonlyArray<{
+  value: string;
+  label: string;
+  short: string;
+}> = [
+  { value: "EDP", label: "Парфимирани води", short: "EDP" },
+  { value: "EDT", label: "Тоалетни води", short: "EDT" },
+  { value: "EDC", label: "Колонски води", short: "EDC" },
+  { value: "PARFUM,EXTRAIT", label: "Парфеми", short: "Парфем" },
+];
+
 export const ALPHA_LADDER: ReadonlyArray<string> = [
   "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL",
 ];
@@ -212,6 +260,15 @@ export type Vertical = {
    * Kids is the one cut that earns its place -- ролери, тротинети, кациги
    * are a different shelf -- so it gets a link rather than a column.
    */
+  /**
+   * Whether this vertical's menu lists strengths rather than category
+   * leaves, in Машки / Женски / Унисекс columns.
+   *
+   * A separate flag rather than a third value of `genderColumns`, because
+   * the two questions are independent: this one is about what the links
+   * narrow *by*, and the columns it draws are a different triple.
+   */
+  byConcentration?: boolean;
   genderColumns?: boolean;
 };
 
@@ -245,6 +302,18 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     allLabel: "Сета опрема",
     categories: ACCESSORY_CATEGORIES,
     genderColumns: false,
+  },
+  {
+    // The fourth vertical, V27. Its menu is the only one not built from
+    // category leaves: the catalogue has exactly one fragrance leaf
+    // (`perfume`), because the thing a shopper narrows by is not the article
+    // type -- every one of them is a bottle -- but its strength.
+    kind: "fragrance",
+    label: "Парфеми",
+    status: "live",
+    icon: SprayCan,
+    allLabel: "Сите парфеми",
+    byConcentration: true,
   },
 ];
 
@@ -284,6 +353,13 @@ export type ListingParams = {
   kind?: string;
   category?: string;
   gender?: string;
+  /**
+   * A fragrance strength, or several separated by commas. Carried here
+   * rather than assembled at the call site for the reason the whole builder
+   * exists: anything not in this type is silently dropped the moment a
+   * shopper touches another filter.
+   */
+  concentration?: string;
   sort?: SortKey;
   page?: number;
 };
@@ -301,6 +377,7 @@ export function listingHref(params: ListingParams = {}): string {
   if (params.kind) sp.set("kind", params.kind);
   if (params.gender) sp.set("gender", params.gender);
   if (params.category) sp.set("category", params.category);
+  if (params.concentration) sp.set("concentration", params.concentration);
   if (params.brand) sp.set("brand", params.brand);
   // One axis or the other, never both: no article carries an EU number and
   // a letter, so a URL holding both would return an empty page. Whichever

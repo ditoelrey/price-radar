@@ -52,6 +52,17 @@ public final class Dtos {
     }
 
     /** One row in a search or category listing. */
+    /**
+     * One brand the current listing scope actually has products in.
+     *
+     * <p>Exists so the storefront can stop rendering a fixed list of sneaker
+     * brands on every vertical. {@code productCount} is what the listing
+     * would return for that brand under the same filters, so the facet and
+     * the page it leads to cannot disagree.
+     */
+    public record BrandFacet(String slug, String name, int productCount) {
+    }
+
     public record ProductCard(
             String slug,
             String name,
@@ -77,6 +88,17 @@ public final class Dtos {
              */
             String gender,
             Money fromPrice,
+            /**
+             * The dearest variant, when a range means anything, else null.
+             *
+             * <p>Fragrances are the reason: one bottle is sold in 30ml, 50ml
+             * and 100ml at three prices, and a card showing only the
+             * cheapest understates what the shopper will pay for the size
+             * they want. Null when there is no range -- a single-size
+             * product, or a size-filtered page, where the summary's maximum
+             * covers sizes the shopper has filtered out.
+             */
+            Money toPrice,
             int offerCount,
             int merchantCount,
             /**
@@ -97,6 +119,27 @@ public final class Dtos {
              * has anything in it.
              */
             List<String> availableSizes,
+            /**
+             * Bottle volumes in millilitres a shopper can buy, smallest
+             * first.
+             *
+             * <p>A third axis beside the EU numbers and the letters, and
+             * separate for the same reason: nothing carries two of them. A
+             * shoe fills the first, a garment the second, a fragrance this
+             * one, so a client knows which rail to draw by seeing which
+             * list is non-empty.
+             */
+            List<Integer> availableVolumesMl,
+            /**
+             * Normalised fragrance strength -- EDP, EDT, EDC, PARFUM,
+             * EXTRAIT, COLOGNE -- or null outside the fragrance vertical.
+             *
+             * <p>Part of the product's identity, not a facet of it:
+             * "Valentino Donna" in Eau de Parfum and in Eau de Toilette are
+             * different liquids at different prices, so the card has to be
+             * able to say which one it is showing.
+             */
+            String concentration,
             /**
              * Best advertised saving on this product, as whole percent, or
              * null when no shop is discounting it.

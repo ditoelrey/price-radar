@@ -149,9 +149,11 @@ public class CatalogRepository {
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
                    p.primary_mpn, cat.slug AS category, cat.name_mk AS category_mk,
                    p.gender::text AS gender,
-                   s.min_price_minor, s.currency_code, s.offer_count,
+                   s.min_price_minor, s.max_price_minor,
+                   s.currency_code, s.offer_count,
                    s.merchant_count, s.available_sizes_eu,
-                   s.available_sizes_alpha, s.updated_at,
+                   s.available_sizes_alpha, s.available_volumes_ml,
+                   p.concentration, s.updated_at,
                    s.max_discount_pct, c.minor_unit
               FROM product_price_summary s
               JOIN product  p ON p.id = s.product_id
@@ -186,6 +188,13 @@ public class CatalogRepository {
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
                         AND p.gender = 'unisex'))
+               -- Fragrances only, and an exact match. "Valentino Donna" in
+               -- Eau de Parfum and in Eau de Toilette are different liquids
+               -- at different prices, so a shopper asking for EDP must not
+               -- be shown the EDT beside it.
+               AND (CAST(:concentration AS text) IS NULL
+                    OR p.concentration = ANY(
+                           string_to_array(CAST(:concentration AS text), ',')))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -238,9 +247,16 @@ public class CatalogRepository {
        coalesce('/media/' || ia.path, p.image_url) AS image_url,
                    p.primary_mpn, cat.slug AS category, cat.name_mk AS category_mk,
                    p.gender::text AS gender,
-                   z.from_price_minor AS min_price_minor, z.currency_code,
+                   z.from_price_minor AS min_price_minor,
+                   -- NULL by design on a size-filtered page. The summary's
+                   -- maximum covers every size, and quoting it beside a
+                   -- price computed for one size would advertise a range
+                   -- the shopper cannot buy within.
+                   NULL::bigint AS max_price_minor,
+                   z.currency_code,
                    z.offer_count, z.merchant_count,
-                   s.available_sizes_eu, s.available_sizes_alpha, s.updated_at,
+                   s.available_sizes_eu, s.available_sizes_alpha,
+                   s.available_volumes_ml, p.concentration, s.updated_at,
                    z.max_discount_pct, c.minor_unit
               FROM sized z
               JOIN product  p ON p.id = z.product_id
@@ -274,6 +290,13 @@ public class CatalogRepository {
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
                         AND p.gender = 'unisex'))
+               -- Fragrances only, and an exact match. "Valentino Donna" in
+               -- Eau de Parfum and in Eau de Toilette are different liquids
+               -- at different prices, so a shopper asking for EDP must not
+               -- be shown the EDT beside it.
+               AND (CAST(:concentration AS text) IS NULL
+                    OR p.concentration = ANY(
+                           string_to_array(CAST(:concentration AS text), ',')))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -291,6 +314,7 @@ public class CatalogRepository {
                                        String[] kinds,
                                        boolean includeUnclassified,
                                        String categorySlug, String gender,
+                                       String concentration,
                                        Sort sort, int limit, int offset) {
         String alpha = blankToNull(sizeAlpha);
         // An EU number wins when both arrive. They cannot both be satisfied
@@ -318,6 +342,7 @@ public class CatalogRepository {
                 .param("includeUnclassified", includeUnclassified)
                 .param("category", blankToNull(categorySlug))
                 .param("gender", blankToNull(gender))
+                .param("concentration", blankToNull(concentration))
                 .param("limit", limit)
                 .param("offset", offset);
         if (byEu) {
@@ -353,6 +378,75 @@ public class CatalogRepository {
                       + "ov.size_alpha))";
     }
 
+    /**
+     * Brands that actually have something to show under the current scope.
+     *
+     * <p>The storefront rendered a hard-coded list of twelve sneaker brands,
+     * which was right while the catalogue was shoes. It is now wrong in both
+     * directions: Hoka and Jordan are offered on the apparel listing where
+     * they have nothing, and the fragrance listing offers none of the brands
+     * it carries -- Ajmal, Lattafa, Dolce &amp; Gabbana.
+     *
+     * <p>The WHERE here mirrors {@code LIST_BASE} clause for clause, minus
+     * the brand filter itself. A facet counting on different terms from the
+     * listing would offer a brand whose page then came back empty, which is
+     * worse than offering nothing at all.
+     */
+    private static final String BRAND_FACETS = """
+            SELECT b.slug, b.name, count(DISTINCT p.id) AS product_count
+              FROM product_price_summary s
+              JOIN product p ON p.id = s.product_id
+              JOIN brand   b ON b.id = p.brand_id
+              LEFT JOIN category cat ON cat.id = p.category_id
+             WHERE s.country_code = CAST(:country AS text)
+               AND s.min_price_minor IS NOT NULL
+               AND (CAST(:kinds AS text[]) IS NULL
+                    OR (cat.kind IS NULL AND :includeUnclassified)
+                    OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               AND (CAST(:q AS text) IS NULL
+                    OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
+                    OR p.primary_mpn    ILIKE CAST(:q AS text)
+                    OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
+               AND (CAST(:category AS text) IS NULL
+                    OR cat.slug = CAST(:category AS text))
+               AND (CAST(:gender AS text) IS NULL
+                    OR p.gender::text = CAST(:gender AS text)
+                    OR (CAST(:gender AS text) IN ('men', 'women')
+                        AND p.gender = 'unisex'))
+               AND (CAST(:concentration AS text) IS NULL
+                    OR p.concentration = ANY(
+                           string_to_array(CAST(:concentration AS text), ',')))
+             GROUP BY b.slug, b.name
+             ORDER BY product_count DESC, b.name
+             LIMIT :limit
+            """;
+
+    /** The facet SQL, exposed so a test can hold it beside the listing's. */
+    static String brandFacetsSql() {
+        return BRAND_FACETS;
+    }
+
+    public List<Dtos.BrandFacet> brandFacets(String country, String query,
+                                             String[] kinds,
+                                             boolean includeUnclassified,
+                                             String categorySlug, String gender,
+                                             String concentration, int limit) {
+        return db.sql(BRAND_FACETS)
+                .param("country", country)
+                .param("q", normalizeQuery(query))
+                .param("kinds", kinds)
+                .param("includeUnclassified", includeUnclassified)
+                .param("category", blankToNull(categorySlug))
+                .param("gender", blankToNull(gender))
+                .param("concentration", blankToNull(concentration))
+                .param("limit", limit)
+                .query((rs, rowNum) -> new Dtos.BrandFacet(
+                        rs.getString("slug"),
+                        rs.getString("name"),
+                        rs.getInt("product_count")))
+                .list();
+    }
+
     private Dtos.ProductCard mapCard(ResultSet rs, boolean sizeSpecific) throws SQLException {
         int minorUnit = rs.getInt("minor_unit");
         String currency = rs.getString("currency_code");
@@ -367,13 +461,46 @@ public class CatalogRepository {
                 rs.getString("category_mk"),
                 rs.getString("gender"),
                 Dtos.Money.of(rs.getLong("min_price_minor"), currency, minorUnit),
+                toPrice(rs, currency, minorUnit),
                 rs.getInt("offer_count"),
                 rs.getInt("merchant_count"),
                 sizeSpecific,
                 readSizes(rs, "available_sizes_eu"),
                 readLabels(rs, "available_sizes_alpha"),
+                readVolumes(rs, "available_volumes_ml"),
+                rs.getString("concentration"),
                 nullableInt(rs, "max_discount_pct"),
                 toInstant(rs, "updated_at"));
+    }
+
+    /**
+     * The dearest bottle, when a range means anything.
+     *
+     * <p>Null whenever it equals the minimum: a product sold in one size has
+     * no range, and rendering "4.240 - 4.240" reads as a bug.
+     */
+    private static Dtos.Money toPrice(ResultSet rs, String currency,
+                                      int minorUnit) throws SQLException {
+        long max = rs.getLong("max_price_minor");
+        if (rs.wasNull() || max <= rs.getLong("min_price_minor")) {
+            return null;
+        }
+        return Dtos.Money.of(max, currency, minorUnit);
+    }
+
+    private static List<Integer> readVolumes(ResultSet rs, String column)
+            throws SQLException {
+        var array = rs.getArray(column);
+        if (array == null) {
+            return List.of();
+        }
+        var out = new java.util.ArrayList<Integer>();
+        for (Object value : (Object[]) array.getArray()) {
+            if (value != null) {
+                out.add(((Number) value).intValue());
+            }
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------
