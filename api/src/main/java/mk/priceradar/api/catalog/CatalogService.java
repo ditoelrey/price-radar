@@ -67,11 +67,18 @@ public class CatalogService {
                                    String concentration,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
-        String alpha = normalizeAlpha(size);
+        // A volume and a letter arrive in the same `size` parameter,
+        // because to a shopper they are one question -- "which size" -- and
+        // the catalogue answers it on whichever axis the product is on.
+        // Read as a volume first: "30ml" would otherwise be upper-cased to
+        // "30ML" and offered to the letter ladder, which has no such rung,
+        // and the page would come back empty.
+        Integer volumeMl = normalizeVolumeMl(size);
+        String alpha = volumeMl == null ? normalizeAlpha(size) : null;
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
         List<Dtos.ProductCard> rows = repository.list(
-                country, query, brand, sizeEu, alpha, kinds,
+                country, query, brand, sizeEu, alpha, volumeMl, kinds,
                 includeUnclassified,
                 category, gender, normalizeConcentration(concentration),
                 sort, pageSize + 1, page * pageSize);
@@ -82,7 +89,9 @@ public class CatalogService {
         // Whichever axis actually filtered, as the client should echo it. The
         // EU number wins when both are present, exactly as the repository
         // resolves them.
-        String applied = sizeEu != null ? trimSize(sizeEu) : alpha;
+        String applied = sizeEu != null ? trimSize(sizeEu)
+                : volumeMl != null ? volumeMl + "ml"
+                : alpha;
         return new Dtos.ProductPage(rows, page, pageSize, hasMore, applied);
     }
 
@@ -138,6 +147,31 @@ public class CatalogService {
         }
         return parts.isEmpty() ? null : String.join(",", parts);
     }
+
+    /**
+     * A bottle volume in millilitres, or null when this is not one.
+     *
+     * <p>Shares the `size` parameter with letters, so it has to be strict:
+     * anything that is not a bare number followed by `ml` falls through to
+     * the letter ladder. The bound mirrors `mkagg.sizing`, which refuses a
+     * four-digit volume for the same reason -- a label that reads that way
+     * is more likely a weight or a code.
+     */
+    static Integer normalizeVolumeMl(String size) {
+        if (size == null) {
+            return null;
+        }
+        var matcher = VOLUME.matcher(size.trim());
+        if (!matcher.matches()) {
+            return null;
+        }
+        int ml = Integer.parseInt(matcher.group(1));
+        return ml >= 1 && ml <= 2000 ? ml : null;
+    }
+
+    private static final java.util.regex.Pattern VOLUME =
+            java.util.regex.Pattern.compile("(\\d{1,4})\\s*ml",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
 
     static String normalizeAlpha(String size) {
         if (size == null || size.isBlank()) {

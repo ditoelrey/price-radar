@@ -13,21 +13,21 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
-/** The brands seeded in the catalogue, in the order shoppers ask for them. */
-const BRANDS = [
-  { slug: "adidas", label: "Adidas" },
-  { slug: "nike", label: "Nike" },
-  { slug: "puma", label: "Puma" },
-  { slug: "new-balance", label: "New Balance" },
-  { slug: "under-armour", label: "Under Armour" },
-  { slug: "reebok", label: "Reebok" },
-  { slug: "converse", label: "Converse" },
-  { slug: "vans", label: "Vans" },
-  { slug: "asics", label: "Asics" },
-  { slug: "hoka", label: "Hoka" },
-  { slug: "skechers", label: "Skechers" },
-  { slug: "jordan", label: "Jordan" },
-];
+/*
+ * The brand list used to live here, as twelve sneaker brands in the order
+ * shoppers asked for them. That was right while the catalogue was shoes.
+ *
+ * It became wrong in both directions at once. Hoka and Jordan were offered
+ * on the Облека and Опрема listings, where they have nothing, so a
+ * shopper clicking one got an empty page and concluded the site was broken.
+ * And Парфеми offered none of the brands it carries -- Ajmal, Lattafa,
+ * Dolce & Gabbana -- so the filter was useless in the one vertical where a
+ * shopper is most likely to arrive knowing the brand they want.
+ *
+ * The brands now come from `GET /api/v1/brands`, asked with this listing's
+ * own filters minus the brand itself. The facet and the page it leads to
+ * therefore cannot disagree.
+ */
 
 const SHOPS = [
   "Sport Vision",
@@ -49,6 +49,8 @@ export function FilterSidebar({
   sizes,
   alphaSizes,
   filters,
+  volumes,
+  brandFacets,
 }: {
   sizes: number[];
   /**
@@ -66,8 +68,30 @@ export function FilterSidebar({
    * category and gender the mega menu sets.
    */
   filters: ListingParams;
+  /**
+   * Bottle volumes in millilitres present in this result set, smallest
+   * first. The third size axis, and like the other two it only ever offers
+   * what the page actually contains.
+   */
+  volumes?: number[];
+  /**
+   * Brands with products under the current scope, commonest first.
+   *
+   * Empty is a real state and renders no section at all: either the scope
+   * genuinely has nothing, or the facet call failed. Both are better served
+   * by an absent filter than by a list of brands whose pages are empty.
+   */
+  brandFacets?: ReadonlyArray<{
+    slug: string;
+    name: string;
+    productCount: number;
+  }>;
 }) {
   const { sizeEu, size, brand, sort, kind, category, gender } = filters;
+  const brands = brandFacets ?? [];
+  // Rendered with the unit. The picker takes strings and writes them into
+  // `?size=` verbatim, which is exactly what the API wants to read back.
+  const volumeLabels = (volumes ?? []).map((ml) => `${ml}ml`);
   const brandHref = (slug: string | null) =>
     listingHref({ ...filters, brand: slug ?? undefined });
   const categoryHref = (slug: string | null) =>
@@ -161,6 +185,15 @@ export function FilterSidebar({
           </>
         )}
 
+        {/* Hidden outright when neither rail has anything, rather than
+            showing a heading over a note saying there is nothing. On a
+            fragrance listing that note was also untrue: those products are
+            sized, in millilitres, and every card shows the chips. The rail
+            cannot offer them yet -- the API's size filter walks the letter
+            ladder and a volume has no rung on it, so the link would lead to
+            an empty page. */}
+        {(sizes.length > 0 || alphaSizes.length > 0) && (
+          <>
         <Separator />
 
         <section>
@@ -188,46 +221,72 @@ export function FilterSidebar({
               className={sizes.length > 0 ? "mt-2" : undefined}
             />
           )}
-          {sizes.length === 0 && alphaSizes.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              Нема големини во овие резултати.
-            </p>
-          )}
         </section>
+          </>
+        )}
 
-        <Separator />
+        {volumeLabels.length > 0 && (
+          <>
+            <Separator />
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">Бренд</h2>
-          <ul className="space-y-0.5">
-            <li>
-              <Link
-                href={brandHref(null)}
-                className={cn(
-                  "block rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent",
-                  !brand && "bg-accent font-medium",
-                )}
-              >
-                Сите брендови
-              </Link>
-            </li>
-            {BRANDS.map((b) => (
-              <li key={b.slug}>
-                <Link
-                  href={brandHref(b.slug)}
-                  className={cn(
-                    "block rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent",
-                    brand === b.slug
-                      ? "bg-primary/10 font-medium text-primary"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  {b.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </section>
+            <section>
+              {/* Its own rail rather than a third case inside the size one.
+                  The other two answer "what fits you"; this answers "how
+                  much of it do you want", which is a different question a
+                  shopper asks for a different reason -- and the price moves
+                  with it, where a shoe costs the same in 42 as in 43. */}
+              <h2 className="mb-1 text-sm font-semibold">Волумен</h2>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Секоја милилитража има своја цена — изберете ја вашата и
+                цените се однесуваат на неа.
+              </p>
+              <AlphaSizePicker sizes={volumeLabels} selected={size} />
+            </section>
+          </>
+        )}
+
+        {brands.length > 0 && (
+          <>
+            <Separator />
+
+            <section>
+              <h2 className="mb-2 text-sm font-semibold">Бренд</h2>
+              <ul className="space-y-0.5">
+                <li>
+                  <Link
+                    href={brandHref(null)}
+                    className={cn(
+                      "block rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent",
+                      !brand && "bg-accent font-medium",
+                    )}
+                  >
+                    Сите брендови
+                  </Link>
+                </li>
+                {brands.map((b) => (
+                  <li key={b.slug}>
+                    <Link
+                      href={brandHref(b.slug)}
+                      className={cn(
+                        "flex items-baseline justify-between gap-2 rounded-md px-2 py-1 text-sm transition-colors hover:bg-accent",
+                        brand === b.slug
+                          ? "bg-primary/10 font-medium text-primary"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      <span className="truncate">{b.name}</span>
+                      {/* The count is the facet's promise: this many
+                          products, under exactly these filters. */}
+                      <span className="shrink-0 text-[11px] tabular-nums opacity-60">
+                        {b.productCount}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </>
+        )}
 
         <Separator />
 

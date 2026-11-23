@@ -737,3 +737,75 @@ class TestTheShelfThePageStates:
         """
         for path in ("Заштитен сет за дожд", "Комбинезони", "Топ"):
             assert derive_category([offer(path=path)]) == (None, None)
+
+
+class TestTheShelfIsTheLastWordOnGender:
+    """schatze states Унисекс on a shelf and nowhere else.
+
+    No facet plan claims a gender for its one fragrance shelf, and no
+    title says one, so 132 of its products had no gender at all and
+    appeared in none of the three columns of the Парфеми menu.
+    """
+
+    def evidence(self, **kw):
+        from mkagg.derive import OfferEvidence
+        return OfferEvidence(merchant_slug=kw.pop("slug", "schatze"), **kw)
+
+    def test_a_shelf_fills_an_empty_gender(self):
+        from mkagg.derive import derive_gender
+
+        gender, source = derive_gender([self.evidence(
+            merchant_category_path="Парфеми / Унисекс",
+            raw_title="Ambre Precieux - edp")])
+        assert (gender, source) == ("unisex", "facet")
+
+    def test_a_facet_still_beats_it(self):
+        """The 202-product regression this ordering prevents.
+
+        e-elixir marks a fragrance unisex because it appears in both of its
+        departments. Only one shelf is recorded on the offer, so reading
+        that shelf would flatten the finding to whichever one was written
+        down.
+        """
+        from mkagg.derive import derive_gender
+
+        gender, source = derive_gender([self.evidence(
+            slug="eelixir", merchant_gender="unisex",
+            merchant_category_path="Женски Eau de parfum",
+            raw_title="Some Fragrance Eau de parfum")])
+        assert (gender, source) == ("unisex", "facet")
+
+    def test_a_title_still_beats_it(self):
+        from mkagg.derive import derive_gender
+
+        gender, source = derive_gender([self.evidence(
+            merchant_category_path="Парфеми / Унисекс",
+            raw_title="Парфем за мажи")])
+        assert (gender, source) == ("men", "title")
+
+    def test_a_shelf_that_names_no_gender_stays_silent(self):
+        """146 of schatze's fragrances sit on "Niche Парфеми", which says
+        nothing about who it is for. NULL is the honest answer."""
+        from mkagg.derive import derive_gender
+
+        assert derive_gender([self.evidence(
+            merchant_category_path="Niche Парфеми",
+            raw_title="Ambre Precieux")]) == (None, None)
+
+
+class TestFacetGenderVocabulary:
+    def test_a_shelf_may_say_unisex_where_a_title_may_not(self):
+        from mkagg.taxonomy import classify_facet_gender, classify_gender
+
+        assert classify_facet_gender("Парфеми / Унисекс") == "unisex"
+        # The title classifier is forbidden from returning it: unisex is a
+        # finding about two departments, not something one title can show.
+        assert classify_gender("Парфеми Унисекс") != "unisex"
+
+    def test_the_ordinary_words_still_read(self):
+        from mkagg.taxonomy import classify_facet_gender
+
+        assert classify_facet_gender("Парфеми / Женски") == "women"
+        assert classify_facet_gender("Fragrances / Men") == "men"
+        assert classify_facet_gender("Патики-ниски") is None
+        assert classify_facet_gender(None) is None

@@ -51,7 +51,7 @@ COMPANION_FETCH_ADAPTERS = frozenset({"aspnet_mk"})
 #: Adapters that take a `vertical` and behave differently per vertical. The
 #: WooCommerce one drops gift sets, candles and mists when it is reading
 #: fragrances, and must not when it is reading a shop that sells shoes.
-VERTICAL_AWARE_ADAPTERS = frozenset({"woocommerce"})
+VERTICAL_AWARE_ADAPTERS = frozenset({"woocommerce", "nopcommerce"})
 
 #: Where a WooCommerce product's per-variant prices live. A parent payload
 #: carries one price and a range; this is the only endpoint that prices each

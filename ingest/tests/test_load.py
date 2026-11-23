@@ -268,6 +268,26 @@ class TestResolvingABrandFromATitle:
             cur.execute("SELECT count(*) FROM brand")
             assert cur.fetchone()[0] == before, "no brand should have been minted"
 
+    def test_a_perfume_house_is_a_brand_too(self, conn):
+        """The first Schatze crawl lost 70 offers to this pattern.
+
+        Sportswear brands are one or two words of plain ASCII; perfume
+        houses are neither, and the rule had been written from the
+        catalogue we had rather than the one we were going to get.
+        """
+        from mkagg.load.promote import _BRAND_NAME
+
+        for name in ["Joop!", "Women’Secret", "The Merchant of Venice",
+                     "Van Cleef & Arpels", "Maison Francis Kurkdjian"]:
+            assert _BRAND_NAME.match(name), name
+
+    def test_it_is_still_a_brand_name_and_not_a_sentence(self, conn):
+        """Loosened, not abandoned. Five words is the ceiling."""
+        from mkagg.load.promote import _BRAND_NAME
+
+        assert not _BRAND_NAME.match("a b c d e f")
+        assert not _BRAND_NAME.match("")
+
     def test_a_real_brand_field_still_creates(self, conn):
         """The guard must not stop the thing this function is for: the first
         live run lost "Mont" and "Hoka" to an unseeded brand."""

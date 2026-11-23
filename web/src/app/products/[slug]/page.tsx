@@ -316,15 +316,24 @@ export default async function ProductDetailPage({
             {headlineDiffers && (
               <div className="mt-3 flex items-start gap-2 rounded-md border border-discount/30 bg-discount-muted px-3 py-2 text-sm">
                 <Info className="mt-0.5 size-4 shrink-0 text-discount" />
+                {/* Says only what is true in every case: the headline
+                    belongs to a size the shopper did not pick.
+                    
+                    It used to say the headline's shop "does not have" that
+                    size, which was a guess that held for shoes and broke on
+                    fragrances. One perfumery sells a bottle in 30ml, 50ml
+                    and 100ml at three prices, so the headline and the
+                    filtered price are routinely the same shop -- and the
+                    page read "Elixir, which does not have 50ml ... the
+                    cheapest is 8.930 at Elixir". */}
                 <p>
                   The{" "}
                   <span className="tnum font-semibold">
                     {formatMoney(overallBest.variant.totalPrice)}
                   </span>{" "}
-                  headline is from {overallBest.offer.merchantName}, which does
-                  not have{" "}
-                  {sizeEu !== undefined ? `EU ${formatSizeEu(sizeEu)}` : size}.
-                  In your size the cheapest is{" "}
+                  headline is for another size. In{" "}
+                  {sizeEu !== undefined ? `EU ${formatSizeEu(sizeEu)}` : size}{" "}
+                  the cheapest is{" "}
                   <span className="tnum font-semibold">
                     {formatMoney(best.variant.totalPrice)}
                   </span>{" "}

@@ -166,6 +166,47 @@ export const CONCENTRATIONS: ReadonlyArray<{
   { value: "PARFUM,EXTRAIT", label: "Парфеми", short: "Парфем" },
 ];
 
+/**
+ * A gender, in the adjective form that labels a product rather than a
+ * department.
+ *
+ * `FRAGRANCE_GENDER_COLUMNS` cannot serve here: it is a menu's three
+ * columns and has no entry for деца, while a badge has to be able to
+ * render whatever the catalogue holds.
+ */
+export const GENDER_LABEL_MK: Readonly<Record<string, string>> = {
+  men: "Машки",
+  women: "Женски",
+  unisex: "Унисекс",
+  kids: "Детски",
+};
+
+/**
+ * Whether a card is showing a bottle of perfume.
+ *
+ * Gates the three things only a fragrance card does: name its audience,
+ * list its volumes, and quote a price range.
+ *
+ * **The audience**, because fragrance names collide. The Arabic houses
+ * and several western ones sell one line in a men's and a women's version
+ * -- "Ajmal Amaze EDP" is two products at 2 145 and 3 065 den -- and the
+ * catalogue gives both the same `canonical_name`, because the audience is
+ * deliberately not in it: putting it there would stop e-elixir's "Moschino
+ * Toy 2 ... for women" ever meeting Schatze's "Toy 2 - edt".
+ *
+ * So the badge is what distinguishes them on screen. A sneaker needs no
+ * such badge: the listing that shows it is already scoped to a department.
+ *
+ * **The price range**, because for a fragrance the two ends are the same
+ * article in two bottles -- 30ml and 100ml -- and the shopper is choosing
+ * between them. For a shoe the two ends are two different shops, and the
+ * dearer one is not an option anybody wants: the cheapest is the answer,
+ * which is why every other card says "од" and one number.
+ */
+export function isFragrance(category: string | null): boolean {
+  return category === "perfume";
+}
+
 export const ALPHA_LADDER: ReadonlyArray<string> = [
   "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL",
 ];

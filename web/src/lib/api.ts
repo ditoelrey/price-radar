@@ -31,6 +31,20 @@ export type StockState =
   /** Last checked too long ago to keep asserting "in stock". */
   | "STALE";
 
+/**
+ * One listing card.
+ *
+ * The three fields the fragrance vertical added are marked optional, and
+ * that is about Next's fetch cache rather than about the API. A listing
+ * response is cached for 60 seconds; deploy an API that gained a field and
+ * the next render can still be served a body from before it existed. The
+ * card then reads `.length` off undefined and takes the whole page down --
+ * which is what happened to Обувки, Облека and Опрема the first time
+ * these shipped, until a refresh picked up a fresh body.
+ *
+ * Optional here forces every reader to say what it does without them, so a
+ * version skew degrades a card instead of breaking a vertical.
+ */
 export type ProductCard = {
   slug: string;
   name: string;
@@ -55,6 +69,15 @@ export type ProductCard = {
    */
   gender: string | null;
   fromPrice: Money | null;
+  /**
+   * The dearest variant, or null when there is no range to show.
+   *
+   * Null in two cases, and the card must treat them the same: a product
+   * sold in one size, and any size-filtered page, where the product's
+   * overall maximum covers sizes the shopper has filtered out. Both mean
+   * "quote one price, not a range".
+   */
+  toPrice?: Money | null;
   offerCount: number;
   merchantCount: number;
   /**
@@ -73,12 +96,42 @@ export type ProductCard = {
    */
   availableSizes: string[];
   /**
+   * Bottle volumes in millilitres a shopper can buy, smallest first.
+   *
+   * The third size axis. A product fills exactly one of the three -- EU
+   * numbers for shoes, letters for garments, millilitres for fragrances --
+   * so which list has entries tells the card which rail to draw.
+   *
+   * Empty is a real answer for a fragrance whose every bottle is sold out,
+   * since the rail only ever lists what is buyable.
+   */
+  availableVolumesMl?: number[];
+  /**
+   * Normalised fragrance strength -- `EDP`, `EDT`, `EDC`, `PARFUM`,
+   * `EXTRAIT`, `ELIXIR`, `ABSOLU`, `COLOGNE` -- or null outside the
+   * fragrance vertical.
+   */
+  concentration?: string | null;
+  /**
    * Best advertised saving on this product, as whole percent, or null when
    * no shop is discounting it. Null rather than 0, so the card can treat
    * "present" as "worth a badge".
    */
   discountPct: number | null;
   updatedAt: string | null;
+};
+
+/**
+ * One brand the current listing scope actually has products in.
+ *
+ * Replaces the sidebar's own fixed list. `productCount` is what the listing
+ * would return for that brand under the same filters, so the facet and the
+ * page it leads to cannot disagree.
+ */
+export type BrandFacet = {
+  slug: string;
+  name: string;
+  productCount: number;
 };
 
 export type ProductPage = {
@@ -175,6 +228,8 @@ export type SearchParams = {
   category?: string;
   /** `men` and `women` include unisex, as the shops' own departments do. */
   gender?: string;
+  /** A fragrance strength, or several separated by commas. */
+  concentration?: string;
   /** One of `SORTS` in `sort-select`; the API falls back to cheapest. */
   sort?: string;
   page?: number;
@@ -215,11 +270,45 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       kind: params.kind,
       category: params.category,
       gender: params.gender,
+      concentration: params.concentration,
       sort: params.sort,
       page: params.page ?? 0,
       pageSize: params.pageSize ?? 24,
     })}`,
   );
+}
+
+/**
+ * Brands with products under the given scope, commonest first.
+ *
+ * Asked with the listing's own filters minus the brand, so the sidebar
+ * offers exactly the brands whose pages would return something. The
+ * sidebar used to render a fixed list of twelve sneaker brands, which was
+ * right while the catalogue was shoes and is now wrong in both directions:
+ * Hoka and Jordan on the apparel listing where they have nothing, and none
+ * of Ajmal, Lattafa or Dolce & Gabbana under Парфеми.
+ *
+ * Failure is survivable and silent on purpose. A listing that cannot show a
+ * brand filter is still a usable listing, whereas a listing that throws
+ * because a facet call failed is not.
+ */
+export async function fetchBrandFacets(
+  params: Pick<SearchParams, "q" | "kind" | "category" | "gender" | "concentration">,
+): Promise<BrandFacet[]> {
+  try {
+    return await get<BrandFacet[]>(
+      `/api/v1/brands${buildQuery({
+        q: params.q,
+        kind: params.kind,
+        category: params.category,
+        gender: params.gender,
+        concentration: params.concentration,
+        limit: 40,
+      })}`,
+    );
+  } catch {
+    return [];
+  }
 }
 
 export async function getProduct(

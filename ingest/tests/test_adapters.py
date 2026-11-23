@@ -755,12 +755,22 @@ class TestWooCommerceHtmlAdapter:
         assert self._offer().quality_issues() == []
 
 
-def test_six_adapters_cover_seven_stores_on_two_routes():
+def test_seven_adapters_cover_nine_stores():
+    """Fewer adapters than shops, because several share a platform.
+
+    Two of them exist twice over -- an API adapter and an HTML one for the
+    same software -- because the API is the better read and the shop's
+    robots.txt decides whether we may use it. magento and woocommerce are
+    the permitted-route pairs; dsport and megasport run on the HTML halves
+    for that reason, while e-elixir runs on the woocommerce API half
+    because its robots.txt allows /wp-json/.
+    """
     from mkagg.adapters import all_adapters
     assert set(all_adapters()) == {
         "sportvision", "aspnet_mk",                  # crawlable as found
         "magento", "woocommerce",                    # API: need permission
         "magento_html", "woocommerce_html",          # robots-permitted route
+        "nopcommerce",                               # schatze, V27 fragrances
     }
 
 

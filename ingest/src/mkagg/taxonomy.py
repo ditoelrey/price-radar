@@ -530,6 +530,34 @@ def classify_gender(title: str | None, *, url: str | None = None) -> str | None:
     return _first_match(_GENDER_RULES, haystacks)
 
 
+#: What a shelf may say that a title may not. Tried before the ordinary
+#: rules, because a path like "maski+unisex" contains a men's word too and
+#: the shop means both.
+_UNISEX_WORDS = ("uniseks", "unisex", "унисекс")
+
+
+def classify_facet_gender(path: str | None) -> str | None:
+    """The gender a shop's own shelf declares, ``unisex`` included.
+
+    The counterpart of :func:`classify_gender` for a *shelf* rather than a
+    title, and the one extra value is the whole point of having two
+    functions. A title cannot show unisex -- that is a finding about two
+    departments -- but a shop writing "Парфеми / Унисекс" above a shelf
+    is stating it outright.
+
+    schatze is why this exists: it publishes a Унисекс shelf and 132
+    of its fragrances sat with no gender at all, because the only reader
+    pointed at that column was the title classifier, which is forbidden
+    from returning unisex.
+    """
+    if not path:
+        return None
+    hay = _normalise(path)
+    if any(word in hay for word in _UNISEX_WORDS):
+        return "unisex"
+    return _first_match(_GENDER_RULES, [hay])
+
+
 def is_footwear(slug: str | None) -> bool:
     return slug in FOOTWEAR_SLUGS
 

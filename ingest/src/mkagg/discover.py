@@ -205,6 +205,19 @@ PRODUCT_URL_PATTERNS: dict[str, re.Pattern[str]] = {
     "aspnet_mk": re.compile(r"/ProductCatalog/ProductDetails\?ProductID=[\w.-]+", re.I),
     # e-elixir, the WooCommerce Store API: /shop/valentino-donna-edp/
     "woocommerce": re.compile(r"/shop/[^/?#]+/?$", re.I),
+    # schatze, nopCommerce: /women/pour-homme-edt-2, /men/1-million-edt.
+    # Two segments, the first being the shelf the shop filed it under.
+    #
+    # The exclusions are measured, not imagined: of 27 two-segment links on
+    # a listing page, 24 are products and the other three are
+    # /customer/addresses, /customer/info and /order/history. The account
+    # and board prefixes are listed too -- they are in the shop's own
+    # robots.txt, so they exist, and a crawl that followed one would be
+    # fetching a login wall.
+    "nopcommerce": re.compile(
+        r"^/(?!customer/|order/|boards/|checkout/|compareproducts/"
+        r"|manufacturer/|newsletter/|passwordrecovery/|returnrequest/)"
+        r"[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*/?$", re.I),
 }
 
 
@@ -1205,7 +1218,37 @@ _EELIXIR_FRAGRANCE = (
      "perfume", "men", "mashki-mirisi"),
 )
 
+#: schatze walks one shelf, not four.
+#:
+#: Its /parfemi listing is the whole fragrance catalogue -- 53 pages -- and
+#: it is the only listing on the shop that is guaranteed to hold nothing
+#: else. The gendered shelves look tempting and are not: /men-2 renders
+#: Clinique lotions under a heading that says "men", and the /women listing
+#: mixes in /niche-fragrances URLs. Walking those would drag cosmetics into
+#: a fragrance run and file them as perfume.
+#:
+#: Nothing is lost by it. e-elixir needs two facets because membership of
+#: both departments is the only evidence it publishes for unisex; schatze
+#: states Унисекс outright in each product's own breadcrumb, which the
+#: adapter reads into `category_path`.
+_SCHATZE_FRAGRANCE = (("/parfemi", "perfume", None, "parfemi"),)
+
 FRAGRANCE_FACET_PLANS: dict[str, PaginatedPlan] = {
+    "schatze": PaginatedPlan(
+        categories=tuple(Facet(path=path, category=cat, gender=gender,
+                               label=label)
+                         for path, cat, gender, label in _SCHATZE_FRAGRANCE),
+        page_suffix="?pagenumber={page}",
+        # Walked to exhaustion rather than trusting a total.
+        #
+        # The paginator does render every page up to 53, so the number is
+        # there -- but `parse_last_page_link` reads `/page/N` and this shop
+        # writes `?pagenumber=N`, so it comes back None and the driver
+        # would crawl page 1 and stop. A silent one-page crawl of a
+        # 53-page shelf is a far worse failure than one extra request:
+        # verified that ?pagenumber=60 returns no products at all, so the
+        # empty page is a real stop signal.
+        walk_until_empty=True, max_pages=80),
     "eelixir": PaginatedPlan(
         categories=tuple(Facet(path=path, category=cat, gender=gender,
                                label=label)

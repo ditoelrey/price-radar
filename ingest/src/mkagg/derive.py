@@ -34,7 +34,8 @@ from dataclasses import dataclass
 
 from .discover import FACET_CATEGORY
 from .taxonomy import (FOOTWEAR_SLUGS, PARENT_SLUGS, classify,
-                       classify_gender, resolve_departments)
+                       classify_facet_gender, classify_gender,
+                       resolve_departments)
 
 #: What a tie resolves to when every candidate is a footwear leaf. The parent
 #: row means "a shoe, kind unspecified", which is exactly true of a product
@@ -74,6 +75,24 @@ class OfferEvidence:
     @property
     def title_category(self) -> str | None:
         return classify(self.raw_title, url=self.product_url)
+
+    @property
+    def shelf_gender(self) -> str | None:
+        """The gender this shop's own shelf declares, unisex included.
+
+        Weaker than `merchant_gender` despite both coming from the shop,
+        and the reason is what each can express. The facet hint is a *set*
+        of departments a URL was found in, which is how unisex is inferred
+        at all. This column holds one shelf -- the adapters record the most
+        specific one and discard the rest -- so it cannot say "both", only
+        "this one".
+
+        Consulted last for exactly that reason: it is lossy evidence about
+        departments, and letting it answer where a facet already has would
+        turn 202 correctly-unisex fragrances into women's ones, each on the
+        strength of whichever shelf happened to be written down.
+        """
+        return classify_facet_gender(self.merchant_category_path)
 
     @property
     def title_gender(self) -> str | None:
@@ -181,6 +200,20 @@ def derive_gender(offers: list[OfferEvidence]) -> tuple[str | None, str | None]:
         winner = _majority(titles)
         if winner:
             return winner, "title"
+
+    # Last: the shop's own shelf. schatze states Унисекс on a shelf and
+    # nowhere else -- no facet plan claims a gender for it and no title
+    # says one -- so 132 of its fragrances had no gender at all and
+    # appeared in none of the three columns of the Парфеми menu.
+    #
+    # Measured over all 30 419 products with an active offer: filling only
+    # what is still empty gains a gender on 146 and changes none. Ranking
+    # it any higher changes 246, almost all of them unisex articles being
+    # flattened to one department. See `OfferEvidence.shelf_gender`.
+    shelves = resolve_departments(
+        {o.shelf_gender for o in offers if o.shelf_gender})
+    if shelves:
+        return shelves, "facet"
     return None, None
 
 

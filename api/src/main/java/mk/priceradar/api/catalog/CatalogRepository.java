@@ -311,6 +311,7 @@ public class CatalogRepository {
      */
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
                                        Double sizeEu, String sizeAlpha,
+                                       Integer sizeMl,
                                        String[] kinds,
                                        boolean includeUnclassified,
                                        String categorySlug, String gender,
@@ -321,8 +322,17 @@ public class CatalogRepository {
         // -- no variant carries both -- so honouring both would return an
         // empty page for a shopper who merely changed vertical with a size
         // still in the URL.
-        boolean byEu = sizeEu != null;
-        boolean sized = byEu || alpha != null;
+        // One axis wins when several arrive, and the order is deliberate:
+        // the EU number is the most specific thing a shopper can have asked
+        // for, and a volume is unambiguous where a letter is a fallback.
+        // Honouring two at once cannot work -- no variant carries two -- so
+        // it would empty the page for a shopper who merely changed vertical
+        // with a size still in the URL.
+        SizeAxis axis = sizeEu != null ? SizeAxis.EU
+                : sizeMl != null ? SizeAxis.VOLUME
+                : alpha != null ? SizeAxis.ALPHA
+                : null;
+        boolean sized = axis != null;
         // The price column differs between the two queries -- the size-
         // filtered one prices each product in the requested size -- so the
         // sort is rendered against whichever is in play.
@@ -333,7 +343,7 @@ public class CatalogRepository {
                 sort.orderBy(sized ? "z.from_price_minor" : "s.min_price_minor",
                              sized ? "z.merchant_count" : "s.merchant_count"));
         if (sized) {
-            sql = sql.replace("/*{SIZE_MATCH}*/", sizeMatch(byEu));
+            sql = sql.replace("/*{SIZE_MATCH}*/", sizeMatch(axis));
         }
         var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
@@ -345,9 +355,11 @@ public class CatalogRepository {
                 .param("concentration", blankToNull(concentration))
                 .param("limit", limit)
                 .param("offset", offset);
-        if (byEu) {
+        if (axis == SizeAxis.EU) {
             spec = spec.param("sizeEu", sizeEu);
-        } else if (sized) {
+        } else if (axis == SizeAxis.VOLUME) {
+            spec = spec.param("sizeMl", sizeMl);
+        } else if (axis == SizeAxis.ALPHA) {
             spec = spec.param("sizeAlpha", alpha);
         } else {
             spec = spec.param("country", country);
@@ -363,7 +375,18 @@ public class CatalogRepository {
      * garment for a shoe size and vice versa, and both read as "no results"
      * rather than as an error.
      */
-    static String sizeMatch(boolean byEu) {
+    /**
+     * Which column a size filter is asking about.
+     *
+     * <p>Three axes, and nothing carries two of them: a shoe has an EU
+     * number, a garment a letter, a fragrance a volume in millilitres. The
+     * axis therefore has to be decided before the query is built, and
+     * asking the wrong one of a product returns an empty page -- which a
+     * shopper reads as "this shop has nothing" rather than as a bug.
+     */
+    public enum SizeAxis { EU, ALPHA, VOLUME }
+
+    static String sizeMatch(SizeAxis axis) {
         // The letter side is a range test, not an equality, because a label
         // can name two sizes: "M/L" is stored as size_alpha M with
         // size_alpha_max L, and has to answer a shopper filtering either.
@@ -371,11 +394,18 @@ public class CatalogRepository {
         // same expression serves both and there is no second code path to
         // keep in step. A NULL size_alpha ranks NULL and matches nothing,
         // which is what a variant with no letter size should do.
-        return byEu ? "ov.size_eu = CAST(:sizeEu AS numeric)"
-                    : "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
-                      + "alpha_size_rank(ov.size_alpha) AND "
-                      + "alpha_size_rank(coalesce(ov.size_alpha_max, "
-                      + "ov.size_alpha))";
+        //
+        // Millilitres are a plain equality, unlike the letters. A bottle is
+        // 50ml or it is not; there is no span to straddle, because no shop
+        // here prints one.
+        return switch (axis) {
+            case EU -> "ov.size_eu = CAST(:sizeEu AS numeric)";
+            case VOLUME -> "ov.size_ml = CAST(:sizeMl AS integer)";
+            case ALPHA -> "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
+                    + "alpha_size_rank(ov.size_alpha) AND "
+                    + "alpha_size_rank(coalesce(ov.size_alpha_max, "
+                    + "ov.size_alpha))";
+        };
     }
 
     /**

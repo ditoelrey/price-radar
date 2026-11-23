@@ -4,6 +4,7 @@ import { ImageIcon, Store } from "lucide-react";
 import type { ProductCard as ProductCardData } from "@/lib/api";
 import { formatMoney, formatSizeEu } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
+import { GENDER_LABEL_MK, isFragrance } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
 /**
@@ -33,6 +34,24 @@ export function ProductCard({
     : size
       ? `/products/${product.slug}?size=${encodeURIComponent(size)}`
       : `/products/${product.slug}`;
+
+  // Defaulted, not assumed. These arrive from a cached fetch that may
+  // predate the field: see the note on `ProductCard` in lib/api.ts.
+  const volumes = product.availableVolumesMl ?? [];
+  const toPrice = product.toPrice ?? null;
+
+  // A range only where both ends are things the shopper is choosing
+  // between: 30ml against 100ml of one fragrance. On a shoe the two ends
+  // are two shops, and the dearer one is nobody's option -- the cheapest
+  // is the whole answer, which is what "од" has always said.
+  //
+  // Never on a size-filtered page either: the API sends no maximum there,
+  // because the product's overall maximum covers sizes the shopper has
+  // just filtered out.
+  const showRange =
+    isFragrance(product.category) &&
+    toPrice !== null &&
+    !product.fromPriceIsSizeSpecific;
 
   return (
     <Link
@@ -101,21 +120,71 @@ export function ProductCard({
           {product.name}
         </p>
 
+        {/* The audience, for fragrances only. Two cards reading "Ajmal
+            Amaze EDP" at two prices are indistinguishable without it --
+            and the name cannot carry it, because stripping the audience
+            word is what lets the two shops' titles meet at all. */}
+        {isFragrance(product.category) && product.gender && (
+          <p className="text-[11px] text-muted-foreground">
+            {GENDER_LABEL_MK[product.gender] ?? product.gender}
+          </p>
+        )}
+
+        {/* Bottle volumes, and only ever the buyable ones -- the rail comes
+            from the summary, which filters on stock. An empty rail on a
+            fragrance means every bottle is sold out, so nothing is drawn
+            rather than an empty row of chips. */}
+        {volumes.length > 0 && (
+          <ul className="mt-1 flex flex-wrap gap-1">
+            {volumes.slice(0, 4).map((ml) => (
+              <li
+                key={ml}
+                className="rounded border px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground"
+              >
+                {ml}ml
+              </li>
+            ))}
+            {volumes.length > 4 && (
+              <li className="px-1 py-0.5 text-[10px] text-muted-foreground">
+                +{volumes.length - 4}
+              </li>
+            )}
+          </ul>
+        )}
+
         <div className="mt-auto pt-2">
           {/* "број" is a shoe size and "големина" a garment size; the card
               knows which it is by which list the product filled, since
               nothing carries both. Saying "во вашиот број" over a hoodie is
               the same mismatch the size rail's own heading had. */}
+          {/* "број" is a shoe size, "големина" a garment one and
+              "волумен" a bottle; the card knows which by which list the
+              product filled, since nothing carries two. Volumes are tested
+              first: a fragrance fills neither of the other two, so without
+              this branch it fell through to "во вашиот број" -- your shoe
+              number -- over a bottle of perfume. A range needs no "од" at all --
+              it states both ends itself, and "од 4.240 – 6.040" reads as
+              a mistake. */}
           <p className="text-[11px] text-muted-foreground">
             {product.fromPriceIsSizeSpecific
-              ? product.availableSizesEu.length === 0 &&
-                product.availableSizes.length > 0
-                ? "во вашата големина од"
-                : "во вашиот број од"
-              : "од"}
+              ? volumes.length > 0
+                ? "во избраниот волумен од"
+                : product.availableSizesEu.length === 0 &&
+                    product.availableSizes.length > 0
+                  ? "во вашата големина од"
+                  : "во вашиот број од"
+              : showRange
+                ? "цена"
+                : "од"}
           </p>
           <p className="tnum text-lg font-semibold text-price">
             {formatMoney(product.fromPrice)}
+            {showRange && (
+              <>
+                {" – "}
+                {formatMoney(toPrice)}
+              </>
+            )}
           </p>
           <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
             <Store className="size-3" />

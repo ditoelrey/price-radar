@@ -187,11 +187,24 @@ def resolve_brand(conn, raw_brand: str | None, title: str = "") -> int | None:
     return None
 
 
-#: A brand name we are willing to create on demand: one to three words of
-#: letters, digits, apostrophes or hyphens. Deliberately narrow, because this
-#: only ever runs on a merchant's own brand *field* -- never on a token guessed
-#: out of a title, which would fill the table with rubbish.
-_BRAND_NAME = re.compile(r"^[\w''&.-]+(?: [\w''&.-]+){0,2}$", re.UNICODE)
+#: A brand name we are willing to create on demand: up to five words of
+#: letters, digits, apostrophes, hyphens, ampersands and exclamation marks.
+#:
+#: Narrow, because this only ever runs on a merchant's own brand *field* --
+#: never on a token guessed out of a title, which would fill the table with
+#: rubbish. But it was too narrow, and perfumery is what showed it: the first
+#: Schatze crawl lost 70 offers to brands this pattern refused.
+#:
+#:     Joop!                    an exclamation mark
+#:     Women’Secret            a curly apostrophe, not the straight one
+#:     The Merchant of Venice   four words
+#:     Van Cleef & Arpels       four words
+#:
+#: Sportswear brands are one or two words and plain ASCII; perfume houses are
+#: neither. Three words and a straight quote was a rule written from the
+#: catalogue we had rather than the one we were going to get.
+_BRAND_NAME = re.compile(r"^[\w'’!&.-]+(?: [\w'’!&.-]+){0,4}$",
+                         re.UNICODE)
 
 
 def ensure_brand(conn, raw_brand: str | None, title: str = "") -> int | None:

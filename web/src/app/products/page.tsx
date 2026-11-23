@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 
-import { searchProducts } from "@/lib/api";
+import { fetchBrandFacets, searchProducts } from "@/lib/api";
 import { formatSizeEu } from "@/lib/format";
 import { FilterSidebar } from "@/components/catalog/filter-sidebar";
 import { byAlphaLadder, listingHref, listingTitle } from "@/lib/navigation";
@@ -52,6 +52,7 @@ export default async function ProductsPage({
   const kind = one(params.kind);
   const category = one(params.category);
   const gender = one(params.gender);
+  const concentration = one(params.concentration);
 
   const filters = {
     q,
@@ -61,10 +62,32 @@ export default async function ProductsPage({
     kind,
     category,
     gender,
+    concentration,
     sort,
   };
 
-  const result = await searchProducts({ ...filters, page, pageSize: 24 });
+  // Together, because the facet does not depend on the page of results and
+  // waiting for one before asking for the other would add a round trip to
+  // every listing.
+  //
+  // The facet is asked WITHOUT the brand filter: its job is to say which
+  // brands this scope has, and passing the current brand would reduce that
+  // answer to the brand already chosen.
+  const [result, brandFacets] = await Promise.all([
+    searchProducts({ ...filters, page, pageSize: 24 }),
+    fetchBrandFacets({ q, kind, category, gender, concentration }),
+  ]);
+
+  // Bottle volumes present in this result set, smallest first. Plain
+  // numbers from the API; the rail renders them with the unit, because
+  // "30" alone beside a letter rail would read as a shoe size.
+  //
+  // They travel in the same `?size=` parameter the letters use, since to a
+  // shopper it is one question. The API reads "30ml" as a volume before it
+  // tries the letter ladder.
+  const volumes = Array.from(
+    new Set(result.items.flatMap((item) => item.availableVolumesMl ?? [])),
+  ).sort((a, b) => a - b);
 
   // The size rail offers what this result set actually contains, so it never
   // suggests a size that would empty the page.
@@ -113,6 +136,8 @@ export default async function ProductsPage({
             sizes={sizes}
             alphaSizes={alphaSizes}
             filters={filters}
+            volumes={volumes}
+            brandFacets={brandFacets}
           />
 
           <section className="min-w-0 flex-1">

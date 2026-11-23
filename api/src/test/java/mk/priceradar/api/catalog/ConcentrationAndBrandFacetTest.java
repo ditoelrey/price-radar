@@ -61,10 +61,56 @@ class ConcentrationAndBrandFacetTest {
                 "cat.kind::text = ANY(CAST(:kinds AS text[]))",
                 "cat.slug = CAST(:category AS text)",
                 "p.gender::text = CAST(:gender AS text)",
-                "p.concentration = CAST(:concentration AS text)"}) {
+                // A list, not a single value: one menu entry ("Парфеми")
+                // names both PARFUM and EXTRAIT.
+                "string_to_array(CAST(:concentration AS text), ',')"}) {
             assertThat(facets).contains(clause);
         }
         assertThat(facets).doesNotContain("b.slug = CAST(:brand AS text)");
+    }
+
+    @Test
+    @DisplayName("a volume is read as a volume, not offered to the ladder")
+    void volumeAxis() {
+        // Letters and millilitres share the `size` parameter, because to a
+        // shopper they are one question. Read in the wrong order, "30ml"
+        // is upper-cased to "30ML" and asked of the letter ladder, which
+        // has no such rung -- and the page comes back empty.
+        assertThat(CatalogService.normalizeVolumeMl("30ml")).isEqualTo(30);
+        assertThat(CatalogService.normalizeVolumeMl("100ML")).isEqualTo(100);
+        assertThat(CatalogService.normalizeVolumeMl(" 50 ml ")).isEqualTo(50);
+    }
+
+    @Test
+    @DisplayName("a letter is not a volume")
+    void lettersFallThrough() {
+        for (String size : new String[] {"XL", "M", "9-10 год.", "", "ml", null}) {
+            assertThat(CatalogService.normalizeVolumeMl(size)).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("an implausible volume is refused, not clamped")
+    void implausibleVolume() {
+        // Mirrors mkagg.sizing: four digits of millilitres is more likely a
+        // weight or a code than a bottle, and 0ml is nothing at all.
+        assertThat(CatalogService.normalizeVolumeMl("2500ml")).isNull();
+        assertThat(CatalogService.normalizeVolumeMl("0ml")).isNull();
+    }
+
+    @Test
+    @DisplayName("each axis selects its own column, and only its own")
+    void onePredicatePerAxis() {
+        var eu = CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.EU);
+        var alpha = CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA);
+        var ml = CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.VOLUME);
+
+        assertThat(ml).isEqualTo("ov.size_ml = CAST(:sizeMl AS integer)");
+        // The three are substituted into one CTE, so a predicate naming a
+        // second column would match nothing at all.
+        assertThat(eu).doesNotContain("size_alpha").doesNotContain("size_ml");
+        assertThat(alpha).doesNotContain("size_eu").doesNotContain("size_ml");
+        assertThat(ml).doesNotContain("size_eu").doesNotContain("size_alpha");
     }
 
     @Test

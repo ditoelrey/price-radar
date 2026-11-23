@@ -20,13 +20,13 @@ class AlphaSizeFilterTest {
     @Test
     @DisplayName("each flag selects its own column")
     void predicatePerAxis() {
-        assertThat(CatalogRepository.sizeMatch(true))
+        assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.EU))
                 .isEqualTo("ov.size_eu = CAST(:sizeEu AS numeric)");
         // A range test, not an equality: "M/L" is stored as size_alpha M
         // with size_alpha_max L and has to answer either letter. coalesce
         // collapses a single-letter row to M..M, so one expression serves
         // both cases.
-        assertThat(CatalogRepository.sizeMatch(false)).isEqualTo(
+        assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA)).isEqualTo(
                 "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
                 + "alpha_size_rank(ov.size_alpha) AND "
                 + "alpha_size_rank(coalesce(ov.size_alpha_max, "
@@ -38,8 +38,8 @@ class AlphaSizeFilterTest {
     void neverBoth() {
         // The two branches are substituted into the same CTE, so a predicate
         // mentioning both columns would match nothing at all.
-        assertThat(CatalogRepository.sizeMatch(true)).doesNotContain("size_alpha");
-        assertThat(CatalogRepository.sizeMatch(false)).doesNotContain("size_eu");
+        assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.EU)).doesNotContain("size_alpha");
+        assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA)).doesNotContain("size_eu");
     }
 
     @Test
