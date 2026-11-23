@@ -829,3 +829,52 @@ class TestFetchPatiently:
 
         assert result.skipped == "circuit_open"
         assert fetcher.stats["circuit_open"] == MAX_BREAKER_REFETCHES + 1
+
+
+class TestTheRobotsOverrideIsOnePathNotASetting:
+    """One job may be exempted; the origin stays checked.
+
+    Schatze's per-volume prices live under a path its robots.txt
+    disallows, and fetching them is an operator decision recorded in V32.
+    The exemption is on the job rather than on the fetcher so it cannot
+    leak: the code that knows why sets it on one request, and every other
+    fetch to the same shop is still refused.
+    """
+
+    def _fetcher(self, monkeypatch):
+        from mkagg.fetch.http import Fetcher, FetcherConfig
+
+        class AllowNothing:
+            def allowed(self, url):
+                return False
+
+        fetcher = Fetcher(FetcherConfig(respect_robots=True))
+        fetcher.robots = AllowNothing()
+        return fetcher
+
+    def test_an_ordinary_job_is_still_refused(self, monkeypatch):
+        from mkagg.fetch.queue import FetchJob
+
+        fetcher = self._fetcher(monkeypatch)
+        result = fetcher.fetch(FetchJob(
+            merchant_slug="schatze",
+            url="https://shop.schatze.mk/shoppingcart/anything"))
+        assert result.skipped == "robots_disallowed"
+
+    def test_the_exempt_job_gets_past_the_check(self, monkeypatch):
+        """Past the robots gate specifically -- it may still fail for any
+        other reason, which is why this asserts only that the refusal is
+        no longer the robots one."""
+        from mkagg.fetch.queue import FetchJob
+
+        fetcher = self._fetcher(monkeypatch)
+        result = fetcher.fetch(FetchJob(
+            merchant_slug="schatze",
+            url="https://shop.schatze.mk/shoppingcart/anything",
+            allow_disallowed=True))
+        assert result.skipped != "robots_disallowed"
+
+    def test_it_is_off_by_default(self):
+        from mkagg.fetch.queue import FetchJob
+
+        assert FetchJob(merchant_slug="x", url="y").allow_disallowed is False

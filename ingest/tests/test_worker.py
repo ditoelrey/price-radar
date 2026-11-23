@@ -135,7 +135,9 @@ class FakeCursor:
         self.q = q
         if "FROM merchant WHERE is_active" in q:
             self._out = [(m["slug"], m["id"], m["adapter"], m["base_url"],
-                          m["publishes_stock"]) for m in MERCHANTS.values()]
+                          m["publishes_stock"],
+                          m.get("api_requires_permission", False))
+                         for m in MERCHANTS.values()]
         else:
             self._out = self._rows
     def fetchall(self): return self._out

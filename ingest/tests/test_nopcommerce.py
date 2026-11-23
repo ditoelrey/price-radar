@@ -12,7 +12,9 @@ import pytest
 from conftest import load_bytes
 
 from mkagg.adapters import get_adapter
-from mkagg.adapters.nopcommerce import attribute_change_request
+from mkagg.adapters.nopcommerce import (attribute_change_request,
+                                        parse_attribute_change,
+                                        volume_options)
 from mkagg.discover import (PRODUCT_URL_PATTERNS, as_facets, extract_links,
                             sweep_plan)
 from mkagg.fragrance import read_gender
@@ -125,17 +127,51 @@ class TestVolumes:
                       "https://shop.schatze.mk/women/pour-homme-edt-2")
         assert all(v.in_stock is None for v in offer.variants)
 
-    def test_the_per_volume_request_is_recorded_not_sent(self):
-        """The one piece of recon that would otherwise have to be redone.
+    def test_the_per_volume_request_carries_the_antiforgery_token(self):
+        """Without it the shop answers 400 and says nothing about why.
 
-        It is not called: the path is under /shoppingcart/, which this
-        shop's robots.txt disallows, and the merchant row says so.
+        The request is not self-contained: nopCommerce pairs a token in the
+        product form with a cookie from the same session, which is why the
+        page is passed in rather than just the ids.
         """
+        page = load_bytes("schatze_pour_homme.html").decode("utf-8", "replace")
         url, body, headers = attribute_change_request(
-            "https://shop.schatze.mk", "46", "46", "121")
-        assert url.endswith("/shoppingcart/productdetails_attributechange")
+            "https://shop.schatze.mk", page, "46", "46", "121")
+        assert "/shoppingcart/productdetails_attributechange" in url
+        assert "productId=46" in url
         assert b"product_attribute_46=121" in body
+        assert b"__RequestVerificationToken=" in body
+        assert b"addtocart_46.EnteredQuantity=1" in body
         assert headers["X-Requested-With"] == "XMLHttpRequest"
+
+    def test_the_response_gives_a_price_and_nothing_else(self):
+        """Measured on three products before a line of parser was written:
+        sku, mpn, gtin and stockAvailability come back empty every time.
+        This installation configures none of them, so the reader does not
+        pretend to read them."""
+        import json
+
+        price, was = parse_attribute_change(json.dumps({
+            "productId": 46, "price": "5.600,00 ден.",
+            "priceWithoutDiscount": "7.000,00 ден.",
+            "sku": None, "mpn": None, "gtin": None, "stockAvailability": ""}))
+        assert (price, was) == (5600, 7000)
+
+    def test_an_unchanged_price_is_not_a_discount(self):
+        import json
+
+        assert parse_attribute_change(json.dumps({
+            "price": "5.600,00 ден.",
+            "priceWithoutDiscount": "5.600,00 ден."})) == (5600, None)
+
+    def test_a_broken_response_prices_nothing(self):
+        assert parse_attribute_change(b"<html>not json</html>") == (None, None)
+
+    def test_the_options_a_page_offers(self):
+        page = load_bytes("schatze_pour_homme.html").decode("utf-8", "replace")
+        product_id, attribute_id, options = volume_options(page)
+        assert (product_id, attribute_id) == ("46", "46")
+        assert options == [("121", "30ml"), ("122", "50ml"), ("123", "100ml")]
 
 
 class TestGiftSets:

@@ -36,7 +36,9 @@ Findings from recon, each of which this module encodes:
 from __future__ import annotations
 
 import html as html_module
+import json
 import re
+from urllib.parse import urlencode
 
 from ..fragrance import is_single_bottle
 from ..models import RawOffer, RawVariant
@@ -78,6 +80,11 @@ _CHECKED = re.compile(r'value="(\d+)"\s+checked')
 
 #: What the brand field is called, in either language the shop may serve.
 _BRAND_LABELS = ("производител", "manufacturer")
+
+#: The antiforgery token the attribute form carries. nopCommerce pairs it
+#: with a `.Duos.Antiforgery` cookie, so a request needs both or answers 400.
+_TOKEN = re.compile(
+    r'name="__RequestVerificationToken"[^>]*value="([^"]*)"')
 
 
 def _text(fragment: str | None) -> str:
@@ -138,28 +145,73 @@ def _volumes(page: str) -> tuple[str | None, list[tuple[str, str]], str | None]:
             checked.group(1) if checked else None)
 
 
-def attribute_change_request(base_url: str, product_id: str,
+def attribute_change_request(base_url: str, page: str, product_id: str,
                              attribute_id: str, option_id: str):
-    """The POST that prices one volume, for whenever it is permitted.
+    """The POST that prices one volume.
 
-    Not called anywhere yet, and deliberately so: the path is under
-    ``/shoppingcart/``, which this shop's robots.txt disallows, and the
-    merchant row carries ``api_requires_permission = true`` to record that.
-    It lives here rather than in a notebook because it is the one piece of
-    recon that would otherwise have to be done again, and because what it
-    returns -- a per-volume price, sku, gtin and stock -- is the whole
-    difference between this shop having a volume rail and not.
+    Read-only despite the path: it returns JSON and changes nothing. The
+    mutating route on this platform is ``/addproducttocart/``, which this
+    adapter never calls. See V32 for why it is fetched at all -- the shop's
+    robots.txt disallows the ``/shoppingcart/`` prefix and the decision to
+    call it anyway is an operator's, recorded in ``merchant.robots_notes``.
 
-    Whoever turns it on flips the merchant row deliberately and writes down
-    why. A product feed from the shop would settle the question better, and
-    would hand over the GTINs as well.
+    The page is passed in because the request is not self-contained: it
+    needs the antiforgery token out of the product form, which is bound to
+    a cookie from the same session. Without it the shop answers 400 and
+    says nothing about why.
     """
-    url = f"{base_url.rstrip('/')}/shoppingcart/productdetails_attributechange"
-    body = (f"product_attribute_{attribute_id}={option_id}"
-            f"&productId={product_id}").encode()
+    token = _TOKEN.search(page)
+    body = urlencode({
+        f"product_attribute_{attribute_id}": option_id,
+        f"addtocart_{product_id}.EnteredQuantity": "1",
+        "__RequestVerificationToken": token.group(1) if token else "",
+    }).encode()
+    url = (f"{base_url.rstrip('/')}/shoppingcart/productdetails_attributechange"
+           f"?productId={product_id}"
+           f"&validateAttributeConditions=False&loadPicture=False")
     headers = {"X-Requested-With": "XMLHttpRequest",
-               "Content-Type": "application/x-www-form-urlencoded"}
+               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
     return url, body, headers
+
+
+def parse_attribute_change(payload) -> tuple[int | None, int | None]:
+    """``(price_minor, list_price_minor)`` for one volume.
+
+    Only the two prices, because only the two prices are there. The
+    response also carries `sku`, `mpn`, `gtin` and `stockAvailability`, and
+    on every product tested each one came back null or empty -- this
+    installation configures no per-combination codes and no per-combination
+    stock. Reading them would be reading nothing; claiming them would be
+    worse.
+
+    `priceWithoutDiscount` equal to `price` is not a discount, and the
+    badge must not say otherwise -- this shop renders the two-price layout
+    at full price too.
+    """
+    try:
+        data = json.loads(as_text(payload))
+    except (ValueError, TypeError):
+        return None, None
+    if not isinstance(data, dict):
+        return None, None
+    price = parse_price_minor(_text(data.get("price")))
+    was = parse_price_minor(_text(data.get("priceWithoutDiscount")))
+    if was is not None and price is not None and was <= price:
+        was = None
+    return price, was
+
+
+def volume_options(page: str):
+    """``(product_id, attribute_id, [(option_id, label)])`` for a page.
+
+    Exposed for the worker, which makes the per-volume requests: the
+    adapter parses, the worker fetches, and neither does the other's job.
+    """
+    found = _PRODUCT_ID.search(page) or _PRICE_ID.search(page)
+    if not found:
+        return None, None, []
+    attribute_id, options, _checked = _volumes(page)
+    return found.group(1), attribute_id, options
 
 
 class NopCommerceAdapter(Adapter):
@@ -250,4 +302,5 @@ class NopCommerceAdapter(Adapter):
 
 adapter = register(NopCommerceAdapter())
 
-__all__ = ["NopCommerceAdapter", "adapter", "attribute_change_request"]
+__all__ = ["NopCommerceAdapter", "adapter", "attribute_change_request",
+           "parse_attribute_change", "volume_options"]

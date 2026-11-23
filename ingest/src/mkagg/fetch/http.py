@@ -349,7 +349,8 @@ class Fetcher:
             self._bump("circuit_open")
             return FetchResult(job=job, skipped="circuit_open")
 
-        if self.robots is not None and not self.robots.allowed(job.url):
+        if (self.robots is not None and not job.allow_disallowed
+                and not self.robots.allowed(job.url)):
             self._bump("robots_disallowed")
             return FetchResult(job=job, skipped="robots_disallowed")
 

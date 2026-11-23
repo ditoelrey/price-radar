@@ -77,6 +77,20 @@ class FetchJob:
     #: window to a question we should never have asked.
     revalidate: bool = True
 
+    #: Fetch this URL even where robots.txt disallows the path.
+    #:
+    #: Off for everything, and set in exactly one place: the per-volume
+    #: price lookup on schatze, which is an operator decision recorded in
+    #: V32 and in `merchant.robots_notes`. It is per job rather than a
+    #: setting on the fetcher so that it cannot leak -- one request is
+    #: exempted, by the code that knows why, and every other fetch to the
+    #: same origin is still checked.
+    #:
+    #: Whoever reverses the decision sets
+    #: `merchant.api_requires_permission` back to true; the adapter then
+    #: never builds a job with this set.
+    allow_disallowed: bool = False
+
     attempt: int = 0
     enqueued_at: float = field(default_factory=time.time)
 

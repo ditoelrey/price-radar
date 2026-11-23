@@ -23,6 +23,7 @@ or newly redesigned costs its own jobs and nothing else.
 from __future__ import annotations
 
 import functools
+import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ from .fetch.queue import FetchJob
 from .fetch.ratelimit import BreakerWait, Priority
 from .fetch.scheduler import mark_checked, record_observation
 from .load import ingest, run_kind_for
-from .models import RawOffer
+from .models import RawOffer, RawVariant
 from .taxonomy import FRAGRANCE_SLUGS, PARENT_SLUGS
 
 #: A probe whose price moves further than this is treated as suspect rather
@@ -46,6 +47,8 @@ IMPLAUSIBLE_MOVE = 0.70
 #: Adapters that need a second request to assemble a full product record.
 #: sport-m and sizeer render an unrendered Razor placeholder where the sizes
 #: belong, so the size run only exists behind POST /GetVelicini/.
+log = logging.getLogger(__name__)
+
 COMPANION_FETCH_ADAPTERS = frozenset({"aspnet_mk"})
 
 #: Adapters that take a `vertical` and behave differently per vertical. The
@@ -148,6 +151,77 @@ def _woo_volumes(fetcher, adapter, job: FetchJob, offer: RawOffer,
     return offer
 
 
+def _nop_volumes(fetcher, job: FetchJob, offer: RawOffer, page: bytes,
+                 base_url: str, waiter: BreakerWait | None = None) -> RawOffer:
+    """Replace a Schatze offer's single price with a price per bottle.
+
+    A product page lists 30ml, 50ml and 100ml and prints one price without
+    saying which volume it belongs to, so the adapter records a price and
+    no volume. This asks the shop for each one -- one request per option,
+    at the merchant's 0.5 rps.
+
+    Survivable the same way the other companion fetches are: losing a
+    request leaves the offer as the page gave it, priced and unsized. That
+    is a product a shopper cannot compare by volume, not a product that
+    disappears.
+
+    Prices only. The response carries sku, mpn, gtin and stockAvailability
+    and all four are empty on this installation, so `in_stock` stays
+    whatever the page said -- which, with `publishes_stock` false, is
+    unknown. See V32.
+    """
+    from .adapters.nopcommerce import (attribute_change_request,
+                                       parse_attribute_change, volume_options)
+
+    text = page.decode("utf-8", "replace") if isinstance(page, bytes) else page
+    product_id, attribute_id, options = volume_options(text)
+    if not product_id or not attribute_id or len(options) < 2:
+        # One volume needs no asking: the adapter already labelled it.
+        return offer
+
+    priced: list[RawVariant] = []
+    skipped: list[str] = []
+    for option_id, label in options:
+        url, body, headers = attribute_change_request(
+            base_url, text, product_id, attribute_id, option_id)
+        probe = fetch_patiently(fetcher, FetchJob(
+            merchant_slug=job.merchant_slug, url=url, kind=job.kind,
+            priority=job.priority, method="POST", body=body,
+            headers=headers,
+            # The decision recorded in V32. Without this the fetcher's own
+            # robots check refuses every one of these, `priced` stays
+            # empty, and the rail is silently not built -- which is exactly
+            # what the first per-volume crawl did for 21 minutes.
+            allow_disallowed=True), waiter)
+        if not probe.ok:
+            skipped.append(probe.skipped or f"http_{probe.status}")
+            continue
+        price_minor, list_minor = parse_attribute_change(probe.body)
+        if price_minor is None:
+            continue
+        priced.append(RawVariant(
+            size_label=label, price_minor=price_minor,
+            list_price_minor=list_minor,
+            merchant_variant_id=option_id,
+            in_stock=offer.variants[0].in_stock if offer.variants else None))
+
+    # All or nothing. A partial rail is worse than none: it would show two
+    # of three bottles and let a shopper conclude the third is not sold.
+    if len(priced) == len(options):
+        offer.variants = priced
+    elif skipped:
+        # Loudly, because the first attempt at this failed completely and
+        # looked like a success: every request was refused, the rail was
+        # never built, and the run reported OK with one variant per offer.
+        # A silent all-or-nothing is indistinguishable from "this product
+        # has one volume".
+        log.warning("%s %s: no volume rail, %d/%d requests skipped (%s)",
+                    job.merchant_slug, offer.merchant_sku,
+                    len(skipped), len(options),
+                    ", ".join(sorted(set(skipped))[:3]))
+    return offer
+
+
 def parse_result(fetcher, result: FetchResult, merchant: dict, *,
                  waiter: BreakerWait | None = None) -> list[RawOffer]:
     """Turn one successful fetch into offers, using the merchant's adapter."""
@@ -192,8 +266,16 @@ def parse_result(fetcher, result: FetchResult, merchant: dict, *,
     offer = adapter.parse_product(result.body, job.url, job.merchant_slug,
                                   **extra)
     if offer and vertical == "fragrance":
-        offer = _woo_volumes(fetcher, adapter, job, offer,
-                             merchant["base_url"], waiter)
+        if adapter_slug == "nopcommerce":
+            # Gated on the merchant's own flag, so the decision recorded in
+            # V32 is the thing that switches this on -- and setting it back
+            # to true falls straight through to the page's single price.
+            if not merchant.get("api_requires_permission", True):
+                offer = _nop_volumes(fetcher, job, offer, result.body,
+                                     merchant["base_url"], waiter)
+        else:
+            offer = _woo_volumes(fetcher, adapter, job, offer,
+                                 merchant["base_url"], waiter)
     return [offer] if offer else []
 
 
@@ -380,10 +462,12 @@ def resolve_category_hint(job_hint: str | None,
 
 def merchants_by_slug(conn) -> dict[str, dict]:
     with conn.cursor() as cur:
-        cur.execute("""SELECT slug, id, adapter, base_url, publishes_stock
+        cur.execute("""SELECT slug, id, adapter, base_url, publishes_stock,
+                              api_requires_permission
                          FROM merchant WHERE is_active""")
         return {r[0]: {"slug": r[0], "id": r[1], "adapter": r[2],
-                       "base_url": r[3], "publishes_stock": r[4]}
+                       "base_url": r[3], "publishes_stock": r[4],
+                       "api_requires_permission": r[5]}
                 for r in cur.fetchall()}
 
 
