@@ -108,18 +108,15 @@ function FragranceMenu({ vertical }: { vertical: Vertical }) {
                     gender: gender.slug,
                     concentration: concentration.value,
                   })}
-                  className="flex items-baseline gap-2 py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  className="block py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  {/* The abbreviation set apart from the words rather than
-                      folded into one string. "EDP" is what a shopper who
-                      knows fragrances scans for, and "Парфимирани води" is
-                      what the rest read; running them together as one label
-                      makes both groups parse the whole line. Fixed width so
-                      the four Macedonian names start on one edge. */}
-                  <span className="w-11 shrink-0 font-mono text-xs uppercase tracking-tight">
-                    {concentration.short}
-                  </span>
-                  {concentration.label}
+                  {/* "EDT - Тоалетни води": the abbreviation a shopper who
+                      knows fragrances scans for, then the words the rest
+                      read. The last entry has no abbreviation, because
+                      "Парфем - Парфеми" is the same word twice. */}
+                  {concentration.short
+                    ? `${concentration.short} - ${concentration.label}`
+                    : concentration.label}
                 </Link>
               </li>
             ))}
@@ -324,9 +321,14 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
             {(() => {
               const vertical = VERTICALS.find((v) => v.kind === openKind);
-              return vertical?.categories ? (
-                <VerticalMenu vertical={vertical} />
-              ) : null;
+              // A vertical earns a panel by having something to put in it,
+              // which is leaves OR strengths. Testing `categories` alone
+              // was right while every vertical had leaves: Парфеми has
+              // none -- its menu is concentrations -- so the panel opened
+              // and rendered nothing at all.
+              const hasMenu =
+                vertical && (vertical.categories || vertical.byConcentration);
+              return hasMenu ? <VerticalMenu vertical={vertical} /> : null;
             })()}
           </div>
         </div>

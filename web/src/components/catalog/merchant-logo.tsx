@@ -26,8 +26,12 @@ import { cn } from "@/lib/utils";
  * is fully transparent already, as are the other four. Blending a
  * transparent logo achieves nothing and risks washing it out, so this list
  * stays empty except where the pixels say otherwise.
+ *
+ * e-elixir arrived as a JPEG, which cannot carry transparency at all, so
+ * its corners are solid white and it joins the list. Schatze shipped a PNG
+ * with a real alpha channel and does not.
  */
-const NEEDS_MULTIPLY = new Set(["buzz"]);
+const NEEDS_MULTIPLY = new Set(["buzz", "eelixir"]);
 
 /** Merchants we ship a logo file for. Anything else falls back to its name. */
 const HAS_LOGO = new Set([
@@ -37,6 +41,8 @@ const HAS_LOGO = new Set([
   "sportm",
   "buzz",
   "megasport",
+  "eelixir",
+  "schatze",
 ]);
 
 export function MerchantLogo({

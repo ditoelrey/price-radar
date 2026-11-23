@@ -235,7 +235,10 @@ export function FilterSidebar({
                   much of it do you want", which is a different question a
                   shopper asks for a different reason -- and the price moves
                   with it, where a shoe costs the same in 42 as in 43. */}
-              <h2 className="mb-1 text-sm font-semibold">Волумен</h2>
+              {/* The same word the detail page uses, and the one the shops
+                  use themselves -- e-elixir's own attribute is милилитража.
+                  Two words for one axis would read as two filters. */}
+              <h2 className="mb-1 text-sm font-semibold">Милилитража</h2>
               <p className="mb-3 text-xs text-muted-foreground">
                 Секоја милилитража има своја цена — изберете ја вашата и
                 цените се однесуваат на неа.

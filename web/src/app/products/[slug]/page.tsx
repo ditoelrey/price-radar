@@ -357,7 +357,16 @@ export default async function ProductDetailPage({
 
             {otherSizes.length > 0 && (
               <div className="mt-5">
-                <p className="mb-2 text-sm font-semibold">Size</p>
+                {/* A bottle is sized in millilitres, and the shops call that
+                    милилитража -- it is e-elixir's own word for the
+                    attribute. "Size" is right for a hoodie and wrong here,
+                    where the choice changes the price as well as the fit.
+                    Only fragrances: Обувки, Облека and Опрема keep theirs. */}
+                <p className="mb-2 text-sm font-semibold">
+                  {product.categoryKind === "fragrance"
+                    ? "Милилитража"
+                    : "Size"}
+                </p>
                 <LabelSizePicker
                   sizes={otherSizes}
                   selected={size}

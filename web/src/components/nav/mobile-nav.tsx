@@ -168,12 +168,11 @@ export function MobileNav() {
                                   concentration: concentration.value,
                                 })}
                                 onClick={close}
-                                className="flex items-baseline gap-2 py-1.5 text-sm text-muted-foreground"
+                                className="block py-1.5 text-sm text-muted-foreground"
                               >
-                                <span className="w-11 shrink-0 font-mono text-xs uppercase">
-                                  {concentration.short}
-                                </span>
-                                {concentration.label}
+                                {concentration.short
+                                  ? `${concentration.short} - ${concentration.label}`
+                                  : concentration.label}
                               </Link>
                             </li>
                           ))}

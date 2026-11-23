@@ -148,6 +148,10 @@ export const FRAGRANCE_GENDER_COLUMNS: ReadonlyArray<{
 /**
  * The four strengths, as a shopper asks for them.
  *
+ * Ordered as a shopper meets them rather than by strength: the toilette
+ * waters are the commonest shelf, the parfums the rarest, and a menu that
+ * opened with the rarest would bury the entry most people want.
+ *
  * `value` is what reaches the API's `?concentration=`, and the last entry
  * names two: the shops shelve PARFUM and EXTRAIT together under Парфеми and
  * a shopper reading that word does not separate them. Keeping them apart in
@@ -158,12 +162,14 @@ export const FRAGRANCE_GENDER_COLUMNS: ReadonlyArray<{
 export const CONCENTRATIONS: ReadonlyArray<{
   value: string;
   label: string;
-  short: string;
+  /** The abbreviation a shopper scans for, or null where there is none. */
+  short: string | null;
 }> = [
-  { value: "EDP", label: "Парфимирани води", short: "EDP" },
   { value: "EDT", label: "Тоалетни води", short: "EDT" },
+  { value: "EDP", label: "Парфимирани води", short: "EDP" },
   { value: "EDC", label: "Колонски води", short: "EDC" },
-  { value: "PARFUM,EXTRAIT", label: "Парфеми", short: "Парфем" },
+  // No abbreviation: "Парфем - Парфеми" would be the same word twice.
+  { value: "PARFUM,EXTRAIT", label: "Парфеми", short: null },
 ];
 
 /**

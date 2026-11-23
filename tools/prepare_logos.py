@@ -17,11 +17,16 @@ So each file is trimmed to its actual content before it ships:
     buzz            300x144     219x63      2.08 -> 3.48
     sizeer          375x126     323x91      2.98 -> 3.55
 
-Afterwards every ratio exceeds the display box's, so all six render at the
-same width and centre vertically -- a tidy column, which is what uniform
-actually means here. Logos of different proportions cannot share both a width
-and a height, and pretending otherwise just moves the distortion into the
-image.
+Afterwards every one of those ratios exceeds the display box's, so they render
+at the same width and centre vertically -- a tidy column, which is what
+uniform actually means here. Logos of different proportions cannot share both
+a width and a height, and pretending otherwise just moves the distortion into
+the image.
+
+e-elixir is the exception and stays one: its mark is a circle, roughly 1:1
+even trimmed, so it is height-limited where the wordmarks are width-limited
+and renders as a small square among them. That is what a round logo looks
+like next to wordmarks; stretching it to match would be worse.
 
 Output is checked in, so this only needs re-running when a logo changes.
 Requires Pillow, which is not a project dependency for that reason:
@@ -50,6 +55,11 @@ SOURCES = {
     "9": "sportm",
     "10": "buzz",
     "11": "megasport",
+    # The two perfumeries, V27. Named by slug rather than by a source
+    # number: the numbering above is an accident of how the first six
+    # arrived, and there is no reason to extend an accident.
+    "eelixir": "eelixir",
+    "schatze": "schatze",
 }
 
 #: A pixel counts as background if it is transparent or near-white.
