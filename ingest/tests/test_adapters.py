@@ -1165,3 +1165,59 @@ class TestAUniversalSizeThatIsInStock:
         out = SportVisionAdapter._parse_sizes(html, 1000, "MKD")
         assert [(v.in_stock, v.merchant_variant_id) for v in out] == [
             (False, "7")]
+
+
+class TestTheSpecTableSportVisionPublishes:
+    """`Пол` and `Возраст`, which nothing read until this audit.
+
+    The fixture is a live page: Nike BASIC kids' socks, where the two rows
+    disagree in the way that matters.
+
+        Пол      Унисекс
+        Возраст  За мали деца (4-10 год.)
+
+    Reading Пол first calls that an adult unisex sock. It is a child's, and
+    151 of the 712 products under Опрема -> Чорапи are in the same position.
+    """
+
+    def test_the_shops_own_audience_is_read(self):
+        adapter = get_adapter("sportvision")
+        offer = adapter.parse_product(
+            load_bytes("sportvision_kids_socks.html"),
+            "https://www.sportvision.mk/mk/corapi/8428184-nike-basic",
+            "sportvision")
+        assert offer is not None
+        assert offer.gender_hint == "kids"
+        assert offer.extractors["gender"] == "css"
+
+    def test_the_rows_are_found_by_class_not_by_label(self):
+        """Every page's navigation links a "Поло блуза" shelf, and "Поло"
+        contains "Пол". Searching for the label text reads that link as the
+        product's gender -- which is what the first pass of this audit did,
+        reporting `Пол=о блуза`."""
+        from mkagg.adapters.sportvision import spec_attr
+
+        html = load_bytes("sportvision_kids_socks.html").decode("utf-8",
+                                                                "replace")
+        assert spec_attr(html, "pol") == "Унисекс"
+        assert spec_attr(html, "vozrast") == "За мали деца (4-10 год.)"
+
+    def test_the_table_is_not_an_accessory_thing(self):
+        """It is on every product page, footwear included.
+
+        The Caven 2.0 fixture was captured for an entirely different test
+        and states `Пол: Машки` -- so this evidence is available across the
+        whole catalogue, not only in the vertical that made us look.
+        """
+        from mkagg.adapters.sportvision import spec_attr
+
+        html = load_bytes("sportvision_caven20.html").decode("utf-8",
+                                                             "replace")
+        assert spec_attr(html, "pol") == "Машки"
+
+    def test_a_row_that_is_not_there_claims_nothing(self):
+        """A missing row is silence, not a default."""
+        from mkagg.adapters.sportvision import spec_attr
+
+        assert spec_attr("<html><body>no table</body></html>", "pol") is None
+        assert spec_attr("", "vozrast") is None

@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from mkagg.load.promote import resolve_offer
+from mkagg.load.promote import UPSERT_OFFER_SQL, resolve_offer
 from mkagg.models import RawOffer, RawVariant
 
 DSN = os.environ.get(
@@ -82,6 +82,33 @@ def merchant_id(conn, slug):
 def resolve(conn, offer, slug=None):
     return resolve_offer(conn, offer, merchant_id(conn, slug or offer.merchant_slug),
                          create_missing=True, report=None)
+
+
+def promote(conn, offer, slug=None):
+    """Resolve an offer *and* write it, the way `promote_run` does.
+
+    The order is the point. `promote_run` upserts each offer immediately
+    after resolving it, so the next offer of the same run is matched against
+    a database that already holds this one -- which is what lets
+    `find_product_by_identity` see that a shop lists two names separately.
+    A test that only resolves leaves `merchant_offer` empty and cannot
+    exercise that guard at all.
+    """
+    mid = merchant_id(conn, slug or offer.merchant_slug)
+    product_id, result = resolve_offer(conn, offer, mid, create_missing=True,
+                                       report=None)
+    with conn.cursor() as cur:
+        cur.execute(UPSERT_OFFER_SQL, {
+            "merchant": mid, "product": product_id,
+            "sku": offer.merchant_sku, "mpn": offer.raw_mpn,
+            "title": offer.raw_title[:500], "brand": offer.raw_brand,
+            "url": offer.product_url, "image": offer.image_url,
+            "category_path": offer.category_path,
+            "gender": offer.gender_hint,
+            "method": result.method if product_id else None,
+            "confidence": result.confidence if product_id else None,
+            "status": "active" if product_id else "unmatched"})
+    return product_id, result
 
 
 @pytest.mark.usefixtures("clean_db")
@@ -239,7 +266,11 @@ class TestWhatGetsWritten:
         with conn.cursor() as cur:
             cur.execute("SELECT slug FROM product WHERE id = %s", (pid,))
             slug = cur.fetchone()[0]
-        assert slug == "versace-pour-homme-edt"
+        # The audience is appended, and must be: one line sold to two
+        # audiences is two products competing for one slug. "Pour Homme" in
+        # the title is where this one's `men` comes from -- the offer names
+        # no shelf at all.
+        assert slug == "versace-pour-homme-edt-men"
         assert "278" not in slug
 
     def test_an_internal_row_number_is_not_filed_as_an_mpn(self, conn):
@@ -305,3 +336,149 @@ class TestTheEdges:
         assert "39229002" in slug
         assert concentration is None
         assert res.method == "mpn"
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestTheWordsTheShopsDisagreeAbout:
+    """The two perfumeries name one bottle three different ways.
+
+    Measured over 1,625 live fragrance products: 36 were two product pages
+    for no reason but this. Each case below is one of them.
+    """
+
+    def test_a_house_prefix_does_not_make_a_second_product(self, conn):
+        """e-elixir prints "Emporio Armani Stronger With You", Schatze
+        prints "Stronger With You". Six bottles over."""
+        a, _ = promote(conn, fragrance_offer(
+            "Emporio Armani Stronger With You Eau de Parfum",
+            sku="a1", brand="Giorgio Armani"))
+        b, res = promote(conn, fragrance_offer(
+            "Stronger With You - edp", merchant="sportvision", sku="b1",
+            brand="Giorgio Armani"))
+        assert a is not None and b == a
+        assert res.method == "identity"
+
+    def test_the_brand_echoed_mid_name_does_not_either(self, conn):
+        a, _ = promote(conn, fragrance_offer(
+            "Lattafa Asad Eau de Parfum", sku="a2", brand="Lattafa"))
+        b, _ = promote(conn, fragrance_offer(
+            "Asad By Lattafa - edp", merchant="sportvision", sku="b2",
+            brand="Lattafa"))
+        assert a is not None and b == a
+
+    def test_an_audience_marker_does_not_either(self, conn):
+        """The commonest of the three: 21 of the 36."""
+        a, _ = promote(conn, fragrance_offer(
+            "Gucci Guilty Eau de toilette", sku="a3", brand="Gucci"))
+        b, _ = promote(conn, fragrance_offer(
+            "Guilty Pour Homme - edt", merchant="sportvision", sku="b3",
+            brand="Gucci"))
+        assert a is not None and b == a
+
+    def test_the_catalogue_keeps_the_shops_own_words(self, conn):
+        """The reduction is for comparing, not for displaying. A shopper
+        looking for Emporio Armani must still find that on the page."""
+        pid, _ = promote(conn, fragrance_offer(
+            "Emporio Armani Stronger With You Eau de Parfum",
+            sku="a4", brand="Giorgio Armani"))
+        with conn.cursor() as cur:
+            cur.execute("SELECT model_name FROM product WHERE id = %s", (pid,))
+            assert cur.fetchone()[0] == "Emporio Armani Stronger With You"
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestWhatTheReductionMustNotJoin:
+    def test_one_shop_listing_both_names_is_believed(self, conn):
+        """e-elixir sells David Beckham "Classic" and "Classic Homme".
+        They are two real releases, and the reduction makes one key of
+        them. A shop listing both separately is the evidence that settles
+        it -- so the reduced key may only join offers from different
+        shops."""
+        a, _ = promote(conn, fragrance_offer(
+            "David Beckham Classic Eau de toilette",
+            sku="a5", brand="David Beckham"))
+        b, _ = promote(conn, fragrance_offer(
+            "David Beckham Classic Homme Eau de toilette",
+            sku="b5", brand="David Beckham"))
+        assert a is not None and b is not None
+        assert b != a, "one shop's two listings are two fragrances"
+
+    def test_and_they_get_different_slugs(self, conn):
+        """Because `ON CONFLICT (slug) DO UPDATE ... RETURNING id` would
+        otherwise hand the second one the first one's row and silently
+        merge exactly what the guard just refused."""
+        a, _ = promote(conn, fragrance_offer(
+            "David Beckham Classic Eau de toilette",
+            sku="a6", brand="David Beckham"))
+        b, _ = promote(conn, fragrance_offer(
+            "David Beckham Classic Homme Eau de toilette",
+            sku="b6", brand="David Beckham"))
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, slug FROM product WHERE id IN (%s, %s)",
+                        (a, b))
+            slugs = dict(cur.fetchall())
+        assert len(set(slugs.values())) == 2, slugs
+
+    def test_the_guard_does_not_undo_its_own_merge(self, conn):
+        """The trap in guarding by shop. Once Schatze's "Guilty Pour
+        Homme" lands on e-elixir's "Guilty", a Schatze offer *is* sitting
+        on that product -- and a naive guard would split it off again on
+        the next crawl, every crawl. The offer being promoted is excluded
+        by its own SKU."""
+        a, _ = promote(conn, fragrance_offer(
+            "Gucci Guilty Eau de toilette", sku="a7", brand="Gucci"))
+        b, _ = promote(conn, fragrance_offer(
+            "Guilty Pour Homme - edt", merchant="sportvision", sku="b7",
+            brand="Gucci"))
+        assert b == a
+        again, _ = promote(conn, fragrance_offer(
+            "Guilty Pour Homme - edt", merchant="sportvision", sku="b7",
+            brand="Gucci"))
+        assert again == a, "a re-crawl must not split the merge"
+
+    def test_gender_still_vetoes_what_the_reduction_joined(self, conn):
+        """"Dylan Blue Pour Homme" and "Dylan Blue Pour Femme" both reduce
+        to "dylan blue". The men-versus-women veto is the only thing left
+        holding them apart, which is why gender stays in the key."""
+        a, _ = promote(conn, fragrance_offer(
+            "Versace Dylan Blue Pour Femme Eau de toilette",
+            sku="a8", brand="Versace"))
+        b, _ = promote(conn, fragrance_offer(
+            "Dylan Blue Pour Homme - edt", merchant="sportvision",
+            sku="b8", brand="Versace"))
+        assert a is not None and b is not None and b != a
+
+    def test_a_flanker_is_still_its_own_product(self, conn):
+        a, _ = promote(conn, fragrance_offer(
+            "Lattafa Asad Eau de Parfum", sku="a9", brand="Lattafa"))
+        b, _ = promote(conn, fragrance_offer(
+            "Asad Elixir - edp", merchant="sportvision", sku="b9",
+            brand="Lattafa"))
+        assert a is not None and b is not None and b != a
+
+
+@pytest.mark.usefixtures("clean_db")
+class TestTheAudienceAFragranceStates:
+    def test_a_title_marker_fills_a_gender_no_shelf_states(self, conn):
+        """The Merchant of Venice's La Fenice sits on
+        `/niche-fragrances/`, which names no gender, and the general
+        derivation does not know that "Pour Femme" is one. Both bottles
+        came out NULL -- and NULL is what the match veto needs most here,
+        because `identity_key` reduces both to "la fenice"."""
+        pid, _ = promote(conn, fragrance_offer(
+            "La Fenice Pour Femme - EDP", sku="c1",
+            brand="The Merchant of Venice"))
+        with conn.cursor() as cur:
+            cur.execute("""SELECT gender::text, gender_source
+                             FROM product WHERE id = %s""", (pid,))
+            assert cur.fetchone() == ("women", "title")
+
+    def test_and_so_the_two_la_fenices_stay_apart(self, conn):
+        femme, _ = promote(conn, fragrance_offer(
+            "La Fenice Pour Femme - EDP", sku="c2",
+            brand="The Merchant of Venice"))
+        homme, _ = promote(conn, fragrance_offer(
+            "La Fenice Pour Homme - EDP", merchant="sportvision", sku="c3",
+            brand="The Merchant of Venice"))
+        assert femme is not None and homme is not None
+        assert homme != femme, "men and women are two bottles"

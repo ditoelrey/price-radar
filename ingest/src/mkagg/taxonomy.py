@@ -50,7 +50,27 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # Deliberately *not* here: "elixir", "intense", "extrait". They name a
     # fragrance rather than the article type, and `mkagg.fragrance` keeps
     # them in the line name for exactly that reason.
+    #
+    # Bare "parfum" is here, and its absence was a real bug. The list held
+    # the Macedonian transliterations -- parfem, parfemi, parfumi -- and the
+    # full English phrase "eau de parfum", but not the one word both shops
+    # print on their shortest labels. So "Ralph Lauren Polo Blue Parfum"
+    # matched nothing here, fell through to the apparel block, and matched
+    # `polo`: two fragrances filed as t-shirts, in Облека, unreachable from
+    # Парфеми. Their own shelf said "Машки Parfum" and could not save them,
+    # because it classified to nothing for the same reason.
+    #
+    # Measured over 35 873 live title/URL pairs: adding it changes 201 of
+    # them and every single one becomes `perfume` -- 199 that named no
+    # category at all, plus the two t-shirts. Nothing outside the two
+    # perfumeries moves, so the word is as unambiguous as it looks.
+    #
+    # It subsumes "eau de parfum", which stays for readability: the phrase
+    # beside "eau de toilette" and "eau de cologne" is what makes the triple
+    # legible, and a reader should not have to know this list is scanned
+    # word-wise to see that all three are covered.
     ("perfume", ("eau de parfum", "eau de toilette", "eau de cologne",
+                 "parfum",
                  "toaletna voda", "kolonska voda", "parfimirana voda",
                  "parfem", "parfemi", "parfumi", "mirisi", "miris",
                  "fragrance", "fragrances", "edp", "edt")),
@@ -556,6 +576,60 @@ def classify_facet_gender(path: str | None) -> str | None:
     if any(word in hay for word in _UNISEX_WORDS):
         return "unisex"
     return _first_match(_GENDER_RULES, [hay])
+
+
+#: Age bands that mean the article is not for an adult. Taken from the
+#: live values, not invented: "За бебиња (0-4 год.)", "За мали деца (4-10
+#: год.)", "За тинејџери (8-14 год.)", "За деца", "Мали деца", "За бебе".
+# "tinejd" and not "tinejdzer": `translit_mk` renders џ as `dj`, so
+# "тинејџери" arrives as "tinejdjeri". The shorter stem matches either
+# spelling and cannot reach another word.
+_KIDS_AGE = ("bebinja", "bebe", "mali deca", "tinejd", "deca", "junior",
+             "kids", "infant")
+
+#: And the one that means it is. Checked first, because "За возрасни" is
+#: what the other 70 percent of pages say and it must not fall through to a
+#: kids word by accident.
+_ADULT_AGE = ("vozrasni", "adult")
+
+
+def read_declared_audience(pol: str | None,
+                           vozrast: str | None) -> str | None:
+    """Who a shop says a product is for, from its own two spec rows.
+
+    Sport Vision, Buzz and Sport Reality render these as
+    ``<tr class="attr-pol">`` and ``attr-vozrast``; sport-m and sizeer as
+    ``<span class="opis">Пол</span>``. Both publish them on every product
+    page, and for socks we stored neither for 477 offers.
+
+    **Возраст decides, Пол only fills in.** The age band is about the
+    article; Пол is about the department, and the two disagree in a way that
+    matters. Measured on live socks pages::
+
+        Nike Basic   Пол: Унисекс   Возраст: За мали деца (4-10 год.)
+
+    Reading Пол first calls that an adult unisex sock. It is a child's.
+    Where the band says adult, Пол answers and can never be overridden to
+    kids; where the band says nothing, Пол answers alone.
+
+        read_declared_audience("Деца", "За мали деца (4-10 год.)") -> "kids"
+        read_declared_audience("Унисекс", "За мали деца (4-10 год.)") -> "kids"
+        read_declared_audience("Машки", "За возрасни")              -> "men"
+        read_declared_audience("Унисекс", None)                     -> "unisex"
+        read_declared_audience(None, None)                          -> None
+    """
+    band = _normalise(vozrast) if vozrast else ""
+    adult = any(w in band for w in _ADULT_AGE)
+    if band and not adult and any(w in band for w in _KIDS_AGE):
+        return "kids"
+    # `classify_facet_gender` and not `classify_gender`: this is the shop
+    # declaring a department, so Унисекс is a real answer here.
+    declared = classify_facet_gender(pol)
+    if declared == "kids" and adult:
+        # "Пол: Деца" under "Возраст: За возрасни" is a contradiction, and
+        # the band is the one about the article. Neither is trusted.
+        return None
+    return declared
 
 
 def is_footwear(slug: str | None) -> bool:

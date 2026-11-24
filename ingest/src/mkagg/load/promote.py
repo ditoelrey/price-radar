@@ -349,8 +349,39 @@ def genders_conflict(a: str | None, b: str | None) -> bool:
 
 def find_product_by_identity(conn, brand_id: int, model: str,
                              concentration: str | None,
-                             gender: str | None = None) -> int | None:
+                             gender: str | None = None,
+                             merchant_slug: str | None = None,
+                             merchant_sku: str | None = None) -> int | None:
     """The product this brand, line, strength and audience already name.
+
+    Two passes over the same small candidate set -- a brand at one strength
+    averages 6.6 products and never exceeds 55, so this is cheaper than it
+    reads.
+
+    **Pass one, the shop's own words.** An exact `model_name` match, which
+    is what every fragrance matched on before the second pass existed.
+
+    **Pass two, the words both shops agree on.** :func:`~mkagg.fragrance.
+    identity_key` reduces a house prefix, a brand echoed mid-name and an
+    audience marker, because the two perfumeries disagree about all three:
+    e-elixir prints "Emporio Armani Stronger With You" and "Eros", Schatze
+    prints "Stronger With You" and "Eros Pour Homme". Measured over 1,625
+    products, 36 bottles were two product pages for this reason alone.
+
+    The reduction is done here in Python rather than stored in a column so
+    that `model_name` stays the shop's own name. The catalogue shows what
+    the bottle says; only the comparison is narrowed.
+
+    **The guard, which is what makes pass two safe.** A reduced key may only
+    join offers from *different* shops. Where one shop lists both names
+    separately it is telling us they are two fragrances, and we believe it
+    -- e-elixir sells "Classic" and "Classic Homme" by David Beckham, which
+    are two real releases, and no normalisation should join them.
+
+    "Its own offer" is excluded from that guard by SKU. Without that the
+    guard would undo its own merge on the very next crawl: Schatze's "Guilty
+    Pour Femme" lands on e-elixir's "Guilty" product, and a run later the
+    guard would see a Schatze offer already there and split it off again.
 
     `IS NOT DISTINCT FROM` on the concentration, not `=`: five live
     e-elixir products state no strength ("Giorgio Armani Code Elixir"), and
@@ -361,20 +392,48 @@ def find_product_by_identity(conn, brand_id: int, model: str,
     Gender is applied as a veto rather than a key, so a candidate is taken
     unless it conflicts outright. See :func:`genders_conflict`; it is also
     what keeps this lookup stable while `derive` revises a gender, which it
-    may do on any later crawl.
+    may do on any later crawl. It is what holds "Dylan Blue Pour Homme" and
+    "Dylan Blue Pour Femme" apart once pass two has reduced both to "dylan
+    blue", so pass two is only sound while gender stays in the key.
     """
+    from ..fragrance import identity_key
+
     with conn.cursor() as cur:
+        cur.execute("SELECT name FROM brand WHERE id = %s", (brand_id,))
+        row = cur.fetchone()
+        brand_name = row[0] if row else None
         cur.execute(
-            """SELECT id, gender::text FROM product
-                WHERE brand_id = %s
-                  AND lower(model_name) = lower(%s)
-                  AND concentration IS NOT DISTINCT FROM %s
-                ORDER BY id""",
-            (brand_id, model, concentration))
+            """SELECT p.id, p.gender::text, p.model_name,
+                      EXISTS (SELECT 1
+                                FROM merchant_offer mo
+                                JOIN merchant m ON m.id = mo.merchant_id
+                               WHERE mo.product_id = p.id
+                                 AND mo.status = 'active'
+                                 AND m.slug = %s
+                                 AND mo.merchant_sku IS DISTINCT FROM %s)
+                 FROM product p
+                WHERE p.brand_id = %s
+                  AND p.concentration IS NOT DISTINCT FROM %s
+                ORDER BY p.id""",
+            (merchant_slug, merchant_sku, brand_id, concentration))
         rows = cur.fetchall()
-    for product_id, candidate_gender in rows:
-        if not genders_conflict(candidate_gender, gender):
+
+    for product_id, candidate_gender, candidate_model, _ in rows:
+        if ((candidate_model or "").lower() == (model or "").lower()
+                and not genders_conflict(candidate_gender, gender)):
             return product_id
+
+    key = identity_key(model, brand_name)
+    if not key:
+        return None
+    for product_id, candidate_gender, candidate_model, shop_lists_another in rows:
+        if shop_lists_another:
+            continue
+        if identity_key(candidate_model, brand_name) != key:
+            continue
+        if genders_conflict(candidate_gender, gender):
+            continue
+        return product_id
     return None
 
 
@@ -430,6 +489,35 @@ def create_product(conn, offer: RawOffer, brand_id: int,
         if category_slug is None and offer.category_hint:
             category_slug, category_source = offer.category_hint, "facet"
         gender, gender_source = derive_gender(evidence)
+
+        # A fragrance's audience, where the general derivation found none.
+        #
+        # `derive_gender` reads the shelf words every vertical shares; it
+        # does not know that "Pour Femme" names an audience, and the
+        # evidence it is handed here carries no category path anyway. So a
+        # niche-shelf bottle whose own title says who it is for came out
+        # NULL: measured, exactly two of 1,625 -- The Merchant of Venice's
+        # La Fenice Pour Femme and Pour Homme, on `/niche-fragrances/`,
+        # which states no gender.
+        #
+        # Additive on purpose. It fills a gap and overrides nothing, which
+        # is the same decision `derive.derive_gender` makes about shelf
+        # gender: a blanket rule there would have rewritten 392 products
+        # including 202 unisex into women.
+        #
+        # It matters beyond the badge. This gender goes into the slug and
+        # into the match veto, and the veto is the only thing holding
+        # "La Fenice Pour Femme" apart from "Pour Homme" once
+        # `identity_key` has reduced both to "la fenice".
+        if identity is not None and gender is None:
+            from ..fragrance import read_gender
+            from_title = read_gender(None, offer.raw_title)
+            if from_title:
+                gender, gender_source = from_title, "title"
+            else:
+                from_shelf = read_gender(offer.category_path, None)
+                if from_shelf:
+                    gender, gender_source = from_shelf, "facet"
 
         category_id = None
         if category_slug:
@@ -570,8 +658,10 @@ def resolve_offer(conn, offer: RawOffer, merchant_id: int, *,
         from ..fragrance import read_gender
         audience = (read_gender(offer.category_path, offer.raw_title)
                     or offer.gender_hint)
-        existing = find_product_by_identity(conn, brand_id, model,
-                                            concentration, audience)
+        existing = find_product_by_identity(
+            conn, brand_id, model, concentration, audience,
+            merchant_slug=offer.merchant_slug,
+            merchant_sku=offer.merchant_sku)
         if existing:
             return existing, MatchResult(existing, "identity", 0.99,
                                          {"line": model,
@@ -631,10 +721,10 @@ def resolve_offer(conn, offer: RawOffer, merchant_id: int, *,
 UPSERT_OFFER_SQL = """
 INSERT INTO merchant_offer (merchant_id, product_id, merchant_sku, raw_mpn,
                             raw_title, raw_brand, product_url, image_url,
-                            merchant_category_path,
+                            merchant_category_path, merchant_gender,
                             match_method, match_confidence, status, last_seen_at)
      VALUES (%(merchant)s, %(product)s, %(sku)s, %(mpn)s, %(title)s, %(brand)s,
-             %(url)s, %(image)s, %(category_path)s,
+             %(url)s, %(image)s, %(category_path)s, %(gender)s,
              %(method)s, %(confidence)s, %(status)s, now())
 ON CONFLICT (merchant_id, merchant_sku) DO UPDATE
         SET product_id       = COALESCE(EXCLUDED.product_id,
@@ -645,6 +735,21 @@ ON CONFLICT (merchant_id, merchant_sku) DO UPDATE
             merchant_category_path = COALESCE(
                                         EXCLUDED.merchant_category_path,
                                         merchant_offer.merchant_category_path),
+            -- The gender the offer arrived with, from the facet the crawler
+            -- walked or from the shop's own spec table. COALESCE for the
+            -- same reason as the shelf above: `walk_facets` writes this
+            -- column too, from a *set* of departments, which is the only
+            -- evidence that can say unisex. A promotion that read no gender
+            -- must not wipe it.
+            --
+            -- Until this line existed nothing wrote it at promote time, so
+            -- the gender reached `create_product`, was stamped on the
+            -- product, and then evaporated -- leaving `derive` unable to
+            -- confirm or revise it on any later pass. 477 socks offers from
+            -- the two shops the facet walk had not covered were in exactly
+            -- that state.
+            merchant_gender  = COALESCE(EXCLUDED.merchant_gender,
+                                        merchant_offer.merchant_gender),
             raw_mpn          = EXCLUDED.raw_mpn,
             raw_title        = EXCLUDED.raw_title,
             raw_brand        = EXCLUDED.raw_brand,
@@ -878,6 +983,7 @@ def promote_run(conn, run_id: int, merchant_id: int, merchant_slug: str, *,
                 "title": offer.raw_title[:500], "brand": offer.raw_brand,
                 "url": offer.product_url, "image": offer.image_url,
                 "category_path": offer.category_path,
+                "gender": offer.gender_hint,
                 "method": result.method if product_id else None,
                 "confidence": result.confidence if product_id else None,
                 "status": "active" if product_id else "unmatched"})

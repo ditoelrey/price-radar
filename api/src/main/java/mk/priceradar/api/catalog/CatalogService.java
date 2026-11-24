@@ -120,6 +120,15 @@ public class CatalogService {
                 normalizeConcentration(concentration), limit);
     }
 
+    public List<Dtos.MerchantFacet> merchants(String query, String[] kinds,
+                                              boolean includeUnclassified,
+                                              String category, String gender,
+                                              String concentration, int limit) {
+        return repository.merchantFacets(country, query, kinds,
+                includeUnclassified, category, gender,
+                normalizeConcentration(concentration), limit);
+    }
+
     /**
      * Upper-cases a concentration, because the column is canonical.
      *
@@ -206,6 +215,7 @@ public class CatalogService {
                     product.slug(),
                     product.name(),
                     product.brand(),
+                    product.brandSlug(),
                     product.colorway(),
                     product.gender(),
                     product.mpn(),

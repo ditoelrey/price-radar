@@ -134,6 +134,21 @@ export type BrandFacet = {
   productCount: number;
 };
 
+/**
+ * One shop that sells inside the current listing scope.
+ *
+ * Same shape and same reason as `BrandFacet`. The sidebar's "Продавници
+ * што ги споредуваме" rail was a fixed array of the six sneaker shops, so
+ * a shopper on Машки парфеми read that we compare Sport Vision and Sizeer
+ * -- neither of which sells perfume -- and was not told about e-elixir or
+ * Schatze, which is where every offer on that page came from.
+ */
+export type MerchantFacet = {
+  slug: string;
+  name: string;
+  productCount: number;
+};
+
 export type ProductPage = {
   items: ProductCard[];
   page: number;
@@ -193,6 +208,17 @@ export type ProductDetail = {
   slug: string;
   name: string;
   brand: string;
+  /**
+   * The brand's own slug, as `?brand=` wants it.
+   *
+   * Optional only for cache skew: a payload rendered before the API served
+   * this field has none, and the breadcrumb falls back to dropping the
+   * brand filter rather than guessing a slug. Guessing is what it used to
+   * do -- lower-case the name, spaces to hyphens -- and that is wrong for
+   * 18 brands, most of them perfumeries: `dolce-&-gabbana`, `lancôme`,
+   * `joop!`, `van-cleef-&-arpels`.
+   */
+  brandSlug?: string;
   colorway: string | null;
   gender: string | null;
   mpn: string | null;
@@ -304,6 +330,33 @@ export async function fetchBrandFacets(
         gender: params.gender,
         concentration: params.concentration,
         limit: 40,
+      })}`,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The shops this listing actually compares.
+ *
+ * Silent on failure like `fetchBrandFacets`, and for the same reason: a
+ * listing missing its shop rail is still a usable listing. The caller
+ * renders nothing rather than falling back to a guess, because a wrong
+ * rail is what this replaced.
+ */
+export async function fetchMerchantFacets(
+  params: Pick<SearchParams, "q" | "kind" | "category" | "gender" | "concentration">,
+): Promise<MerchantFacet[]> {
+  try {
+    return await get<MerchantFacet[]>(
+      `/api/v1/merchants${buildQuery({
+        q: params.q,
+        kind: params.kind,
+        category: params.category,
+        gender: params.gender,
+        concentration: params.concentration,
+        limit: 20,
       })}`,
     );
   } catch {

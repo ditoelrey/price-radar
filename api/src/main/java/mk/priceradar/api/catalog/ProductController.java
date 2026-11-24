@@ -96,6 +96,27 @@ public class ProductController {
     }
 
     /**
+     * Shops with products under the given scope, biggest first.
+     *
+     * <p>Same parameters as {@code /brands}, and for the same reason: the
+     * sidebar asks which shops this page actually compares, and the answer
+     * has to be the page's own rather than a list written when the
+     * catalogue was only trainers.
+     */
+    @GetMapping("/merchants")
+    public List<Dtos.MerchantFacet> merchants(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) String gender,
+            @RequestParam(required = false) String concentration,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int limit) {
+        boolean isDefaultScope = kind == null || kind.isBlank();
+        return catalog.merchants(q, kindsFor(kind), isDefaultScope,
+                normalize(category), normalize(gender), concentration, limit);
+    }
+
+    /**
      * Lower-cases and trims a filter value, or returns null for a blank one.
      *
      * <p>No validation beyond that, deliberately: an unknown category or

@@ -153,11 +153,19 @@ export const FRAGRANCE_GENDER_COLUMNS: ReadonlyArray<{
  * opened with the rarest would bury the entry most people want.
  *
  * `value` is what reaches the API's `?concentration=`, and the last entry
- * names two: the shops shelve PARFUM and EXTRAIT together under Парфеми and
- * a shopper reading that word does not separate them. Keeping them apart in
- * the menu would offer two entries whose difference nobody can act on --
- * while still keeping them apart in the data, where "Parfum" and "Extrait
- * de Parfum" are genuinely different bottles at different prices.
+ * names four: PARFUM, EXTRAIT, ELIXIR and ABSOLU are all the concentrated
+ * form, the shops shelve them together under Парфеми, and a shopper reading
+ * that word does not separate them. Keeping them apart in the menu would
+ * offer four entries whose difference nobody can act on -- while still
+ * keeping them apart in the data, where "Parfum", "Extrait de Parfum",
+ * "Elixir de Parfum" and "Absolu de Parfum" are genuinely different bottles
+ * at different prices.
+ *
+ * The list has to hold every concentrated spelling the parser can produce,
+ * because these four entries are the only route into the vertical from the
+ * menu: a strength missing here is a product no shopper can reach. ELIXIR
+ * and ABSOLU were missing, and six bottles -- Gucci Guilty Elixir among
+ * them -- sat outside all four shortcuts.
  */
 export const CONCENTRATIONS: ReadonlyArray<{
   value: string;
@@ -169,7 +177,7 @@ export const CONCENTRATIONS: ReadonlyArray<{
   { value: "EDP", label: "Парфимирани води", short: "EDP" },
   { value: "EDC", label: "Колонски води", short: "EDC" },
   // No abbreviation: "Парфем - Парфеми" would be the same word twice.
-  { value: "PARFUM,EXTRAIT", label: "Парфеми", short: null },
+  { value: "PARFUM,EXTRAIT,ELIXIR,ABSOLU", label: "Парфеми", short: null },
 ];
 
 /**
@@ -243,6 +251,7 @@ export function byAlphaLadder(a: string, b: string): number {
 export const ACCESSORY_CATEGORIES: ReadonlyArray<{
   slug: string;
   label: string;
+  genders?: ReadonlyArray<GenderSlug>;
   hidden?: boolean;
 }> = [
   { slug: "bags_backpacks", label: "Торби и ранци" },
@@ -250,7 +259,15 @@ export const ACCESSORY_CATEGORIES: ReadonlyArray<{
   { slug: "socks", label: "Чорапи" },
   { slug: "protective_gear", label: "Кациги, наочари и ракавици" },
   { slug: "balls_training", label: "Топки и фитнес опрема" },
-  { slug: "skates_scooters", label: "Ролери и тротинети" },
+  // Kids only, and measured rather than assumed: 47 of its 49 products are
+  // children's, leaving one for Мажи and one for Жени. The leaf would be a
+  // link to a page with a single item in it, which is the dead facet this
+  // menu removed from the brand list for the same reason.
+  {
+    slug: "skates_scooters",
+    label: "Ролери и тротинети",
+    genders: ["kids"],
+  },
   // Shown from 2026-11-21: 106 products, once sport-m and Sport Vision
   // completed the Опрема vertical. The threshold this clears is the comment
   // above -- a leaf under a hundred products reads as an empty site.
@@ -295,17 +312,30 @@ export type Vertical = {
   /**
    * Whether the menu splits into Мажи / Жени / Деца columns.
    *
-   * True for shoes and clothing, where the departments hold different
-   * stock. False for Опрема, where they would not: 55 percent of Sport
-   * Vision's equipment is unisex and 66 percent of Sport Reality's, and
-   * since a men's listing already includes unisex, the two adult columns
-   * would be roughly 85 percent the same links. Two of the six shops do not
-   * gender their equipment section at all -- Sport Reality's sits outside
-   * the gender tabs entirely, and Sport-M publishes 758 articles with no
-   * gender in any URL.
+   * True for all three stocked verticals now, Опрема included.
    *
-   * Kids is the one cut that earns its place -- ролери, тротинети, кациги
-   * are a different shelf -- so it gets a link rather than a column.
+   * Опрема was false, and the reasoning was about the adult columns: 55
+   * percent of Sport Vision's equipment is unisex and 66 percent of Sport
+   * Reality's, a men's listing already includes unisex, so Мажи and Жени
+   * are roughly 85 percent the same links. That is still true, and it is
+   * still the weakest part of this menu.
+   *
+   * What it missed is the other direction. Without columns the only route
+   * to a leaf is ungendered -- `?kind=accessory&category=socks` -- and that
+   * listing holds every kids' item in the leaf. Measured: 151 of the 712
+   * products under Чорапи are kids', 210 of 1 060 under Капи, 117 of 444
+   * under Кациги, 717 across the vertical, 19 percent of it. A shopper
+   * looking at socks was shown 19-21 baby socks next to a men's three-pack
+   * and had no way to ask for one without the other.
+   *
+   * The "Опрема за деца" link in the old menu did not address that: it
+   * helps someone who wants kids' things find them, and does nothing for
+   * someone who does not. A gendered leaf link does, because `gender=men`
+   * excludes kids while still including unisex.
+   *
+   * So the duplication between the two adult columns is accepted as the
+   * price of the kids cut, rather than the kids cut being dropped to avoid
+   * it.
    */
   /**
    * Whether this vertical's menu lists strengths rather than category
@@ -348,7 +378,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     icon: Backpack,
     allLabel: "Сета опрема",
     categories: ACCESSORY_CATEGORIES,
-    genderColumns: false,
+    genderColumns: true,
   },
   {
     // The fourth vertical, V27. Its menu is the only one not built from

@@ -29,14 +29,17 @@ import { cn } from "@/lib/utils";
  * therefore cannot disagree.
  */
 
-const SHOPS = [
-  "Sport Vision",
-  "Sport Reality",
-  "Buzz Sneakers",
-  "Megasport",
-  "Sport-M",
-  "Sizeer",
-];
+/*
+ * The shop rail had the same disease as the brand list above, and it
+ * survived the fix because it looked like a static fact about the site
+ * rather than a filter. It was six sneaker shops, hardcoded, on every
+ * listing -- so Машки парфеми told a shopper we compare Sport Vision,
+ * Sport Reality, Buzz Sneakers, Megasport, Sport-M and Sizeer, none of
+ * which sells perfume, while naming neither shop its offers came from.
+ *
+ * It now comes from `GET /api/v1/merchants`, asked with this listing's own
+ * filters, so the rail cannot claim a comparison the page does not make.
+ */
 
 /**
  * Left rail, as in the references.
@@ -51,6 +54,7 @@ export function FilterSidebar({
   filters,
   volumes,
   brandFacets,
+  merchantFacets,
 }: {
   sizes: number[];
   /**
@@ -86,9 +90,24 @@ export function FilterSidebar({
     name: string;
     productCount: number;
   }>;
+  /**
+   * The shops this listing compares, biggest first.
+   *
+   * Empty renders no section, like `brandFacets`. The heading claims
+   * something -- that these are the shops we compare here -- so an empty
+   * list must print nothing rather than a heading over nothing, and a
+   * failed facet call must not fall back to a guess. Guessing is what the
+   * old fixed array did.
+   */
+  merchantFacets?: ReadonlyArray<{
+    slug: string;
+    name: string;
+    productCount: number;
+  }>;
 }) {
   const { sizeEu, size, brand, sort, kind, category, gender } = filters;
   const brands = brandFacets ?? [];
+  const shops = merchantFacets ?? [];
   // Rendered with the unit. The picker takes strings and writes them into
   // `?size=` verbatim, which is exactly what the API wants to read back.
   const volumeLabels = (volumes ?? []).map((ml) => `${ml}ml`);
@@ -291,23 +310,29 @@ export function FilterSidebar({
           </>
         )}
 
-        <Separator />
+        {shops.length > 0 && (
+          <>
+            <Separator />
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">Продавници што ги споредуваме</h2>
-          <ul className="space-y-1 text-xs text-muted-foreground">
-            {SHOPS.map((shop) => (
-              <li key={shop} className="flex items-center gap-2">
-                <span className="size-1.5 rounded-full bg-price" />
-                {shop}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
-            Понудите се подредени според вкупна цена со достава — никогаш
-            според тоа колку продавницата ни плаќа.
-          </p>
-        </section>
+            <section>
+              <h2 className="mb-2 text-sm font-semibold">
+                Продавници што ги споредуваме
+              </h2>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {shops.map((shop) => (
+                  <li key={shop.slug} className="flex items-center gap-2">
+                    <span className="size-1.5 rounded-full bg-price" />
+                    {shop.name}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground">
+                Понудите се подредени според вкупна цена со достава — никогаш
+                според тоа колку продавницата ни плаќа.
+              </p>
+            </section>
+          </>
+        )}
       </div>
     </aside>
   );

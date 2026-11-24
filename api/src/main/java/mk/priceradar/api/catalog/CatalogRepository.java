@@ -167,9 +167,9 @@ public class CatalogRepository {
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:q AS text)
-                    OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
+                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
+                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
+                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
@@ -269,9 +269,9 @@ public class CatalogRepository {
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:q AS text)
-                    OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
+                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
+                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
+                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
@@ -347,6 +347,8 @@ public class CatalogRepository {
         }
         var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
+                .param("qLike", likeQuery(query))
+                .param("qSku", skuQuery(query))
                 .param("brand", blankToNull(brandSlug))
                 .param("kinds", kinds)
                 .param("includeUnclassified", includeUnclassified)
@@ -434,9 +436,9 @@ public class CatalogRepository {
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:q AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:q AS text)
-                    OR b.name           ILIKE '%' || CAST(:q AS text) || '%')
+                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
+                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
+                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
                AND (CAST(:category AS text) IS NULL
                     OR cat.slug = CAST(:category AS text))
                AND (CAST(:gender AS text) IS NULL
@@ -451,6 +453,86 @@ public class CatalogRepository {
              LIMIT :limit
             """;
 
+    /**
+     * The shops selling inside a listing scope, with how much each has.
+     *
+     * <p>The WHERE clause is {@link #BRAND_FACETS}'s, which is
+     * {@code LIST_BASE}'s, so the rail cannot name a shop the listing would
+     * not show. The join is the only difference: a merchant reaches a
+     * product through an offer, and only an active one counts -- a shop
+     * whose listing went away still has rows, and naming it would claim a
+     * comparison the page cannot make.
+     *
+     * <p>{@code count(DISTINCT p.id)} rather than counting offers, so the
+     * number means what it means beside a brand: products, not listings.
+     */
+    private static final String MERCHANT_FACETS = """
+            SELECT m.slug, m.name, count(DISTINCT p.id) AS product_count
+              FROM product_price_summary s
+              JOIN product p ON p.id = s.product_id
+              JOIN brand   b ON b.id = p.brand_id
+              JOIN merchant_offer mo
+                   ON mo.product_id = p.id AND mo.status = 'active'
+              JOIN merchant m ON m.id = mo.merchant_id
+              LEFT JOIN category cat ON cat.id = p.category_id
+             WHERE s.country_code = CAST(:country AS text)
+               AND s.min_price_minor IS NOT NULL
+               AND (CAST(:kinds AS text[]) IS NULL
+                    OR (cat.kind IS NULL AND :includeUnclassified)
+                    OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               AND (CAST(:q AS text) IS NULL
+                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
+                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
+                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
+               AND (CAST(:category AS text) IS NULL
+                    OR cat.slug = CAST(:category AS text))
+               AND (CAST(:gender AS text) IS NULL
+                    OR p.gender::text = CAST(:gender AS text)
+                    OR (CAST(:gender AS text) IN ('men', 'women')
+                        AND p.gender = 'unisex'))
+               AND (CAST(:concentration AS text) IS NULL
+                    OR p.concentration = ANY(
+                           string_to_array(CAST(:concentration AS text), ',')))
+             GROUP BY m.slug, m.name
+             ORDER BY product_count DESC, m.name
+             LIMIT :limit
+            """;
+
+    /** The facet SQL, exposed so a test can hold it beside the listing's. */
+    static String merchantFacetsSql() {
+        return MERCHANT_FACETS;
+    }
+
+    public List<Dtos.MerchantFacet> merchantFacets(String country, String query,
+                                                   String[] kinds,
+                                                   boolean includeUnclassified,
+                                                   String categorySlug,
+                                                   String gender,
+                                                   String concentration,
+                                                   int limit) {
+        return db.sql(MERCHANT_FACETS)
+                .param("country", country)
+                .param("q", normalizeQuery(query))
+                .param("qLike", likeQuery(query))
+                .param("qSku", skuQuery(query))
+                .param("kinds", kinds)
+                .param("includeUnclassified", includeUnclassified)
+                .param("category", blankToNull(categorySlug))
+                .param("gender", blankToNull(gender))
+                .param("concentration", blankToNull(concentration))
+                .param("limit", limit)
+                .query((rs, rowNum) -> new Dtos.MerchantFacet(
+                        rs.getString("slug"),
+                        rs.getString("name"),
+                        rs.getInt("product_count")))
+                .list();
+    }
+
+    /** The listing SQL, exposed so a test can hold the facets beside it. */
+    static String listBaseSql() {
+        return LIST_BASE;
+    }
+
     /** The facet SQL, exposed so a test can hold it beside the listing's. */
     static String brandFacetsSql() {
         return BRAND_FACETS;
@@ -464,6 +546,8 @@ public class CatalogRepository {
         return db.sql(BRAND_FACETS)
                 .param("country", country)
                 .param("q", normalizeQuery(query))
+                .param("qLike", likeQuery(query))
+                .param("qSku", skuQuery(query))
                 .param("kinds", kinds)
                 .param("includeUnclassified", includeUnclassified)
                 .param("category", blankToNull(categorySlug))
@@ -538,7 +622,8 @@ public class CatalogRepository {
     // ------------------------------------------------------------------
 
     private static final String PRODUCT_BY_SLUG = """
-            SELECT p.id, p.slug, p.canonical_name, b.name AS brand, p.colorway,
+            SELECT p.id, p.slug, p.canonical_name, b.name AS brand,
+                   b.slug AS brand_slug, p.colorway,
                    p.gender::text AS gender, p.primary_mpn,
                    cat.kind::text AS category_kind, cat.slug AS category,
                    cat.name_mk AS category_mk,
@@ -642,6 +727,11 @@ public class CatalogRepository {
                       size_label
             """;
 
+    /** The detail SQL, exposed so a test can pin what the breadcrumb needs. */
+    static String productBySlugSql() {
+        return PRODUCT_BY_SLUG;
+    }
+
     public Optional<ProductRow> findProductBySlug(String slug) {
         return db.sql(PRODUCT_BY_SLUG).param("slug", slug)
                 .query((rs, rowNum) -> new ProductRow(
@@ -649,6 +739,7 @@ public class CatalogRepository {
                         rs.getString("slug"),
                         rs.getString("canonical_name"),
                         rs.getString("brand"),
+                        rs.getString("brand_slug"),
                         rs.getString("colorway"),
                         rs.getString("gender"),
                         rs.getString("primary_mpn"),
@@ -709,6 +800,7 @@ public class CatalogRepository {
     // ------------------------------------------------------------------
 
     public record ProductRow(long id, String slug, String name, String brand,
+                             String brandSlug,
                              String colorway, String gender, String mpn,
                              String imageUrl, String categoryKind,
                              String category, String categoryMk,
@@ -745,6 +837,65 @@ public class CatalogRepository {
             return null;
         }
         return query.trim();
+    }
+
+    /**
+     * The query as an ILIKE pattern, with punctuation made permissive.
+     *
+     * <p>Two jobs, and the first one was a bug. A shopper who copies a name
+     * off a shop's page brings its punctuation with them, and we did not
+     * store it: `clean_model_name` turns "adidas 3-Stripes" into
+     * "Adidas 3 Stripes" on one shop and "Adidas 3stripes" on another. So
+     * `3-stripes` matched neither spelling and the search came back empty on
+     * a product we hold six of.
+     *
+     * <p>Each run of punctuation becomes {@code %}, which matches the space,
+     * the nothing, or the hyphen itself. Spaces stay literal: turning those
+     * into wildcards too would let "nike air" match a name with twelve words
+     * between them, and that is a different search from the one asked for.
+     *
+     * <p>The second job is that {@code %} and {@code _} are ILIKE
+     * metacharacters and arrived unescaped, so a shopper typing a lone
+     * {@code %} matched the whole catalogue. They are escaped first, and the
+     * punctuation rule is written so it cannot eat the escapes it just
+     * added.
+     */
+    static String likeQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        // A query with no letter and no digit in it matches nothing. Caught
+        // live: "---" reduced to "%", the predicate wrapped that in two
+        // more, and the search answered with the entire catalogue.
+        if (query.codePoints().noneMatch(Character::isLetterOrDigit)) {
+            return null;
+        }
+        String escaped = query.trim()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+        return escaped.replaceAll("[^\\p{L}\\p{N}\\\\%_ ]+", "%");
+    }
+
+    /**
+     * The query as an article code, punctuation stripped and upper-cased.
+     *
+     * <p>Sport Vision, Buzz and Nike print {@code HV0949-313} and
+     * {@code 9A0693-AA7}; `normalize_sku` stored {@code HV0949313} and
+     * {@code 9A0693AA7}. Measured: all 29 498 stored MPNs are free of
+     * punctuation, so the normalisation is entirely one-sided -- the column
+     * needs no expression index and the query needs stripping.
+     *
+     * <p>Returns null where nothing is left, so a query of pure punctuation
+     * does not become an empty pattern that matches every unnamed article.
+     */
+    static String skuQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        String bare = query.replaceAll("[^A-Za-z0-9]", "")
+                .toUpperCase(java.util.Locale.ROOT);
+        return bare.isEmpty() ? null : bare;
     }
 
     private static String blankToNull(String value) {

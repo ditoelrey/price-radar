@@ -145,6 +145,24 @@ export default async function ProductDetailPage({
   // Looked up rather than assumed: an unclassified product has no vertical
   // and gets a plain link to everything instead of a wrong one.
   const vertical = VERTICALS.find((v) => v.kind === product.categoryKind);
+
+  // What every step of the trail below the first one is scoped to.
+  //
+  // The brand step used to be built by hand -- `/products?brand=` and the
+  // display name lower-cased -- which dropped the scope and guessed the
+  // slug. Both halves were wrong. `/products` with no `kind` means
+  // footwear, so Calvin Klein on a perfume page led to Calvin Klein
+  // *trainers*, of which there are none, and Adidas on a hoodie led to
+  // Adidas shoes rather than Adidas hoodies.
+  //
+  // `kind: "all"` where the product has no vertical: an unclassified
+  // product's brand link would otherwise fall into the footwear default
+  // and claim the brand has nothing, when what we actually know is that we
+  // do not know where it belongs.
+  const trailScope = {
+    kind: vertical?.kind ?? "all",
+    category: product.category ?? undefined,
+  };
   const rows = rowsFor(product.offers, sizeEu, size);
   const best = rows[0];
 
@@ -212,9 +230,7 @@ export default async function ProductDetailPage({
             end: the link went to all footwear. */}
         <nav className="mb-4 flex items-center gap-1 text-xs text-muted-foreground">
           <Link
-            href={listingHref(
-              vertical ? { kind: vertical.kind } : {},
-            )}
+            href={listingHref({ kind: trailScope.kind })}
             className="hover:text-foreground"
           >
             {vertical?.label ?? "Производи"}
@@ -223,10 +239,7 @@ export default async function ProductDetailPage({
           {product.categoryMk && product.category && (
             <>
               <Link
-                href={listingHref({
-                  kind: product.categoryKind ?? undefined,
-                  category: product.category,
-                })}
+                href={listingHref(trailScope)}
                 className="hover:text-foreground"
               >
                 {product.categoryMk}
@@ -235,7 +248,7 @@ export default async function ProductDetailPage({
             </>
           )}
           <Link
-            href={`/products?brand=${product.brand.toLowerCase().replace(/\s+/g, "-")}`}
+            href={listingHref({ ...trailScope, brand: product.brandSlug })}
             className="hover:text-foreground"
           >
             {product.brand}

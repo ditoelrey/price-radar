@@ -63,6 +63,17 @@ public final class Dtos {
     public record BrandFacet(String slug, String name, int productCount) {
     }
 
+    /**
+     * One shop that actually sells inside the current listing scope.
+     *
+     * <p>Same reason as {@link BrandFacet}: the sidebar used to name six
+     * sneaker shops on every listing, so a shopper on Машки парфеми was
+     * told the site compares Sport Vision and Sizeer -- which sell no
+     * perfume -- and was not told about the two perfumeries that do.
+     */
+    public record MerchantFacet(String slug, String name, int productCount) {
+    }
+
     public record ProductCard(
             String slug,
             String name,
@@ -230,6 +241,19 @@ public final class Dtos {
             String slug,
             String name,
             String brand,
+            /**
+             * The brand's own slug, as {@code ?brand=} wants it.
+             *
+             * <p>Served rather than derived, because the breadcrumb used to
+             * build it from the display name -- lower-case and spaces to
+             * hyphens. That is wrong for 18 brands the catalogue carries,
+             * most of them perfumeries: "Dolce & Gabbana" became
+             * {@code dolce-&-gabbana} and not {@code dolce-gabbana},
+             * "Lancôme" kept its circumflex, "Joop!" its exclamation mark.
+             * A slug is a fact the database holds; guessing it on the
+             * client produced a dead link on every one of them.
+             */
+            String brandSlug,
             String colorway,
             String gender,
             String mpn,

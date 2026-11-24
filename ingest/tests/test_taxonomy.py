@@ -13,7 +13,7 @@ import pytest
 from mkagg.normalize import clean_model_name
 from mkagg.taxonomy import (FOOTWEAR_SLUGS, KNOWN_GENDERS, KNOWN_SLUGS,
                             PARENT_SLUGS, classify, classify_gender,
-                            is_footwear)
+                            is_footwear, read_declared_audience)
 
 
 class TestClassifyRealTitles:
@@ -401,6 +401,57 @@ class TestApparelWordsThatAreAlsoShoes:
         the title now lands correctly, and re-deriving fixes the row.
         """
         assert classify("NIKE W NSW TF RPL REVIVAL PARKA") == "jackets"
+
+
+class TestTheWordTheShopsPrintOnShortLabels:
+    """"Parfum", which the perfume rule did not know.
+
+    The rule held the Macedonian transliterations -- parfem, parfemi,
+    parfumi -- and the full phrase "eau de parfum", but not the bare word.
+    So a title saying only "Parfum" matched nothing in the fragrance block,
+    fell through to apparel, and matched whatever English word happened to
+    be in the product's name.
+
+    Two real rows: `ralph-lauren-polo-blue-parfum-147011` and
+    `ralph-lauren-polo-red-parfum-1470` were filed as `tshirts`, via `polo`.
+    They sat in Облека, were unreachable from Парфеми, and put a perfumery
+    on the clothing page's shop rail. Their own shelf said "Машки Parfum"
+    and could not rescue them, because that classified to nothing for the
+    very same reason.
+    """
+
+    def test_a_polo_fragrance_is_not_a_polo_shirt(self):
+        assert classify("Ralph Lauren Polo Blue Parfum") == "perfume"
+        assert classify("Ralph Lauren Polo Red Parfum") == "perfume"
+
+    def test_a_polo_shirt_still_is_one(self):
+        """The whole risk of the fix, and it is not realised: `polo` still
+        decides a title that does not also name a strength."""
+        assert classify("Ralph Lauren Polo majica") == "tshirts"
+        assert classify("PUMA ESS Polo") == "tshirts"
+
+    def test_the_shelf_resolves_on_its_own_now(self):
+        """What made the two rows unrecoverable. `derive` ranks a shop's
+        own shelf above the title, so this is the signal that should have
+        decided it, and it classified to nothing."""
+        assert classify("Машки Parfum") == "perfume"
+        assert classify("Женски Parfum") == "perfume"
+
+    def test_the_longer_phrases_still_work(self):
+        """Bare "parfum" subsumes "eau de parfum", and the triple stays in
+        the rule for readability. This is the check that it still reads."""
+        assert classify("Polo Blue Eau de Parfum") == "perfume"
+        assert classify("Versace Eau de toilette") == "perfume"
+        assert classify("Acqua di Parma Eau de Cologne") == "perfume"
+
+    def test_a_strength_that_names_a_fragrance_is_still_refused(self):
+        """Unchanged, and it must stay that way: "elixir" and "intense"
+        name a bottle rather than an article type, and `mkagg.fragrance`
+        keeps them in the line name for that reason. The shelf carries the
+        category for these -- measured, 106 live titles at the two
+        perfumeries name no strength at all, and that is honest."""
+        assert classify("Giorgio Armani Code Elixir") is None
+        assert classify("Christina Aguilera Violet Noir") is None
 
 
 class TestGenderFromTitle:
@@ -910,3 +961,53 @@ class TestSwimIsAGarmentWordNotAGearWord:
         """
         assert classify("Шорцеви за пливање Speedo") == "swimwear"
         assert classify("Костим за капење Arena") == "swimwear"
+
+
+class TestWhoTheShopSaysItIsFor:
+    """`Пол` and `Возраст`, and why the age band decides.
+
+    Both platforms publish both rows on every product page. Read in the
+    wrong order they disagree, and the disagreement is not rare: Sport
+    Vision prints `Пол: Унисекс` beside `Возраст: За мали деца (4-10 год.)`
+    on children's socks, and 151 of the 712 products under Опрема -> Чорапи
+    are children's.
+    """
+
+    def test_the_age_band_beats_the_department(self):
+        assert read_declared_audience(
+            "Унисекс", "За мали деца (4-10 год.)") == "kids"
+        assert read_declared_audience("Машки", "За бебиња (0-4 год.)") == "kids"
+
+    def test_an_adult_band_lets_the_department_answer(self):
+        assert read_declared_audience("Машки", "За возрасни") == "men"
+        assert read_declared_audience("Женски", "За возрасни") == "women"
+        assert read_declared_audience("Унисекс", "За возрасни") == "unisex"
+
+    def test_a_kids_department_is_read_too(self):
+        """Sport Vision splits children by sex: Деца, Деца-девојчиња,
+        Деца-момчиња. All three are the kids department."""
+        for pol in ("Деца", "Деца-девојчиња", "Деца-момчиња"):
+            assert read_declared_audience(pol, None) == "kids", pol
+
+    def test_the_teenager_band_transliterates(self):
+        """`translit_mk` renders џ as `dj`, so "тинејџери" arrives as
+        "tinejdjeri". A rule written for "tinejdzeri" matches nothing, and
+        23 Sport Vision products carry this band."""
+        assert read_declared_audience(
+            None, "За тинејџери (8-14 год.)") == "kids"
+        assert read_declared_audience(
+            None, "За тинејџери (од 8-16 год.)") == "kids"
+
+    def test_unisex_survives_here_where_a_title_could_not_say_it(self):
+        """`classify_gender` is forbidden from returning unisex, because a
+        title cannot show it. A shop writing `Пол: Унисекс` states it."""
+        assert read_declared_audience("Унисекс", None) == "unisex"
+
+    def test_a_contradiction_is_refused_rather_than_guessed(self):
+        """`Пол: Деца` under `Возраст: За возрасни` cannot both be true,
+        and the honest answer is neither."""
+        assert read_declared_audience("Деца", "За возрасни") is None
+
+    def test_silence_stays_silence(self):
+        assert read_declared_audience(None, None) is None
+        assert read_declared_audience("", "") is None

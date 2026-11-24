@@ -22,6 +22,7 @@ from decimal import Decimal
 
 from ..models import RawOffer, RawVariant
 from ..normalize import normalize_size, normalize_sku, parse_price_minor
+from ..taxonomy import read_declared_audience
 from .base import (Adapter, as_text, datalayer_product_codes, jsonld_product,
                    ld_image, ld_offer, ld_text, og_image, register,
                    rescue_field)
@@ -70,6 +71,32 @@ def _page_title(html: str) -> str | None:
         if text:
             return text
     return None
+
+
+#: The specification table all three shops on this platform render::
+#:
+#:     <tr class="attr-pol"><td>Пол</td><td>Унисекс</td></tr>
+#:     <tr class="attr-vozrast"><td>Возраст</td><td>За мали деца (4-10 год.)</td></tr>
+#:
+#: Anchored on the row's own class rather than on the label text, and that
+#: is the whole trick: every page's navigation menu links a "Поло блуза"
+#: and a "Поло маици" shelf, so a search for "Пол" finds those long before
+#: it finds the product's own gender. The first pass at this audit read a
+#: navigation link as a sock's gender for exactly that reason.
+_ATTR_ROW = r'<tr[^>]*class="[^"]*attr-{name}[^"]*"[^>]*>(.*?)</tr>'
+_CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
+_STRIP_TAGS = re.compile(r"<[^>]+>")
+
+
+def spec_attr(html: str, name: str) -> str | None:
+    """The value cell of ``<tr class="attr-NAME">``, or None."""
+    row = re.search(_ATTR_ROW.format(name=name), html, re.S)
+    if not row:
+        return None
+    cells = _CELL.findall(row.group(1))
+    if len(cells) < 2:
+        return None
+    return " ".join(_STRIP_TAGS.sub(" ", cells[-1]).split()) or None
 
 
 class SportVisionAdapter(Adapter):
@@ -131,6 +158,20 @@ class SportVisionAdapter(Adapter):
         if not store_id or not title:
             return None
 
+        # Who the shop says this is for. Published on every product page
+        # by all three shops here and read by nothing until now, which is
+        # why 339 Sport Vision socks offers reached the catalogue with no
+        # gender: their gender came from the facet the crawler walked, was
+        # stamped on the product once at creation, and survived only
+        # because `derive` declines to clear what it cannot confirm.
+        #
+        # Same channel `aspnet_mk` already uses for its own Спецификации
+        # table, so `derive` needs to learn nothing new.
+        audience = read_declared_audience(spec_attr(html, "pol"),
+                                          spec_attr(html, "vozrast"))
+        if audience:
+            extractors["gender"] = "css"
+
         price_minor = parse_price_minor(price_raw, minor_unit=0)
         variants = self._parse_sizes(html, price_minor, currency)
         if variants:
@@ -153,6 +194,7 @@ class SportVisionAdapter(Adapter):
             currency_code=currency,
             variants=variants,
             extractors=extractors,
+            gender_hint=audience,
         )
 
     @staticmethod

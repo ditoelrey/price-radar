@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
 
-import { fetchBrandFacets, searchProducts } from "@/lib/api";
+import {
+  fetchBrandFacets,
+  fetchMerchantFacets,
+  searchProducts,
+} from "@/lib/api";
 import { formatSizeEu } from "@/lib/format";
 import { FilterSidebar } from "@/components/catalog/filter-sidebar";
 import { byAlphaLadder, listingHref, listingTitle } from "@/lib/navigation";
@@ -73,9 +77,14 @@ export default async function ProductsPage({
   // The facet is asked WITHOUT the brand filter: its job is to say which
   // brands this scope has, and passing the current brand would reduce that
   // answer to the brand already chosen.
-  const [result, brandFacets] = await Promise.all([
+  //
+  // The shop rail is asked the same way and in the same trip. It used to be
+  // a fixed list of the six sneaker shops, which on a Парфеми listing named
+  // six shops that sell no perfume and omitted the two that do.
+  const [result, brandFacets, merchantFacets] = await Promise.all([
     searchProducts({ ...filters, page, pageSize: 24 }),
     fetchBrandFacets({ q, kind, category, gender, concentration }),
+    fetchMerchantFacets({ q, kind, category, gender, concentration }),
   ]);
 
   // Bottle volumes present in this result set, smallest first. Plain
@@ -138,6 +147,7 @@ export default async function ProductsPage({
             filters={filters}
             volumes={volumes}
             brandFacets={brandFacets}
+            merchantFacets={merchantFacets}
           />
 
           <section className="min-w-0 flex-1">

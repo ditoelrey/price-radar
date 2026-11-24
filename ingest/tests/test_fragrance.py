@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from mkagg.fragrance import (CONCENTRATIONS, NOT_CONCENTRATION, is_single_bottle,
-                             line_name, read_concentration, read_gender)
+from mkagg.fragrance import (CONCENTRATIONS, NOT_CONCENTRATION, identity_key,
+                             is_single_bottle, line_name, read_concentration,
+                             read_gender)
 
 
 def key(title, brand, shelf=None):
@@ -225,3 +226,81 @@ class TestWhatIsNotABottleOfPerfume:
     def test_an_empty_title_decides_nothing(self):
         assert not is_single_bottle("")
         assert not is_single_bottle(None)
+
+
+class TestTheMatchKey:
+    """`identity_key` is narrower than `line_name` on purpose.
+
+    `line_name` gives the catalogue a display name -- the shop's own words.
+    This gives the comparison key. Every case below is a live cross-shop
+    pair that was two product pages before it existed.
+    """
+
+    def test_a_house_of_the_brand_comes_off(self):
+        """e-elixir prints the house, Schatze does not. Six bottles."""
+        assert identity_key("Emporio Armani Stronger With You",
+                            "Giorgio Armani") == "stronger with you"
+        assert identity_key("Stronger With You",
+                            "Giorgio Armani") == "stronger with you"
+
+    def test_a_house_is_not_guessed_from_the_shape(self):
+        """"Acqua Di Gio" stands in exactly the same place as "Emporio
+        Armani" and is a fragrance, not a house. Only the table separates
+        them, which is why there is a table."""
+        assert identity_key("Acqua Di Gio Profumo",
+                            "Giorgio Armani") == "acqua di gio profumo"
+
+    def test_the_brand_echoed_mid_name_comes_off(self):
+        """`line_name` strips the brand as a prefix only. Schatze puts it
+        at the end as often: "Candy Prada", "Fakhar Lattafa"."""
+        assert identity_key("Candy Prada", "Prada") == "candy"
+        assert identity_key("Fakhar Lattafa", "Lattafa") == "fakhar"
+        assert identity_key("Armani Code", "Giorgio Armani") == "code"
+
+    def test_a_dangling_by_goes_with_it(self):
+        """"Asad By Lattafa" against e-elixir's "Asad". Removing the brand
+        leaves a trailing "by" that would keep the two apart on its own."""
+        assert identity_key("Asad By Lattafa", "Lattafa") == "asad"
+        assert identity_key("Phantom By Paco Rabanne",
+                            "Paco Rabanne") == "phantom"
+
+    def test_an_audience_marker_comes_off(self):
+        """The largest cause: 21 of 36 measured splits."""
+        assert identity_key("Guilty Pour Femme", "Gucci") == "guilty"
+        assert identity_key("Code Femme", "Giorgio Armani") == "code"
+        assert identity_key("9am Dive Unisex", "Afnan") == "9am dive"
+        assert identity_key("Eros Pour Homme", "Versace") == "eros"
+
+    def test_word_order_falls_out_of_it(self):
+        """Valentino's two shops disagree about where "Donna" goes, not
+        about whether to print it."""
+        assert (identity_key("Donna Born In Roma", "Valentino")
+                == identity_key("Born In Roma Donna", "Valentino")
+                == "born in roma")
+
+    def test_a_name_made_only_of_removable_words_survives(self):
+        """Versace's own "Pour Homme" is the fragrance this module was
+        built around. Reduced to nothing it would key on the empty string
+        and collect every unreadable Versace title in the shop."""
+        assert identity_key("Pour Homme", "Versace") == "pour homme"
+        assert identity_key("Armani", "Giorgio Armani") == "armani"
+
+    def test_a_flanker_is_left_alone(self):
+        """The whole risk. "Magnetic Man" leads with an extra word and is
+        not "Man"; "Asad Elixir" trails one and is not "Asad". Position
+        tells you nothing, which is why no shape rule is used."""
+        assert identity_key("Magnetic Man", "Bruno Banani") == "magnetic man"
+        assert identity_key("Asad Elixir", "Lattafa") == "asad elixir"
+        assert identity_key("Asad Bourbon", "Lattafa") == "asad bourbon"
+        assert identity_key("Born In Roma Intense",
+                            "Valentino") == "born in roma intense"
+
+    def test_a_common_brand_word_is_not_stripped_alone(self):
+        """"The Merchant of Venice" would otherwise strip "the" and "of"
+        out of every line it names."""
+        assert identity_key("The Nobleman", "The Merchant of Venice") \
+            == "the nobleman"
+
+    def test_nothing_in_gives_nothing_out(self):
+        assert identity_key(None, "Versace") is None
+        assert identity_key("", "Versace") is None

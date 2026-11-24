@@ -226,6 +226,131 @@ def line_name(title: str | None, brand: str | None = None) -> str | None:
     return flat or None
 
 
+#: A brand's own sub-houses, as the shops print them inside a line name.
+#:
+#: Hand-curated, and it has to be: nothing in the string tells "Emporio
+#: Armani" (a house of Giorgio Armani) from "Acqua Di Gio" (a fragrance line
+#: of the same brand). Both are two words standing in front of the name, both
+#: repeat across a dozen products, and only knowing the brand separates them.
+#:
+#: Measured rather than guessed. Of every repeated leading word-pair in the
+#: catalogue, exactly one causes a cross-shop split: e-elixir prints "Emporio
+#: Armani Stronger With You" and Schatze prints "Stronger With You", six
+#: bottles over. The other repeated prefixes -- Van Cleef's "Collection
+#: Extraordinaire", Gisada's "Luxury Collection", Armaf's "Club De" -- are
+#: printed by both shops or stocked by one, so they split nothing and are
+#: deliberately absent. An unused rule is an untested one.
+HOUSE_NAMES: dict[str, tuple[str, ...]] = {
+    "giorgio armani": ("emporio armani", "armani prive"),
+}
+
+#: Audience markers that belong to a fragrance's printed name, as opposed to
+#: the shelf words :data:`_AUDIENCE` removes.
+#:
+#: These are the ones :func:`line_name` keeps, and keeping them is right for
+#: a display name: "Versace Pour Homme" is what the bottle says. But they are
+#: also the single largest cause of the same bottle becoming two products --
+#: 21 of 36 measured cross-shop splits -- because the two shops disagree on
+#: whether to print them::
+#:
+#:     e-elixir  "Eros"                 Schatze  "Eros Pour Homme"
+#:     e-elixir  "Code"                 Schatze  "Code Femme"
+#:     e-elixir  "9am Dive Unisex"      Schatze  "9am Dive"
+#:
+#: Removing them is safe only because the gender stays in the key: "Dylan
+#: Blue Pour Homme" and "Dylan Blue Pour Femme" both reduce to "dylan blue"
+#: and are held apart by men-versus-women, which is the veto this catalogue
+#: already applies. Measured: ignoring gender instead would wrongly collapse
+#: 39 products.
+_NAME_AUDIENCE = re.compile(
+    r"(?<![a-z0-9])(?:"
+    r"pour homme|pour femme|pour hommes|pour femmes"
+    r"|uomo|donna|homme|femme|unisex|uniseks"
+    r")(?![a-z0-9])")
+
+#: A brand word left standing alone by its neighbours' removal. Removed only
+#: as the last step, and only when it is dangling: Schatze prints "Asad By
+#: Lattafa" where e-elixir prints "Asad", and dropping "lattafa" leaves a
+#: trailing "by" that keeps the two apart.
+_DANGLING_BY = re.compile(r"(?:^by | by$)")
+
+#: Brand words too common to remove on their own. "The Merchant of Venice"
+#: would otherwise strip "the" and "of" out of every line it names, and
+#: those words carry meaning inside a fragrance name. They still come off as
+#: part of a longer run, which is where they are actually a brand echo.
+_WEAK_BRAND_WORDS = frozenset({"the", "of", "and", "de", "le", "la", "du",
+                               "des", "di", "by", "von", "van", "el"})
+
+
+def _without(text: str, phrase: str) -> str:
+    """`text` with whole-word occurrences of `phrase` removed."""
+    return " ".join(re.sub(
+        rf"(?<![a-z0-9]){re.escape(phrase)}(?![a-z0-9])", " ", text).split())
+
+
+def identity_key(line: str | None, brand: str | None = None) -> str | None:
+    """The line name reduced to what both shops agree on.
+
+    :func:`line_name` gives the fragrance its display name -- the shop's own
+    words, which a shopper recognises. This gives its *match* key, which is
+    narrower, and the two are deliberately different things: the catalogue
+    shows "Emporio Armani Stronger With You" and matches it on "stronger
+    with you".
+
+    Four reductions, each a closed vocabulary rather than a shape::
+
+        identity_key("Emporio Armani Stronger With You", "Giorgio Armani")
+            -> "stronger with you"      # a house of the brand
+        identity_key("Armani Code", "Giorgio Armani")
+            -> "code"                   # the brand echoed mid-name
+        identity_key("Asad By Lattafa", "Lattafa")
+            -> "asad"                   # and the "by" it leaves behind
+        identity_key("Guilty Pour Femme", "Gucci")
+            -> "guilty"                 # an audience marker
+
+    **Why a vocabulary and not a shape.** The obvious rule is that extra
+    *leading* words are a house prefix while extra *trailing* words are a
+    flanker. It is wrong in both directions, measured on live pairs: "Bruno
+    Banani Magnetic Man" leads with an extra word and is not "Man", while
+    "Asad By Lattafa" trails two and is "Asad". Position carries no
+    information here. Only the words themselves do.
+
+    **Why a stage that empties the string is skipped.** A fragrance can be
+    named entirely out of removable words. Versace's own "Pour Homme" is the
+    case the whole module was built around, and reducing it to nothing would
+    key it on the empty string and collect every unreadable title Versace
+    sells. Where a reduction would leave nothing, the name *is* those words,
+    so they stay.
+    """
+    out = _fold(line)
+    if not out:
+        return None
+
+    brand_flat = _fold(brand)
+    for house in HOUSE_NAMES.get(brand_flat, ()):
+        out = _without(out, house) or out
+
+    # The brand's own words, longest run first so "emporio armani" goes
+    # before "armani" and cannot leave an orphan "emporio" behind.
+    #
+    # Anywhere in the string, not just as a prefix, which is what
+    # `line_name` does. The echo is as often in the middle or at the end:
+    # Schatze prints "Candy Prada", "Fakhar Lattafa" and "Armani Code",
+    # and a prefix-only strip leaves all three unmatched.
+    words = brand_flat.split()
+    for size in range(len(words), 0, -1):
+        for start in range(len(words) - size + 1):
+            run = words[start:start + size]
+            if size == 1 and run[0] in _WEAK_BRAND_WORDS:
+                continue
+            out = _without(out, " ".join(run)) or out
+    out = " ".join(_DANGLING_BY.sub(" ", out).split()) or out
+
+    # Last, because the audience marker is the one reduction that can
+    # legitimately consume a whole name.
+    return " ".join(_NAME_AUDIENCE.sub(" ", out).split()) or out or None
+
+
 # -----------------------------------------------------------------------------
 # Gender
 # -----------------------------------------------------------------------------
@@ -400,5 +525,5 @@ def most_specific_shelf(names) -> str | None:
 
 
 __all__ = ["CONCENTRATIONS", "NOT_CONCENTRATION", "SHELF_GENDERS",
-           "read_concentration", "line_name", "read_gender",
-           "is_single_bottle", "most_specific_shelf"]
+           "HOUSE_NAMES", "read_concentration", "line_name", "identity_key",
+           "read_gender", "is_single_bottle", "most_specific_shelf"]
