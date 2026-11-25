@@ -38,6 +38,23 @@ import { type SortKey } from "@/lib/sort";
 export type GenderSlug = "men" | "women" | "kids";
 
 /**
+ * What a listing link may narrow the audience to.
+ *
+ * `adults` is the extra one and it is not a department: it means men, women
+ * and unisex together, but not kids. The Опрема menu needs it. That
+ * vertical stopped splitting Мажи from Жени -- most equipment is unisex, so
+ * the two columns were roughly 85 percent the same links -- while a leaf
+ * link carrying no gender at all would show 19-21 baby socks beside a men's
+ * three-pack, which is the mixing the split was made to end.
+ *
+ * The API reads it as `gender=adults`; see the predicate in
+ * `CatalogRepository`, which also lets an unclassified article through,
+ * because "we do not know who this is for" must not mean "hidden from the
+ * only adult route there is".
+ */
+export type AudienceSlug = GenderSlug | "adults";
+
+/**
  * The three columns of every vertical's menu.
  *
  * Two forms, and which is which matters. `label` is the noun -- Мажи / Жени
@@ -251,31 +268,62 @@ export function byAlphaLadder(a: string, b: string): number {
 export const ACCESSORY_CATEGORIES: ReadonlyArray<{
   slug: string;
   label: string;
-  genders?: ReadonlyArray<GenderSlug>;
+  /** Which Опрема column this leaf appears in. Absent means both. */
+  audiences?: ReadonlyArray<AudienceSlug>;
   hidden?: boolean;
 }> = [
+  // `audiences` is which of the two Опрема columns a leaf appears in, and
+  // every entry below is set from a count, not a guess. Measured
+  // 2026-11-25, live products per leaf, kids column first:
+  //
+  //     caps_hats        208 kids   socks            151
+  //     gloves            90        bags_backpacks    84
+  //     skates_scooters   47        swim_gear         36
+  //     protective_gear   31        balls_training    21
+  //     other_accessories  2        bottles/laces/wallets 0
+  //
+  // The line is drawn at 30. Below it a column entry promises a shelf and
+  // delivers a handful, which is the dead-facet failure this menu already
+  // removed from the brand list -- so `Топки и тренинг опрема` (21, because
+  // balls are unisex) and `Останата опрема` (2) are adults-only.
   { slug: "bags_backpacks", label: "Торби и ранци" },
   { slug: "caps_hats", label: "Капи, качкети и бандани" },
   { slug: "socks", label: "Чорапи" },
-  { slug: "protective_gear", label: "Кациги, наочари и ракавици" },
-  { slug: "balls_training", label: "Топки и фитнес опрема" },
-  // Kids only, and measured rather than assumed: 47 of its 49 products are
-  // children's, leaving one for Мажи and one for Жени. The leaf would be a
-  // link to a page with a single item in it, which is the dead facet this
-  // menu removed from the brand list for the same reason.
+  // V33 split this out of `protective_gear`, where 298 gloves sat beside
+  // helmets and shin guards. Not "winter gloves": of those 298 only 115
+  // state a kind at all -- 183 are "Brugi Rakavici Crni", brand, article
+  // and colour -- and no shop publishes a winter-glove shelf.
+  { slug: "gloves", label: "Ракавици" },
+  { slug: "protective_gear", label: "Кациги, наочари и заштитници" },
+  {
+    slug: "balls_training",
+    label: "Топки и тренинг опрема",
+    audiences: ["adults"],
+  },
+  // Kids only, and measured rather than assumed: 47 of its 48 products are
+  // children's, leaving one for the adult shelf.
   {
     slug: "skates_scooters",
     label: "Ролери и тротинети",
-    genders: ["kids"],
+    audiences: ["kids"],
   },
-  // Shown from 2026-11-21: 106 products, once sport-m and Sport Vision
-  // completed the Опрема vertical. The threshold this clears is the comment
-  // above -- a leaf under a hundred products reads as an empty site.
   { slug: "swim_gear", label: "Опрема за пливање" },
-  { slug: "bottles_thermos", label: "Шишиња и термоси", hidden: true },
-  { slug: "wallets", label: "Паричници", hidden: true },
-  { slug: "shoe_care_laces", label: "Врвки и нега на обувки", hidden: true },
-  { slug: "other_accessories", label: "Друго", hidden: true },
+  // Unhidden 2026-11-25: 126 products no menu entry reached -- hair ties,
+  // phone covers, Crocs charms, face masks. The shops' own word for the
+  // shelf is "Останата опрема", so the menu uses that rather than the bare
+  // "Друго" the category row carries.
+  {
+    slug: "other_accessories",
+    label: "Останата опрема",
+    audiences: ["adults"],
+  },
+  // Visible from 2026-11-25 at 11 products, which is the one leaf that
+  // gets to break the hundred-product rule. A wallet is a thing a shopper
+  // arrives looking for by name, and the leaf exists because megasport
+  // publishes one combined "Ранци и Паричници" facet that nothing but a
+  // wallet's own name can be separated out of -- see the ordering note in
+  // `taxonomy._RULES`. Kids: zero, so it is adults-only.
+  { slug: "wallets", label: "Паричници", audiences: ["adults"] },
 ];
 
 export type Vertical = {
@@ -307,6 +355,8 @@ export type Vertical = {
     slug: string;
     label: string;
     genders?: ReadonlyArray<GenderSlug>;
+    /** Which Опрема column this leaf appears in. Absent means both. */
+    audiences?: ReadonlyArray<AudienceSlug>;
     hidden?: boolean;
   }>;
   /**
@@ -347,6 +397,22 @@ export type Vertical = {
    */
   byConcentration?: boolean;
   genderColumns?: boolean;
+  /**
+   * Whether this vertical's menu is one general column plus a kids one,
+   * rather than Мажи / Жени / Деца.
+   *
+   * True only for Опрема, and the measurement is the reason: 55 percent of
+   * Sport Vision's equipment is unisex and 66 percent of Sport Reality's,
+   * and since a men's listing already includes unisex the two adult columns
+   * came out roughly 85 percent the same links. Two of the six shops do not
+   * gender their equipment at all.
+   *
+   * The kids cut still earns its place -- 717 products, 19 percent of the
+   * vertical -- so it keeps a column while the adult departments collapse
+   * into one. A shopper who does want Мажи or Жени has the gender rail on
+   * the listing page.
+   */
+  adultsAndKids?: boolean;
 };
 
 export const VERTICALS: ReadonlyArray<Vertical> = [
@@ -378,7 +444,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     icon: Backpack,
     allLabel: "Сета опрема",
     categories: ACCESSORY_CATEGORIES,
-    genderColumns: true,
+    adultsAndKids: true,
   },
   {
     // The fourth vertical, V27. Its menu is the only one not built from
@@ -402,13 +468,21 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
  */
 export function categoriesFor(
   kind: string | undefined,
-  gender?: GenderSlug,
+  audience?: AudienceSlug,
 ): ReadonlyArray<{ slug: string; label: string }> {
   const categories = (
     VERTICALS.find((v) => v.kind === kind)?.categories ?? []
   ).filter((c) => !c.hidden);
-  if (!gender) return categories;
-  return categories.filter((c) => !c.genders || c.genders.includes(gender));
+  if (!audience) return categories;
+  // Two fields, because the two questions are different. `genders` is which
+  // department stocks a garment -- a sports bra is not in the men's. The
+  // Опрема leaves use `audiences`, which is which of that menu's two
+  // columns a leaf is worth a line in. Absent means every column.
+  return categories.filter(
+    (c) =>
+      (!c.genders || c.genders.includes(audience as GenderSlug)) &&
+      (!c.audiences || c.audiences.includes(audience)),
+  );
 }
 
 /** Every leaf of a vertical, hidden ones included, for titling a listing. */

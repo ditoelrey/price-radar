@@ -194,6 +194,7 @@ export function MobileNav() {
                     directly instead of three gender toggles that would open
                     onto near-identical lists. */}
                 {expanded && !soon && !vertical.byConcentration
+                  && !vertical.adultsAndKids
                   && vertical.genderColumns === false && (
                   <div className="pb-2 pl-3">
                     <ul>
@@ -229,7 +230,50 @@ export function MobileNav() {
                   </div>
                 )}
 
+                {/* Опрема: the general shelf, then the kids' one. Same
+                    two groups the desktop menu draws, stacked. The general
+                    links carry `gender=adults` so a leaf does not return
+                    its kids' stock alongside the adult sizes. */}
+                {expanded && !soon && vertical.adultsAndKids && (
+                  <div className="pb-2 pl-3">
+                    {(["adults", "kids"] as const).map((audience) => (
+                      <div key={audience} className="border-t first:border-t-0">
+                        <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {audience === "kids" ? "Детска опрема" : vertical.label}
+                        </p>
+                        <ul>
+                          {categoriesFor(vertical.kind, audience).map((category) => (
+                            <li key={category.slug}>
+                              <Link
+                                href={listingHref({
+                                  kind: vertical.kind,
+                                  gender: audience,
+                                  category: category.slug,
+                                })}
+                                onClick={close}
+                                className="block py-1.5 text-sm text-muted-foreground"
+                              >
+                                {category.label}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                        <Link
+                          href={listingHref({ kind: vertical.kind, gender: audience })}
+                          onClick={close}
+                          className="block py-1.5 text-sm font-medium"
+                        >
+                          {audience === "kids"
+                            ? "Сета детска опрема"
+                            : vertical.allLabel}
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {expanded && !soon && !vertical.byConcentration
+                  && !vertical.adultsAndKids
                   && vertical.genderColumns !== false && (
                   <div className="pb-2 pl-3">
                     <Link

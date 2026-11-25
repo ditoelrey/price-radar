@@ -215,8 +215,36 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     # transliterator produces `shtitnik` and `shal`. The first URL-section
     # audit after the first Опрема sweep found both, the same way the apparel
     # one found `/mk/sorc/`.
+    # Gloves are their own leaf, and they come before the protective one
+    # because a glove is a glove before it is anything else. They used to
+    # sit in that list beside helmets and shin guards, which put 298
+    # products of four different intents on one shelf: a shopper after ski
+    # gloves was shown goalkeeper gloves, костобрани and a bike helmet.
+    #
+    # **Why not winter gloves and sport gloves separately.** The evidence is
+    # not there. Measured over all 298, reading title, shelf and URL
+    # together with a wide cold-weather vocabulary -- zimski, thermal,
+    # insulated, knit, fleece, storm, primaloft, mitten, ski -- 66 state a
+    # sport kind, 49 state cold weather, and 183 state nothing at all. Those
+    # are "Brugi Rakavici Crni": brand, article, colour. The shops are no
+    # help either. `golmanski-rakavici` is the only glove kind any of them
+    # separates (62 offers, two shops) against 141 offers on a generic
+    # `Ракавици` shelf, and not one publishes a winter-glove shelf.
+    #
+    # So this leaf answers the question the evidence can answer -- "is this
+    # a glove", true for 298 of 298 -- and it is the word four of the six
+    # shops use for the shelf. A winter/sport split later divides a clean
+    # leaf rather than un-mixing two.
+    #
+    # `golmanski` stays here rather than in the protective list: a
+    # goalkeeper glove is a glove, and its own name still finds it inside
+    # the leaf.
+    ("gloves", ("rakavici", "rakavica", "rakavicki", "gloves", "glove",
+                "rukavice", "golmanski", "golmanski rakavici",
+                "rakavici oprema mazhi", "rakavici oprema zheni")),
+    # What is left: the hard protective goods and the eyewear. 87 guards, 23
+    # helmets, 20 pieces of eyewear.
     ("protective_gear", ("kaciga", "kacigi", "helmet", "naocari", "naochari",
-                         "rakavici", "rakavica", "gloves", "golmanski",
                          "kostobrani", "kostobran", "sticnici", "shtitnik",
                          "shtitnici", "stitnik", "stitnici",
                          "stitnik za zabi", "shtitnik za zabi", "bandazer",
@@ -224,8 +252,17 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                          "shin guard", "visor")),
     ("caps_hats", ("kapa", "kapi", "kachket", "kacket", "kachketi",
                    "kacketi", "shapka", "shapki", "bandana", "bandani",
-                   "zimski kapi", "zimska kapa", "podkapa", "traka za glava", "traka za kosa",
-                   "grejac za vrat", "grejach za vrat", "headband",
+                   "zimski kapi", "zimska kapa", "podkapa",
+                   # `traka za glava` is a headband and stays. Its
+                   # neighbour `traka za kosa` -- a hair tie -- moved to
+                   # `other_accessories`, which is where the shops'
+                   # own hair-elastic and sweatband shelves now go.
+                   "traka za glava",
+                   "grejac za vrat", "grejach za vrat",
+                   # Plural too: the padding matches whole words, and
+                   # "Nike Flex Classic Headbands Wide 3pk" is how the
+                   # shops write it.
+                   "headband", "headbands",
                    "beanie", "cap", "shal", "sal")),
     # "torbici" is megasport's spelling for the women's bag facet, and it is
     # here because the slug probe caught it falling through to the parent
@@ -248,15 +285,22 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                         "oprema za trening", "pumpa za topka", "pumpa",
                         "fitnes rekvizit", "pomagalo za sklekovi",
                         "mat", "yoga")),
-    ("bottles_thermos", ("shishe", "shishinja", "sise za voda", "termos",
-                         "termosi", "bidon", "bottle", "flask", "thermos")),
+    # Folded into `other_accessories` on 2026-11-25. 61 products, and
+    # the leaf was never reachable: it sat under the hundred-product
+    # threshold the menu uses, so it was hidden from the one surface
+    # that could have sent anyone to it.
+    ("other_accessories", ("shishe", "shishinja", "sise za voda",
+                           "termos", "termosi", "bidon", "bottle",
+                           "flask", "thermos")),
     # Before the footwear rules, and these phrases are why. Sizeer files
     # "Средство за чистење на обувки" under its accessories group, and the
     # word обувки at the end of it carried the whole thing into the footwear
     # umbrella -- a cleaning spray classified as a shoe. Its three siblings
     # (водоотпорно средство, средство за миризби, четка за велур) matched
     # nothing at all. The probe found all four.
-    ("shoe_care_laces", ("vrvki", "vrvka", "vrvci", "laces", "shoelace",
+    # Folded into `other_accessories` on 2026-11-25, 25 products. The
+    # ordering note above still applies to every phrase in this list.
+    ("other_accessories", ("vrvki", "vrvka", "vrvci", "laces", "shoelace",
                          "oprema za chistenje", "oprema za cistenje",
                          "chistenje na obuvki", "cistenje na obuvki",
                          "sredstvo za chistenje", "sredstvo za cistenje",
@@ -272,7 +316,23 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("other_accessories", ("drugo", "ostanato", "maska za lice",
                            "zashtitna maska", "zastitna maska",
                            "ukras", "ukrasi", "privezok", "privezoci",
-                           "keyring", "keychain")),
+                           "keyring", "keychain",
+                           # The small stuff the shops shelve on its
+                           # own and nothing read. `potnik` is the
+                           # sweatband shelf -- Slazenger wristbands,
+                           # Nike hair ties -- and classified to
+                           # nothing, so its 16 offers landed in the
+                           # parent bucket or wherever a title guessed.
+                           # `elastik za kosa` likewise.
+                           "potnik", "potnici", "znojnik", "znojnici",
+                           # The shelf is `/mk/lastik-za-kosa/` -- no
+                           # leading e. Taken from the live URLs rather
+                           # than from the Macedonian word, which is
+                           # "еластика".
+                           "lastik za kosa", "elastik za kosa",
+                           "elastika za kosa",
+                           "traka za kosa", "hair tie", "hair ties",
+                           "wristband", "wristbands")),
     # Equipment whose kind the title does not narrow, then the umbrella --
     # the parent category, meaning "equipment, kind unspecified", exactly as
     # `footwear` and `apparel` do for theirs.
@@ -364,8 +424,14 @@ APPAREL_SLUGS = frozenset({
 #: one leaf, so a rule returning it would now null the category instead.
 ACCESSORY_SLUGS = frozenset({
     "accessories", "socks", "caps_hats", "bags_backpacks", "wallets",
-    "protective_gear", "swim_gear", "balls_training", "bottles_thermos",
-    "skates_scooters", "shoe_care_laces", "other_accessories",
+    "protective_gear", "swim_gear", "balls_training",
+    "skates_scooters", "other_accessories",
+    # V33 split this out of `protective_gear`.
+    "gloves",
+    # `bottles_thermos` and `shoe_care_laces` left in V34: both sat
+    # under the menu's hundred-product threshold and were unreachable,
+    # and their rows are gone, so a rule returning either would null
+    # the category rather than set it.
 })
 
 #: The fragrance vertical, added in V27. One leaf so far: a bottle of

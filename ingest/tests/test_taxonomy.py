@@ -183,12 +183,13 @@ class TestFourCanonicalBuckets:
 
     def test_known_slugs_are_exactly_the_seeded_ones(self):
         """Every slug this module may return, matching V4 + V10 + V17 + V18
-        + V23 + V27.
+        + V23 + V27 + V33 + V34.
 
         The apparel leaves joined in V18, the Опрема ones in V23, the
-        fragrance pair in V27. `equipment` left in V23: that kind was folded
-        into `accessory` and its one leaf deleted, so a rule still returning
-        it would null the category rather than set it.
+        fragrance pair in V27, `gloves` in V33. `equipment` left in V23 and
+        `bottles_thermos` and `shoe_care_laces` in V34: each of those rows
+        is gone, so a rule still returning one would null the category
+        rather than set it.
         """
         assert KNOWN_SLUGS == {
             "footwear", "sneakers", "cleats", "shoes_boots", "slides_sandals",
@@ -196,9 +197,8 @@ class TestFourCanonicalBuckets:
             "tracksuits", "shorts", "leggings", "sports_bras", "underwear",
             "dresses_skirts", "swimwear",
             "accessories", "socks", "caps_hats", "bags_backpacks", "wallets",
-            "protective_gear", "swim_gear", "balls_training",
-            "bottles_thermos", "skates_scooters", "shoe_care_laces",
-            "other_accessories",
+            "gloves", "protective_gear", "swim_gear", "balls_training",
+            "skates_scooters", "other_accessories",
             "fragrances", "perfume",
         }
 
@@ -271,8 +271,11 @@ class TestModelLines:
         # offers, not one Predator, F50 or Terrex title carries a glove,
         # guard, ball or garment word -- so this is the rule order holding a
         # door shut rather than a bug being fixed.
-        ("Adidas PREDATOR голмански ракавици", "protective_gear"),
-        ("Adidas PREDATOR GLOVES", "protective_gear"),
+        # V33: the article word is unchanged, the leaf it names is
+        # `gloves`. The point of these two is that "Predator" -- a boot
+        # line -- must not outrank it, and that still holds.
+        ("Adidas PREDATOR голмански ракавици", "gloves"),
+        ("Adidas PREDATOR GLOVES", "gloves"),
         ("Штитник PREDATOR SG", "protective_gear"),
         ("Adidas TERREX јакна за планинарење", "jackets"),
         ("Adidas F50 Топка", "balls_training"),
@@ -697,14 +700,14 @@ class TestAccessoryLeaves:
         ("adidas Торбичка Waist Bag", "bags_backpacks"),
         ("Вреќа за тренинг adidas", "bags_backpacks"),
         ("Кациги Smith Ski Helmet", "protective_gear"),
-        ("Голмански ракавици adidas", "protective_gear"),
+        ("Голмански ракавици adidas", "gloves"),      # V33
         ("Костобрани Nike", "protective_gear"),
         ("Ролери Rollerblade", "skates_scooters"),
         ("Тротинет Micro", "skates_scooters"),
         ("adidas Топка Champions League", "balls_training"),
         ("Држачи за склекови", "balls_training"),
-        ("Термос Stanley 1L", "bottles_thermos"),
-        ("Врвки за патики 120cm", "shoe_care_laces"),
+        ("Термос Stanley 1L", "other_accessories"),
+        ("Врвки за патики 120cm", "other_accessories"),
         ("Заштитна маска за лице", "other_accessories"),
     ])
     def test_reads_the_leaf(self, title, expected):
@@ -797,7 +800,7 @@ class TestWhatTheSlugProbeFound:
         under its accessories group, and the обувки at the end carried the
         whole phrase into the footwear umbrella -- so a bottle of cleaner
         classified as footwear, which is a vertical away from the truth."""
-        assert classify("Средство за чистење на обувки") == "shoe_care_laces"
+        assert classify("Средство за чистење на обувки") == "other_accessories"
         assert classify("Обувки за вода") == "slides_sandals"
         assert classify("Патики Nike Air Max") == "sneakers"
 
@@ -808,16 +811,16 @@ class TestWhatTheSlugProbeFound:
     ])
     def test_the_rest_of_the_shoe_care_shelf(self, label):
         """Its three siblings matched no rule at all."""
-        assert classify(label) == "shoe_care_laces"
+        assert classify(label) == "other_accessories"
 
     @pytest.mark.parametrize("slug,expected", [
-        ("pribor-i-dodatoci-za-obuvki", "shoe_care_laces"),
+        ("pribor-i-dodatoci-za-obuvki", "other_accessories"),
         ("oprema-za-trening", "balls_training"),
         ("kaciga", "protective_gear"),
         ("kacketi-i-kapi", "caps_hats"),
         ("naocari-za-plivanje", "swim_gear"),
         ("corapi", "socks"),
-        ("sise-za-voda", "bottles_thermos"),
+        ("sise-za-voda", "other_accessories"),
     ])
     def test_sportvision_sections_as_the_shop_spells_them(self, slug,
                                                           expected):
@@ -831,14 +834,14 @@ class TestWhatTheSlugProbeFound:
         ("Ролери", "skates_scooters"),
         ("Скироли", "skates_scooters"),
         ("Тротинети", "skates_scooters"),
-        ("Голмански ракавици", "protective_gear"),
+        ("Голмански ракавици", "gloves"),             # V33
         ("Костобрани", "protective_gear"),
         ("Капи за пливање", "swim_gear"),
         ("Торбички", "bags_backpacks"),
         ("Зимски капи", "caps_hats"),
         ("Бандани", "caps_hats"),
-        ("Шишиња", "bottles_thermos"),
-        ("Термос", "bottles_thermos"),
+        ("Шишиња", "other_accessories"),
+        ("Термос", "other_accessories"),
         ("Баланс топка", "balls_training"),
         ("Држачи за склекови", "balls_training"),
         ("Друго", "other_accessories"),
@@ -1011,3 +1014,152 @@ class TestWhoTheShopSaysItIsFor:
     def test_silence_stays_silence(self):
         assert read_declared_audience(None, None) is None
         assert read_declared_audience("", "") is None
+
+
+class TestGlovesAreTheirOwnLeaf:
+    """V33 split 298 gloves out of `protective_gear`.
+
+    They had sat in one keyword list with helmets, костобрани and шин
+    guards, which put four unrelated intents on one shelf: a shopper after
+    ski gloves was shown goalkeeper gloves and a bike helmet.
+
+    The leaf is `gloves` and not "winter gloves", because the evidence for
+    the finer split does not exist. Measured over all 298, reading title,
+    shelf and URL together with a wide cold-weather vocabulary: 66 state a
+    sport kind, 49 state cold weather, 183 state nothing at all. No shop
+    publishes a winter-glove shelf either -- `golmanski-rakavici` is the
+    only glove kind any of them separates.
+    """
+
+    def test_a_glove_is_a_glove_whatever_kind(self):
+        assert classify("BRUGI Ракавици/CRNI") == "gloves"
+        assert classify("Adidas TIRO GLOVE") == "gloves"
+        assert classify("Regatta Kingsdale Glove Black") == "gloves"
+
+    def test_a_goalkeeper_glove_is_still_a_glove(self):
+        """It keeps its own name inside the leaf; it does not need its own
+        leaf. Both shops that separate it publish the shelf, and both now
+        resolve here."""
+        assert classify("Голмански ракавици") == "gloves"
+        assert classify("golmanski-rakavici") == "gloves"
+        assert classify("Adidas Голмански ракавици Copa Gl Clb") == "gloves"
+
+    def test_the_shops_own_glove_shelves_resolve(self):
+        """Four of the six publish a generic one, under three spellings."""
+        for shelf in ("Ракавици", "rakavici", "rakavici-oprema-mazhi",
+                      "rakavici-oprema-zheni"):
+            assert classify(shelf) == "gloves", shelf
+
+    def test_what_is_left_in_the_protective_leaf(self):
+        """Helmets, eyewear and the guards -- 165 products, all of which
+        state what they are."""
+        assert classify("Wintro Ski Helmet") == "protective_gear"
+        assert classify("Elan Kaciga Eon Pro Black") == "protective_gear"
+        assert classify("Костобрани") == "protective_gear"
+        assert classify("Штитник TIRO SG EU CLB") == "protective_gear"
+        assert classify("Наочари") == "protective_gear"
+
+    def test_the_sg_items_are_shin_guards_by_their_shelf(self):
+        """`SG` is Adidas's soft-ground stud code, not "shin guard", and the
+        cleats rule reads it that way -- "Штитник TIRO SG EU CLB" became
+        `cleats` once for exactly that reason. What identifies these 16 is
+        the shops' own shelf: sport-m files them under Костобрани, Sport
+        Vision under `/mk/kostobran/`."""
+        assert classify("Adidas F50 SG MTC") != "gloves"
+        assert classify("Костобрани") == "protective_gear"
+        assert classify("adidas Tiro Club", url="https://x/mk/kostobran/1-a") \
+            == "protective_gear"
+
+    def test_a_glove_does_not_become_a_hat_or_a_hat_a_glove(self):
+        assert classify("New Era Neon Team Cuff Beanie") == "caps_hats"
+        assert classify("Зимски капи") == "caps_hats"
+        assert classify("BRUGI Ракавици/BELI") == "gloves"
+
+    def test_the_leaf_is_a_known_slug(self):
+        """`derive` drops a category it cannot find here, so a rule
+        returning an unlisted slug would null the product instead."""
+        assert "gloves" in KNOWN_SLUGS
+
+
+class TestTheSmallLeavesFoldedIn:
+    """V34 folded two unreachable leaves into Останата опрема.
+
+    Шишиња и термоси (61 products) and Врвки и нега на обувки (25) both sat
+    under the hundred-product threshold the storefront menu uses, so both
+    were hidden -- three leaves nobody could open against one they can.
+
+    `wallets` is deliberately not among them. It is smaller still at 11, and
+    it survives because megasport publishes one combined "Ранци и
+    Паричници" facet that nothing but a wallet's own name separates out.
+    """
+
+    def test_bottles_and_flasks_land_in_the_miscellany(self):
+        assert classify("Adidas FARM BOTTLE") == "other_accessories"
+        assert classify("Шишиња") == "other_accessories"
+        assert classify("Термос") == "other_accessories"
+
+    def test_shoe_care_keeps_its_ordering_and_its_answer(self):
+        """The phrases stayed where they were in `_RULES`, and the reason is
+        the comment above them: "Средство за чистење на обувки" ends in
+        обувки, and from any later position the footwear umbrella claims the
+        whole thing -- a cleaning spray classified as a shoe."""
+        assert classify("Средство за чистење на обувки") == "other_accessories"
+        assert classify("Врвки") == "other_accessories"
+        assert classify("vloski") == "other_accessories"
+
+    def test_a_wallet_is_still_its_own_leaf(self):
+        assert classify("Паричник") == "wallets"
+        assert classify("wallet") == "wallets"
+
+    def test_the_folded_slugs_are_gone_from_the_vocabulary(self):
+        """`derive` drops a category it cannot find, and the rows are
+        deleted, so a rule returning either would null the product."""
+        assert "bottles_thermos" not in KNOWN_SLUGS
+        assert "shoe_care_laces" not in KNOWN_SLUGS
+
+
+class TestTheSmallAccessoriesNothingUsedToRead:
+    """Sweatbands, wristbands and hair ties.
+
+    `/mk/potnik/` is the shops' sweatband shelf -- Slazenger wristbands,
+    Nike hair ties -- and it classified to nothing, so its offers landed in
+    the parent umbrella or wherever a title guessed. `/mk/lastik-za-kosa/`
+    likewise.
+    """
+
+    def test_the_sweatband_shelf_resolves(self):
+        assert classify("potnik") == "other_accessories"
+        assert classify("Потник") == "other_accessories"
+        assert classify("Slazenger Slaz 2pk Wristband 00 Black") \
+            == "other_accessories"
+
+    def test_the_hair_elastic_shelf_resolves(self):
+        """The path is `/mk/lastik-za-kosa/`, with no leading e. Taken from
+        the live URLs rather than from the Macedonian word."""
+        assert classify(
+            "Nike Flex Classic Mixed Hair Ties 8pk",
+            url="https://www.sportvision.mk/mk/lastik-za-kosa/8702564-nike-x",
+        ) == "other_accessories"
+        assert classify("Nike Flex Classic Mixed Hair Ties 8pk") \
+            == "other_accessories"
+
+    def test_a_headband_is_still_headwear(self):
+        """`traka za glava` stays in Капи, качкети и бандани -- a headband
+        is one of the things that leaf is named for. Only its neighbour
+        `traka za kosa`, a hair tie, moved."""
+        assert classify("traka-za-glava") == "caps_hats"
+        assert classify("Nike Flex Classic Headbands Wide 3pk") == "caps_hats"
+        assert classify("traka-za-kosa") == "other_accessories"
+
+    def test_a_resistance_band_is_training_kit_not_miscellany(self):
+        """The word "elastic" alone decides nothing: Sport Ring Elastic Band
+        sits on `/mk/fitnes-rekvizit/` and is a resistance band."""
+        assert classify(
+            "Ring Sport Elastic Band",
+            url="https://www.sportvision.mk/mk/fitnes-rekvizit/6806044-x",
+        ) == "balls_training"
+
+    def test_a_joint_brace_is_still_protective(self):
+        assert classify("Brugi Stegac Crn") == "protective_gear"
+        assert classify("Стегач") == "protective_gear"
+        assert classify("bandazer") == "protective_gear"

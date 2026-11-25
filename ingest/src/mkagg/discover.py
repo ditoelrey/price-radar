@@ -883,16 +883,16 @@ _SV_ACCESSORY = (
     ("corapi", "socks", None),
     ("kacketi-i-kapi", "caps_hats", None),
     ("ranec", "bags_backpacks", None),
-    ("sise-za-voda", "bottles_thermos", None),
+    ("sise-za-voda", "other_accessories", None),
     ("oprema-za-plivanje", "swim_gear", None),
     ("naocari-za-plivanje", "swim_gear", None),
     ("topka", "balls_training", None),
     ("podloga", "balls_training", None),
     ("oprema-za-trening", "balls_training", None),
-    ("golmanski-rakavici", "protective_gear", None),
+    ("golmanski-rakavici", "gloves", None),
     ("kaciga", "protective_gear", None),
     ("roleri", "skates_scooters", None),
-    ("pribor-i-dodatoci-za-obuvki", "shoe_care_laces", None),
+    ("pribor-i-dodatoci-za-obuvki", "other_accessories", None),
     # Sport-specific shelves that mix leaves -- a football one holds balls,
     # shin guards and gloves together -- so the parent is the truest answer
     # rather than a shrug.
@@ -922,6 +922,14 @@ _SV_ACCESSORY = (
 #: Five are deliberately absent. `set`, `potnik`, `traka`, `rosuli` and
 #: `rakav` are genuinely ambiguous and the umbrella is the honest answer for
 #: them; `velosiped` is excluded outright.
+#:
+#: `potnik` is still absent *here* -- it is not a shelf worth walking, since
+#: "потник" is a singlet as often as a sweatband -- but
+#: `taxonomy._RULES` does now read it off the URL of products already
+#: ingested, where it resolves to `other_accessories`. On this shop that
+#: shelf holds Slazenger wristbands and Nike hair ties. Measured over 35 873
+#: live offers: 9 products move, all of them out of the umbrella, and no
+#: garment is touched.
 _SR_ACCESSORY = (
     ("corapi", "socks", None),
     ("stucni", "socks", None),
@@ -937,8 +945,8 @@ _SR_ACCESSORY = (
     ("kufer", "bags_backpacks", None),
     ("vreka-za-trening", "bags_backpacks", None),
     ("paricnik", "wallets", None),
-    ("golmanski-rakavici", "protective_gear", None),
-    ("rakavici", "protective_gear", None),
+    ("golmanski-rakavici", "gloves", None),
+    ("rakavici", "gloves", None),
     ("kostobran", "protective_gear", None),
     ("stitnik", "protective_gear", None),
     ("stitnik-za-zabi", "protective_gear", None),
@@ -953,14 +961,14 @@ _SR_ACCESSORY = (
     ("podloga", "balls_training", None),
     ("pomagalo-za-sklekovi", "balls_training", None),
     ("fitnes-rekvizit", "balls_training", None),
-    ("sise-za-voda", "bottles_thermos", None),
+    ("sise-za-voda", "other_accessories", None),
     ("kapa-za-plivanje", "swim_gear", None),
     ("naocari-za-plivanje", "swim_gear", None),
     ("maska-i-perai", "swim_gear", None),
     ("cepovi-za-usi", "swim_gear", None),
     ("stipka-za-nos", "swim_gear", None),
-    ("vloski", "shoe_care_laces", None),
-    ("sprej", "shoe_care_laces", None),
+    ("vloski", "other_accessories", None),
+    ("sprej", "other_accessories", None),
     ("roleri", "skates_scooters", None),
     ("trotinet", "skates_scooters", None),
     ("ostrica-za-klizalki", "skates_scooters", None),
@@ -981,19 +989,23 @@ _BUZZ_ACCESSORY = (
     ("kapa", "caps_hats", None),
     ("kacket", "caps_hats", None),
     ("kacketi-i-kapi", "caps_hats", None),
-    ("traka-za-kosa", "caps_hats", None),
+    # A hair tie, not headwear -- unlike its neighbour
+    # `traka-za-glava`, which is a headband and stays. Both the facet
+    # and the keyword had to move: this mapping is consulted before
+    # `classify`, so changing only the rule left them here.
+    ("traka-za-kosa", "other_accessories", None),
     ("ranec", "bags_backpacks", None),
     ("torbica", "bags_backpacks", None),
     ("torba", "bags_backpacks", None),
     ("kufer", "bags_backpacks", None),
     ("vreka-za-trening", "bags_backpacks", None),
     ("paricnik", "wallets", None),
-    ("rakavici", "protective_gear", None),
-    ("sise-za-voda", "bottles_thermos", None),
-    ("sprej", "shoe_care_laces", None),
-    ("vloski", "shoe_care_laces", None),
-    ("vrvci", "shoe_care_laces", None),
-    ("oprema-za-cistenje", "shoe_care_laces", None),
+    ("rakavici", "gloves", None),
+    ("sise-za-voda", "other_accessories", None),
+    ("sprej", "other_accessories", None),
+    ("vloski", "other_accessories", None),
+    ("vrvci", "other_accessories", None),
+    ("oprema-za-cistenje", "other_accessories", None),
     ("ukras", "other_accessories", None),
     ("privezok", "other_accessories", None),
     ("ostanata-oprema", "accessories", None),
@@ -1086,7 +1098,7 @@ _PODGRUPA_ACCESSORY = {
     "107": ("skates_scooters", "Скироли"),
     "111": ("skates_scooters", "Тротинети"),
     "277": ("swim_gear", "Капи за пливање"),
-    "487": ("protective_gear", "Голмански ракавици"),
+    "487": ("gloves", "Голмански ракавици"),
     "489": ("other_accessories", "Друго"),
     "493": ("caps_hats", "Капи"),
     "494": ("protective_gear", "Костобрани"),
@@ -1094,16 +1106,16 @@ _PODGRUPA_ACCESSORY = {
     "507": ("bags_backpacks", "Ранци"),
     "512": ("bags_backpacks", "Торби"),
     "518": ("socks", "Чорапи"),
-    "519": ("bottles_thermos", "Шишиња"),
-    "548": ("shoe_care_laces", "Средство за заштита од влага"),
-    "550": ("shoe_care_laces", "Средство за отстранување на миризби"),
-    "560": ("shoe_care_laces", "Комбинирана четка за велур кожа"),
+    "519": ("other_accessories", "Шишиња"),
+    "548": ("other_accessories", "Средство за заштита од влага"),
+    "550": ("other_accessories", "Средство за отстранување на миризби"),
+    "560": ("other_accessories", "Комбинирана четка за велур кожа"),
     "591": ("caps_hats", "Бандани"),
-    "607": ("shoe_care_laces", "Врвки"),
+    "607": ("other_accessories", "Врвки"),
     "628": ("balls_training", "Држачи за склекови"),
-    "638": ("shoe_care_laces", "Средство за чистење на обувки"),
+    "638": ("other_accessories", "Средство за чистење на обувки"),
     "667": ("balls_training", "Баланс топка"),
-    "678": ("bottles_thermos", "Термос"),
+    "678": ("other_accessories", "Термос"),
     "704": ("other_accessories", "Заштитна маска за лице"),
     "761": ("bags_backpacks", "Торбички"),
     "782": ("caps_hats", "Зимски капи"),

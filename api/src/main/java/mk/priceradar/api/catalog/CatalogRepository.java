@@ -187,7 +187,21 @@ public class CatalogRepository {
                AND (CAST(:gender AS text) IS NULL
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex'))
+                        AND p.gender = 'unisex')
+                    -- `adults` is "everything a grown-up buys": men, women
+                    -- and unisex, but not kids. It exists because the Опрема
+                    -- menu stopped splitting the adult departments -- most
+                    -- equipment is unisex, so Мажи and Жени were roughly 85
+                    -- percent the same links -- and a leaf link carrying no
+                    -- gender at all would put 19-21 baby socks back beside a
+                    -- men's three-pack, which is the mixing that split was
+                    -- made to end.
+                    --
+                    -- An unclassified article is included: `gender IS NULL`
+                    -- means we do not know who it is for, and hiding it from
+                    -- the only adult route there is would lose it entirely.
+                    OR (CAST(:gender AS text) = 'adults'
+                        AND (p.gender IS NULL OR p.gender <> 'kids')))
                -- Fragrances only, and an exact match. "Valentino Donna" in
                -- Eau de Parfum and in Eau de Toilette are different liquids
                -- at different prices, so a shopper asking for EDP must not
@@ -289,7 +303,21 @@ public class CatalogRepository {
                AND (CAST(:gender AS text) IS NULL
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex'))
+                        AND p.gender = 'unisex')
+                    -- `adults` is "everything a grown-up buys": men, women
+                    -- and unisex, but not kids. It exists because the Опрема
+                    -- menu stopped splitting the adult departments -- most
+                    -- equipment is unisex, so Мажи and Жени were roughly 85
+                    -- percent the same links -- and a leaf link carrying no
+                    -- gender at all would put 19-21 baby socks back beside a
+                    -- men's three-pack, which is the mixing that split was
+                    -- made to end.
+                    --
+                    -- An unclassified article is included: `gender IS NULL`
+                    -- means we do not know who it is for, and hiding it from
+                    -- the only adult route there is would lose it entirely.
+                    OR (CAST(:gender AS text) = 'adults'
+                        AND (p.gender IS NULL OR p.gender <> 'kids')))
                -- Fragrances only, and an exact match. "Valentino Donna" in
                -- Eau de Parfum and in Eau de Toilette are different liquids
                -- at different prices, so a shopper asking for EDP must not
@@ -444,7 +472,21 @@ public class CatalogRepository {
                AND (CAST(:gender AS text) IS NULL
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex'))
+                        AND p.gender = 'unisex')
+                    -- `adults` is "everything a grown-up buys": men, women
+                    -- and unisex, but not kids. It exists because the Опрема
+                    -- menu stopped splitting the adult departments -- most
+                    -- equipment is unisex, so Мажи and Жени were roughly 85
+                    -- percent the same links -- and a leaf link carrying no
+                    -- gender at all would put 19-21 baby socks back beside a
+                    -- men's three-pack, which is the mixing that split was
+                    -- made to end.
+                    --
+                    -- An unclassified article is included: `gender IS NULL`
+                    -- means we do not know who it is for, and hiding it from
+                    -- the only adult route there is would lose it entirely.
+                    OR (CAST(:gender AS text) = 'adults'
+                        AND (p.gender IS NULL OR p.gender <> 'kids')))
                AND (CAST(:concentration AS text) IS NULL
                     OR p.concentration = ANY(
                            string_to_array(CAST(:concentration AS text), ',')))
@@ -489,7 +531,21 @@ public class CatalogRepository {
                AND (CAST(:gender AS text) IS NULL
                     OR p.gender::text = CAST(:gender AS text)
                     OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex'))
+                        AND p.gender = 'unisex')
+                    -- `adults` is "everything a grown-up buys": men, women
+                    -- and unisex, but not kids. It exists because the Опрема
+                    -- menu stopped splitting the adult departments -- most
+                    -- equipment is unisex, so Мажи and Жени were roughly 85
+                    -- percent the same links -- and a leaf link carrying no
+                    -- gender at all would put 19-21 baby socks back beside a
+                    -- men's three-pack, which is the mixing that split was
+                    -- made to end.
+                    --
+                    -- An unclassified article is included: `gender IS NULL`
+                    -- means we do not know who it is for, and hiding it from
+                    -- the only adult route there is would lose it entirely.
+                    OR (CAST(:gender AS text) = 'adults'
+                        AND (p.gender IS NULL OR p.gender <> 'kids')))
                AND (CAST(:concentration AS text) IS NULL
                     OR p.concentration = ANY(
                            string_to_array(CAST(:concentration AS text), ',')))

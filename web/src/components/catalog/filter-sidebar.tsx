@@ -5,9 +5,9 @@ import { SizePicker } from "@/components/catalog/size-picker";
 import { SortSelect } from "@/components/catalog/sort-select";
 import {
   GENDER_COLUMNS,
+  type AudienceSlug,
   categoriesFor,
   listingHref,
-  type GenderSlug,
   type ListingParams,
 } from "@/lib/navigation";
 import { Separator } from "@/components/ui/separator";
@@ -121,9 +121,16 @@ export function FilterSidebar({
   // Narrowed by the gender in force, so the women's listing does not offer
   // a men's-only leaf -- and the other way round, which is the case that
   // matters: Градници и топови has no men's stock at all.
-  const isGender = (value: string | undefined): value is GenderSlug =>
-    GENDER_COLUMNS.some((g) => g.slug === value);
-  const categories = categoriesFor(kind, isGender(gender) ? gender : undefined);
+  // `adults` belongs here too, and not only the three departments: it is
+  // what the Опрема menu's general column sends, and without it the rail
+  // offered Ролери и тротинети on an adults page -- a kids-only leaf whose
+  // adult listing holds one product.
+  const isAudience = (value: string | undefined): value is AudienceSlug =>
+    value === "adults" || GENDER_COLUMNS.some((g) => g.slug === value);
+  const categories = categoriesFor(
+    kind,
+    isAudience(gender) ? gender : undefined,
+  );
   const activeGender = GENDER_COLUMNS.find((g) => g.slug === gender);
 
   return (

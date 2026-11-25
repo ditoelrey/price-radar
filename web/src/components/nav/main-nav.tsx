@@ -22,6 +22,7 @@ import {
   CONCENTRATIONS,
   FRAGRANCE_GENDER_COLUMNS,
   GENDER_COLUMNS,
+  type AudienceSlug,
   VERTICALS,
   categoriesFor,
   listingHref,
@@ -51,6 +52,68 @@ const CLOSE_DELAY_MS = 120;
  * Kids is the exception and gets a link of its own: ролери, тротинети and
  * кациги are a genuinely different shelf.
  */
+/**
+ * Опрема: one general column, one for kids.
+ *
+ * Each column lists only the leaves worth a line in it -- `audiences` on
+ * the leaf, set from live counts -- so the kids column does not promise a
+ * shelf of balls and deliver 21.
+ *
+ * The general column's links carry `gender=adults`, not nothing. Without it
+ * every leaf here would return its kids' stock too, and a shopper looking
+ * at socks would be shown 19-21 baby socks beside a men's three-pack.
+ */
+function AdultsAndKidsMenu({ vertical }: { vertical: Vertical }) {
+  const columns: ReadonlyArray<{
+    audience: AudienceSlug;
+    heading: string;
+    allLabel: string;
+  }> = [
+    { audience: "adults", heading: vertical.label, allLabel: vertical.allLabel ?? "" },
+    { audience: "kids", heading: "Детска опрема", allLabel: "Сета детска опрема" },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-8">
+      {columns.map((column) => {
+        const categories = categoriesFor(vertical.kind, column.audience);
+        return (
+          <section key={column.audience}>
+            <h3 className="border-b pb-2 text-base font-semibold">
+              {column.heading}
+            </h3>
+            <ul className="mt-3 space-y-1">
+              {categories.map((category) => (
+                <li key={category.slug}>
+                  <Link
+                    href={listingHref({
+                      kind: vertical.kind,
+                      gender: column.audience,
+                      category: category.slug,
+                    })}
+                    className="block py-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {category.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <Link
+              href={listingHref({
+                kind: vertical.kind,
+                gender: column.audience,
+              })}
+              className="mt-3 inline-flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary"
+            >
+              {column.allLabel}
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function CategoryMenu({ vertical }: { vertical: Vertical }) {
   const categories = categoriesFor(vertical.kind);
   return (
@@ -141,6 +204,9 @@ function VerticalMenu({ vertical }: { vertical: Vertical }) {
   // to draw nor Деца to draw them for.
   if (vertical.byConcentration) {
     return <FragranceMenu vertical={vertical} />;
+  }
+  if (vertical.adultsAndKids) {
+    return <AdultsAndKidsMenu vertical={vertical} />;
   }
   if (vertical.genderColumns === false) {
     return <CategoryMenu vertical={vertical} />;
