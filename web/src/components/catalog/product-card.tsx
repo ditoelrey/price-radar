@@ -116,7 +116,17 @@ export function ProductCard({
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           {product.brand}
         </p>
-        <p className="line-clamp-2 text-sm font-medium leading-snug group-hover:text-primary">
+        {/* Two lines reserved, not just allowed.
+            `line-clamp-2` caps a long name at two lines; it does not give a
+            short one the same height. That is what broke the grid: measured
+            on a Killtec search at 1400px, a row of one-line names came out
+            371px tall and any row holding a two-line name 390px, so the
+            price sat 19px lower on some rows than others. The image box was
+            never the cause -- it is `aspect-square` and measured exactly
+            227x227 on every card, whatever the photo's shape.
+            `lh` is the element's own line-height, so this stays correct if
+            the type scale moves. */}
+        <p className="line-clamp-2 min-h-[2lh] text-sm font-medium leading-snug group-hover:text-primary">
           {product.name}
         </p>
 

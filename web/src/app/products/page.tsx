@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, SearchX } from "lucide-react";
+import { SearchX } from "lucide-react";
 
 import {
   fetchBrandFacets,
@@ -11,6 +11,7 @@ import { FilterSidebar } from "@/components/catalog/filter-sidebar";
 import { byAlphaLadder, listingHref, listingTitle } from "@/lib/navigation";
 import { isSortKey } from "@/lib/sort";
 import { ProductCard } from "@/components/catalog/product-card";
+import { PaginationBar } from "@/components/catalog/pagination-bar";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
@@ -124,9 +125,15 @@ export default async function ProductsPage({
               {listingTitle(filters)}
             </h1>
             <p className="mt-0.5 text-sm text-muted-foreground">
+              {/* The real figure now that the API counts: "165 производи"
+                  rather than "24+", which only ever said "a page's worth,
+                  and there is more". The `+` form stays as the fallback for
+                  a payload cached before `total` existed. */}
               {result.items.length === 0
                 ? "Нема производи"
-                : `${result.items.length}${result.hasMore ? "+" : ""} производи`}
+                : result.total !== undefined
+                  ? `${result.total} производи`
+                  : `${result.items.length}${result.hasMore ? "+" : ""} производи`}
               {sizeEu !== undefined && (
                 <> · цени за EU {formatSizeEu(sizeEu)}</>
               )}
@@ -177,31 +184,21 @@ export default async function ProductsPage({
               </div>
             )}
 
-            {(page > 0 || result.hasMore) && (
-              <nav className="mt-6 flex items-center justify-between">
-                {page > 0 ? (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={pageHref(page - 1)}>
-                      <ChevronLeft /> Претходна
-                    </Link>
-                  </Button>
-                ) : (
-                  <span />
-                )}
-                <span className="text-sm text-muted-foreground">
-                  Страница {page + 1}
-                </span>
-                {result.hasMore ? (
-                  <Button asChild variant="outline" size="sm">
-                    <Link href={pageHref(page + 1)}>
-                      Следна <ChevronRight />
-                    </Link>
-                  </Button>
-                ) : (
-                  <span />
-                )}
-              </nav>
-            )}
+            {/* `total` is what lets the bar number itself and offer the
+                last page. Where it is missing -- an ISR payload cached
+                before the API served it -- fall back to the page we are on
+                plus one if there is more, which degrades to the old
+                next/previous pair rather than claiming a page count we do
+                not have. */}
+            <PaginationBar
+              page={page}
+              totalPages={
+                result.total !== undefined
+                  ? Math.max(1, Math.ceil(result.total / result.pageSize))
+                  : page + (result.hasMore ? 2 : 1)
+              }
+              href={pageHref}
+            />
           </section>
         </div>
       </main>

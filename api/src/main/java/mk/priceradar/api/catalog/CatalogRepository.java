@@ -166,10 +166,41 @@ public class CatalogRepository {
                AND (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               -- Every word of the query has to be found somewhere, and
+               -- "somewhere" is wider than our own name for the product.
+               -- See `tokenQuery` for why this is word-wise and what the
+               -- shop's own title and URL are doing in here.
+               -- Gated on `:q`, not on `:qTokens`. The two say different
+               -- things: no query at all means no filter, while a query
+               -- that yields no usable token -- "%" or "---" -- must match
+               -- nothing. Keying the gate on the token array conflated
+               -- them and answered "%" with the whole catalogue.
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
-                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
+                    OR p.primary_mpn ILIKE CAST(:qSku AS text)
+                    OR (CAST(:qTokens AS text[]) IS NOT NULL
+                        AND NOT EXISTS (
+                        SELECT 1
+                          FROM unnest(CAST(:qTokens AS text[])) AS needle(tok)
+                         WHERE p.canonical_name NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(b.name, '') NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(p.primary_mpn, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- The leaf's Macedonian name, which is what makes
+                           -- a pasted "Дуксер" or "Патики" resolve without a
+                           -- stop-word list: the word is not discarded, it is
+                           -- required to describe the product.
+                           AND coalesce(cat.name_mk, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- And the shop's own words. `raw_title` carries
+                           -- what the merchant printed, `product_url` its
+                           -- Latin shelf -- so `dukser` and `patiki` match
+                           -- the same products `Дуксер` and `Патики` do,
+                           -- with no transliteration table to maintain.
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM merchant_offer qmo
+                                WHERE qmo.product_id = p.id
+                                  AND qmo.status = 'active'
+                                  AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
+                                       OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
@@ -282,10 +313,41 @@ public class CatalogRepository {
              WHERE (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               -- Every word of the query has to be found somewhere, and
+               -- "somewhere" is wider than our own name for the product.
+               -- See `tokenQuery` for why this is word-wise and what the
+               -- shop's own title and URL are doing in here.
+               -- Gated on `:q`, not on `:qTokens`. The two say different
+               -- things: no query at all means no filter, while a query
+               -- that yields no usable token -- "%" or "---" -- must match
+               -- nothing. Keying the gate on the token array conflated
+               -- them and answered "%" with the whole catalogue.
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
-                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
+                    OR p.primary_mpn ILIKE CAST(:qSku AS text)
+                    OR (CAST(:qTokens AS text[]) IS NOT NULL
+                        AND NOT EXISTS (
+                        SELECT 1
+                          FROM unnest(CAST(:qTokens AS text[])) AS needle(tok)
+                         WHERE p.canonical_name NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(b.name, '') NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(p.primary_mpn, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- The leaf's Macedonian name, which is what makes
+                           -- a pasted "Дуксер" or "Патики" resolve without a
+                           -- stop-word list: the word is not discarded, it is
+                           -- required to describe the product.
+                           AND coalesce(cat.name_mk, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- And the shop's own words. `raw_title` carries
+                           -- what the merchant printed, `product_url` its
+                           -- Latin shelf -- so `dukser` and `patiki` match
+                           -- the same products `Дуксер` and `Патики` do,
+                           -- with no transliteration table to maintain.
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM merchant_offer qmo
+                                WHERE qmo.product_id = p.id
+                                  AND qmo.status = 'active'
+                                  AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
+                                       OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
                AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
@@ -375,7 +437,7 @@ public class CatalogRepository {
         }
         var spec = db.sql(sql)
                 .param("q", normalizeQuery(query))
-                .param("qLike", likeQuery(query))
+                .param("qTokens", tokenQuery(query))
                 .param("qSku", skuQuery(query))
                 .param("brand", blankToNull(brandSlug))
                 .param("kinds", kinds)
@@ -395,6 +457,70 @@ public class CatalogRepository {
             spec = spec.param("country", country);
         }
         return spec.query((rs, rowNum) -> mapCard(rs, sized)).list();
+    }
+
+    /**
+     * How many products the same filters match, ignoring the page.
+     *
+     * <p>Built from the listing's own SQL rather than from a second copy of
+     * its WHERE clause: everything up to the `ORDER BY` is wrapped in a
+     * `count(*)`, so the two cannot drift. That matters here more than
+     * usual -- there are already four copies of the search predicate in
+     * this file, and a count that disagreed with the listing would number
+     * pages that come back empty.
+     *
+     * <p>It is a second query, which the comment on `hasMore` calls pure
+     * waste, and that was right while nothing needed the figure. A numbered
+     * pagination bar does: it cannot say "page 3 of 50", or offer the last
+     * page, without knowing. Measured on the full catalogue unfiltered --
+     * the worst case, 30 000 products and no predicate to narrow it -- the
+     * count runs in about 31 ms against a request that already takes 150,
+     * and `hasMore` keeps its cheap `pageSize + 1` trick for the rows
+     * themselves so the fast LIMIT path is untouched.
+     */
+    public int count(String country, String query, String brandSlug,
+                     Double sizeEu, String sizeAlpha, Integer sizeMl,
+                     String[] kinds, boolean includeUnclassified,
+                     String categorySlug, String gender,
+                     String concentration) {
+        String alpha = blankToNull(sizeAlpha);
+        SizeAxis axis = sizeEu != null ? SizeAxis.EU
+                : sizeMl != null ? SizeAxis.VOLUME
+                : alpha != null ? SizeAxis.ALPHA
+                : null;
+        boolean sized = axis != null;
+        String listing = sized ? LIST_BY_SIZE : LIST_BASE;
+        int orderAt = listing.indexOf("ORDER BY /*{ORDER}*/");
+        if (orderAt < 0) {
+            throw new IllegalStateException(
+                    "listing SQL lost its ORDER BY marker; the count is "
+                    + "derived from it and would silently count the wrong rows");
+        }
+        String sql = "SELECT count(*) FROM ("
+                + listing.substring(0, orderAt) + ") AS matched";
+        if (sized) {
+            sql = sql.replace("/*{SIZE_MATCH}*/", sizeMatch(axis));
+        }
+        var spec = db.sql(sql)
+                .param("q", normalizeQuery(query))
+                .param("qTokens", tokenQuery(query))
+                .param("qSku", skuQuery(query))
+                .param("brand", blankToNull(brandSlug))
+                .param("kinds", kinds)
+                .param("includeUnclassified", includeUnclassified)
+                .param("category", blankToNull(categorySlug))
+                .param("gender", blankToNull(gender))
+                .param("concentration", blankToNull(concentration));
+        if (axis == SizeAxis.EU) {
+            spec = spec.param("sizeEu", sizeEu);
+        } else if (axis == SizeAxis.VOLUME) {
+            spec = spec.param("sizeMl", sizeMl);
+        } else if (axis == SizeAxis.ALPHA) {
+            spec = spec.param("sizeAlpha", alpha);
+        } else {
+            spec = spec.param("country", country);
+        }
+        return spec.query(Integer.class).single();
     }
 
     /**
@@ -463,10 +589,41 @@ public class CatalogRepository {
                AND (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               -- Every word of the query has to be found somewhere, and
+               -- "somewhere" is wider than our own name for the product.
+               -- See `tokenQuery` for why this is word-wise and what the
+               -- shop's own title and URL are doing in here.
+               -- Gated on `:q`, not on `:qTokens`. The two say different
+               -- things: no query at all means no filter, while a query
+               -- that yields no usable token -- "%" or "---" -- must match
+               -- nothing. Keying the gate on the token array conflated
+               -- them and answered "%" with the whole catalogue.
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
-                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
+                    OR p.primary_mpn ILIKE CAST(:qSku AS text)
+                    OR (CAST(:qTokens AS text[]) IS NOT NULL
+                        AND NOT EXISTS (
+                        SELECT 1
+                          FROM unnest(CAST(:qTokens AS text[])) AS needle(tok)
+                         WHERE p.canonical_name NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(b.name, '') NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(p.primary_mpn, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- The leaf's Macedonian name, which is what makes
+                           -- a pasted "Дуксер" or "Патики" resolve without a
+                           -- stop-word list: the word is not discarded, it is
+                           -- required to describe the product.
+                           AND coalesce(cat.name_mk, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- And the shop's own words. `raw_title` carries
+                           -- what the merchant printed, `product_url` its
+                           -- Latin shelf -- so `dukser` and `patiki` match
+                           -- the same products `Дуксер` and `Патики` do,
+                           -- with no transliteration table to maintain.
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM merchant_offer qmo
+                                WHERE qmo.product_id = p.id
+                                  AND qmo.status = 'active'
+                                  AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
+                                       OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
                AND (CAST(:category AS text) IS NULL
                     OR cat.slug = CAST(:category AS text))
                AND (CAST(:gender AS text) IS NULL
@@ -522,10 +679,41 @@ public class CatalogRepository {
                AND (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+               -- Every word of the query has to be found somewhere, and
+               -- "somewhere" is wider than our own name for the product.
+               -- See `tokenQuery` for why this is word-wise and what the
+               -- shop's own title and URL are doing in here.
+               -- Gated on `:q`, not on `:qTokens`. The two say different
+               -- things: no query at all means no filter, while a query
+               -- that yields no usable token -- "%" or "---" -- must match
+               -- nothing. Keying the gate on the token array conflated
+               -- them and answered "%" with the whole catalogue.
                AND (CAST(:q AS text) IS NULL
-                    OR p.canonical_name ILIKE '%' || CAST(:qLike AS text) || '%'
-                    OR p.primary_mpn    ILIKE CAST(:qSku AS text)
-                    OR b.name           ILIKE '%' || CAST(:qLike AS text) || '%')
+                    OR p.primary_mpn ILIKE CAST(:qSku AS text)
+                    OR (CAST(:qTokens AS text[]) IS NOT NULL
+                        AND NOT EXISTS (
+                        SELECT 1
+                          FROM unnest(CAST(:qTokens AS text[])) AS needle(tok)
+                         WHERE p.canonical_name NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(b.name, '') NOT ILIKE '%' || needle.tok || '%'
+                           AND coalesce(p.primary_mpn, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- The leaf's Macedonian name, which is what makes
+                           -- a pasted "Дуксер" or "Патики" resolve without a
+                           -- stop-word list: the word is not discarded, it is
+                           -- required to describe the product.
+                           AND coalesce(cat.name_mk, '') NOT ILIKE '%' || needle.tok || '%'
+                           -- And the shop's own words. `raw_title` carries
+                           -- what the merchant printed, `product_url` its
+                           -- Latin shelf -- so `dukser` and `patiki` match
+                           -- the same products `Дуксер` and `Патики` do,
+                           -- with no transliteration table to maintain.
+                           AND NOT EXISTS (
+                               SELECT 1
+                                 FROM merchant_offer qmo
+                                WHERE qmo.product_id = p.id
+                                  AND qmo.status = 'active'
+                                  AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
+                                       OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
                AND (CAST(:category AS text) IS NULL
                     OR cat.slug = CAST(:category AS text))
                AND (CAST(:gender AS text) IS NULL
@@ -569,7 +757,7 @@ public class CatalogRepository {
         return db.sql(MERCHANT_FACETS)
                 .param("country", country)
                 .param("q", normalizeQuery(query))
-                .param("qLike", likeQuery(query))
+                .param("qTokens", tokenQuery(query))
                 .param("qSku", skuQuery(query))
                 .param("kinds", kinds)
                 .param("includeUnclassified", includeUnclassified)
@@ -602,7 +790,7 @@ public class CatalogRepository {
         return db.sql(BRAND_FACETS)
                 .param("country", country)
                 .param("q", normalizeQuery(query))
-                .param("qLike", likeQuery(query))
+                .param("qTokens", tokenQuery(query))
                 .param("qSku", skuQuery(query))
                 .param("kinds", kinds)
                 .param("includeUnclassified", includeUnclassified)
@@ -916,6 +1104,49 @@ public class CatalogRepository {
      * punctuation rule is written so it cannot eat the escapes it just
      * added.
      */
+    /**
+     * The query split into words, each an ILIKE pattern.
+     *
+     * <p>Search was one substring: the whole query, wrapped in wildcards,
+     * matched against our own name for the product. That fails the moment a
+     * shopper pastes a title off a shop's page, because the words are ours
+     * and the paste is theirs. `clean_model_name` drops the merchant's
+     * category noun, so "Juicy Couture Дуксер Classic Velour" -- copied from
+     * buzz -- had to match "Juicy Couture Classic Velour", and a contiguous
+     * pattern cannot.
+     *
+     * <p>So every word must be found, and each may be found in a different
+     * place: our canonical name, the brand, the article code, the leaf's
+     * Macedonian name, or the shop's own `raw_title` and `product_url`.
+     *
+     * <p><b>Why no stop-word list.</b> The obvious fix is to discard generic
+     * Macedonian nouns -- дуксер, патики, маица -- when the rest of the
+     * query matches. That widens every search that contains one: "патики
+     * nike" would return Nike perfume. Requiring the word to appear in the
+     * category's own name instead keeps it a filter rather than noise, and
+     * there is no vocabulary to keep up to date as leaves are added.
+     *
+     * <p>Transliteration comes free the same way. `product_url` holds the
+     * shop's Latin shelf (`/mk/dukser/`, `/mk/patiki/`), so a shopper typing
+     * either script reaches the same products without a mapping table.
+     *
+     * <p>Order within the query stops mattering, which is the point: a
+     * pasted title has the merchant's word order, not ours.
+     */
+    static String[] tokenQuery(String query) {
+        String pattern = likeQuery(query);
+        if (pattern == null) {
+            return null;
+        }
+        List<String> tokens = new ArrayList<>();
+        for (String word : pattern.split(" +")) {
+            if (!word.isBlank() && !word.replace("%", "").replace("\\", "").isBlank()) {
+                tokens.add(word);
+            }
+        }
+        return tokens.isEmpty() ? null : tokens.toArray(new String[0]);
+    }
+
     static String likeQuery(String query) {
         if (query == null || query.isBlank()) {
             return null;

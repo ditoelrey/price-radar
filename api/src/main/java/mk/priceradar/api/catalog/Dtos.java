@@ -169,6 +169,14 @@ public final class Dtos {
             int page,
             int pageSize,
             boolean hasMore,
+            /**
+             * Every product the filters match, not just this page's worth.
+             *
+             * <p>Added so the storefront can number its pages and offer the
+             * last one. `hasMore` answers "is there another page" for a
+             * next/previous pair and nothing more -- it cannot say "of 50".
+             */
+            int total,
             String appliedSizeFilter) {
     }
 

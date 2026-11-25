@@ -154,6 +154,14 @@ export type ProductPage = {
   page: number;
   pageSize: number;
   hasMore: boolean;
+  /**
+   * Every product the filters match, not just this page's worth.
+   *
+   * Optional for cache skew: an ISR payload rendered before the API served
+   * this field has none, and the pagination bar falls back to what it can
+   * infer from `hasMore` rather than claiming "page 3 of 1".
+   */
+  total?: number;
   appliedSizeFilter: string | null;
 };
 

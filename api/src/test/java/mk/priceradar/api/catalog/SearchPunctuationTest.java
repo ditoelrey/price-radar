@@ -74,12 +74,15 @@ class SearchPunctuationTest {
     }
 
     @Test
-    @DisplayName("spaces stay literal")
-    void spacesAreNotWildcards() {
-        // Turning these into wildcards too would let "nike air" match a name
-        // with twelve words between the two, which is a different search
-        // from the one that was asked for.
+    @DisplayName("a space separates words rather than becoming a wildcard")
+    void spacesSeparateTokens() {
+        // `likeQuery` leaves the space alone; `tokenQuery` then splits on
+        // it. Turning it into a wildcard instead would make one pattern of
+        // the whole query and lose the per-word matching the paste case
+        // needs.
         assertThat(CatalogRepository.likeQuery("nike air")).isEqualTo("nike air");
+        assertThat(CatalogRepository.tokenQuery("nike air"))
+                .containsExactly("nike", "air");
     }
 
     @Test
@@ -145,7 +148,7 @@ class SearchPunctuationTest {
                 CatalogRepository.listBaseSql(),
                 CatalogRepository.brandFacetsSql(),
                 CatalogRepository.merchantFacetsSql()}) {
-            assertThat(sql).contains(":qLike");
+            assertThat(sql).contains(":qTokens");
             assertThat(sql).contains(":qSku");
         }
     }

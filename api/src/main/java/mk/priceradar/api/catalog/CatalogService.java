@@ -92,7 +92,12 @@ public class CatalogService {
         String applied = sizeEu != null ? trimSize(sizeEu)
                 : volumeMl != null ? volumeMl + "ml"
                 : alpha;
-        return new Dtos.ProductPage(rows, page, pageSize, hasMore, applied);
+        int total = repository.count(
+                country, query, brand, sizeEu, alpha, volumeMl, kinds,
+                includeUnclassified, category, gender,
+                normalizeConcentration(concentration));
+        return new Dtos.ProductPage(rows, page, pageSize, hasMore, total,
+                                    applied);
     }
 
     /**
