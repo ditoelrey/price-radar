@@ -185,18 +185,20 @@ export default async function ProductsPage({
             )}
 
             {/* `total` is what lets the bar number itself and offer the
-                last page. Where it is missing -- an ISR payload cached
-                before the API served it -- fall back to the page we are on
-                plus one if there is more, which degrades to the old
-                next/previous pair rather than claiming a page count we do
-                not have. */}
+                last page. Passed through as undefined when the payload
+                does not carry it -- a body cached by `fetch` before the API
+                served the field -- and the bar then shows previous and next
+                only. It used to guess `page + (hasMore ? 2 : 1)` here,
+                which on the first page of a 350-page listing drew "1 2" and
+                sent the last-page button to page 2. */}
             <PaginationBar
               page={page}
               totalPages={
                 result.total !== undefined
                   ? Math.max(1, Math.ceil(result.total / result.pageSize))
-                  : page + (result.hasMore ? 2 : 1)
+                  : undefined
               }
+              hasMore={result.hasMore}
               href={pageHref}
             />
           </section>

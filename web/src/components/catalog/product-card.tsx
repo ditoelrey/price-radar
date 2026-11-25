@@ -62,7 +62,18 @@ export function ProductCard({
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <div className="relative aspect-square bg-muted/40">
+      {/* A strict square, and `aspect-square` alone does not give you one.
+          This div is a flex item in a `flex-col` card, so it carries
+          `min-height: auto` -- which refuses to go below the intrinsic
+          height of its in-flow content. A tall, narrow photo therefore
+          overrode the ratio: measured on the last page of Опрема with a
+          120x2400 image, the box went from 227px to 3932 and the card from
+          390 to 4095, wrecking the row.
+          `shrink-0` keeps it from being squeezed the other way, `min-h-0`
+          removes the floor, and the image below is taken out of flow so it
+          cannot contribute an intrinsic height at all. Any one of the three
+          would do; together they make the square unconditional. */}
+      <div className="relative aspect-square w-full min-h-0 shrink-0 overflow-hidden bg-muted/40">
         {product.imageUrl ? (
           // Shop CDNs are many and unpredictable, so this stays a plain <img>
           // rather than next/image: configuring a remote allowlist per shop
@@ -72,7 +83,7 @@ export function ProductCard({
             src={product.imageUrl}
             alt=""
             loading="lazy"
-            className="size-full object-contain p-4 transition-transform group-hover:scale-[1.03]"
+            className="absolute inset-0 size-full object-contain p-4 transition-transform group-hover:scale-[1.03]"
           />
         ) : (
           <div className="grid size-full place-items-center text-muted-foreground/40">

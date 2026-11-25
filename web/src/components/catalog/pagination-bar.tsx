@@ -118,18 +118,62 @@ function Step({
 export function PaginationBar({
   page,
   totalPages,
+  hasMore,
   href,
   className,
 }: {
   /** Zero-based, as the API numbers it. */
   page: number;
-  totalPages: number;
+  /**
+   * How many pages there are, or undefined when the payload did not say.
+   *
+   * Undefined is a real state, not a bug to paper over: a response cached
+   * before the API served `total` has none. The first version of this
+   * component guessed in that case -- current page plus one if there was
+   * more -- and the guess was a lie with consequences. On page 1 it drew
+   * "1 2" for a 350-page listing and pointed the last-page button at page
+   * 2. Nothing looked broken, which is what made it bad.
+   *
+   * So an unknown total now draws only what is known: previous and next.
+   */
+  totalPages?: number;
+  /** Whether a next page exists. The only navigation left when the total
+   *  is unknown, and `hasMore` has always been able to answer it. */
+  hasMore?: boolean;
   href: (page: number) => string;
   className?: string;
 }) {
+  const current = page + 1;
+
+  if (totalPages === undefined) {
+    // Nothing to number and no last page to offer. Hidden entirely on the
+    // first page with nothing after it, which is the one-page case.
+    if (page === 0 && !hasMore) return null;
+    return (
+      <nav
+        aria-label="Страници"
+        className={cn("mt-6 flex items-center justify-center gap-1.5",
+                      className)}
+      >
+        <Step href={href} to={current - 1} disabled={page === 0}
+              label="Претходна страница">
+          <ChevronLeft className="size-4" />
+          <span className="hidden sm:inline">Претходна</span>
+        </Step>
+        <span className="px-2 text-sm tabular-nums text-muted-foreground">
+          {current}
+        </span>
+        <Step href={href} to={current + 1} disabled={!hasMore}
+              label="Следна страница">
+          <span className="hidden sm:inline">Следна</span>
+          <ChevronRight className="size-4" />
+        </Step>
+      </nav>
+    );
+  }
+
   if (totalPages <= 1) return null;
 
-  const current = page + 1;
   const atFirst = current <= 1;
   const atLast = current >= totalPages;
 
