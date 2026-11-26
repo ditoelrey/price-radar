@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { X } from "lucide-react";
 
+import { FilterLink } from "@/components/catalog/filter-transition";
 import { type ActiveChip } from "@/lib/filters";
 
 /**
@@ -27,30 +27,28 @@ export function ActiveFilters({
   if (chips.length === 0) return null;
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       {chips.map((chip) => (
-        <Link
+        <FilterLink
           key={`${chip.key}:${chip.value}`}
           href={chip.href}
-          scroll={false}
           className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 py-1 pl-3 pr-2 text-xs font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {chip.label}
           <X aria-hidden className="size-3.5 opacity-70" />
           <span className="sr-only">Отстрани филтер</span>
-        </Link>
+        </FilterLink>
       ))}
 
       {/* Only from two chips up. With one, it is the same click as the chip
           itself, and two controls that do one thing is noise. */}
       {chips.length > 1 && (
-        <Link
+        <FilterLink
           href={clearHref}
-          scroll={false}
           className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Исчисти сè
-        </Link>
+        </FilterLink>
       )}
     </div>
   );

@@ -842,7 +842,8 @@ public class CatalogRepository {
      * Leaving a group's own filter out is what makes the numbers mean "and
      * this many more if you tick that too".
      */
-    public enum Facet { BRAND, SHOP, CATEGORY, GENDER, SIZE, PRICE }
+    public enum Facet { BRAND, SHOP, CATEGORY, GENDER, SIZE, PRICE,
+                        CONCENTRATION }
 
     /**
      * The WHERE clause for a facet, with its own group left out.
@@ -867,7 +868,9 @@ public class CatalogRepository {
         if (enumerating != Facet.GENDER) {
             where.append(W_GENDER);
         }
-        where.append(W_CONCENTRATION);
+        if (enumerating != Facet.CONCENTRATION) {
+            where.append(W_CONCENTRATION);
+        }
         if (enumerating != Facet.PRICE) {
             where.append(priceBand(priceExpr(axis)));
         }
@@ -908,6 +911,13 @@ public class CatalogRepository {
             case GENDER -> "SELECT p.gender::text AS value,\n"
                     + "       p.gender::text AS label,\n"
                     + "       count(DISTINCT p.id) AS product_count\n";
+            // The fragrance vertical's own product types. A strength is not
+            // a category -- `fragrances` is the only leaf there is -- but it
+            // is what a shopper picks between on that storefront, so it is
+            // the group the other verticals fill with leaves.
+            case CONCENTRATION -> "SELECT p.concentration AS value,\n"
+                    + "       p.concentration AS label,\n"
+                    + "       count(DISTINCT p.id) AS product_count\n";
             case SIZE -> throw new IllegalArgumentException(
                     "sizes come from sizeFacetSql: they are three axes in one "
                     + "group and are counted from the summary's own arrays");
@@ -938,6 +948,11 @@ public class CatalogRepository {
              GROUP BY p.gender
             HAVING p.gender IS NOT NULL
              ORDER BY product_count DESC
+            """;
+            case CONCENTRATION -> """
+             GROUP BY p.concentration
+            HAVING p.concentration IS NOT NULL
+             ORDER BY product_count DESC, p.concentration
             """;
             case SIZE, PRICE -> "";
         };

@@ -109,6 +109,7 @@ public final class Dtos {
      */
     public record Facets(List<FacetOption> genders,
                          List<FacetOption> categories,
+                         List<FacetOption> concentrations,
                          List<SizeOption> sizes,
                          List<FacetOption> brands,
                          List<FacetOption> shops,

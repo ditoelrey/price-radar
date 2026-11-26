@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { FilterLink } from "@/components/catalog/filter-transition";
 import {
   ChevronLeft,
   ChevronRight,
@@ -93,13 +93,13 @@ function Step({
     );
   }
   return (
-    <Link
+    <FilterLink
       href={href(to - 1)}
       aria-label={label}
       className={cn(STEP, "hover:border-primary/40 hover:text-primary")}
     >
       {children}
-    </Link>
+    </FilterLink>
   );
 }
 
@@ -226,7 +226,7 @@ export function PaginationBar({
            is. */
         const essential = entry === 1 || entry === totalPages;
         return (
-          <Link
+          <FilterLink
             key={entry}
             href={href(entry - 1)}
             aria-label={`Страница ${entry}`}
@@ -237,7 +237,7 @@ export function PaginationBar({
             )}
           >
             {entry}
-          </Link>
+          </FilterLink>
         );
       })}
 

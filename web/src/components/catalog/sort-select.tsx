@@ -1,6 +1,8 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+
+import { useFilterTransition } from "@/components/catalog/filter-transition";
 import { ArrowDownUp, ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -41,6 +43,9 @@ export function SortSelect({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+  // Re-sorting costs the same second a filter does, and the select would
+  // otherwise sit on the new value with the old order still on screen.
+  const transition = useFilterTransition();
 
   const onChange = (value: string) => {
     const next = new URLSearchParams(params.toString());
@@ -54,7 +59,12 @@ export function SortSelect({
     // meaningless -- the same reason the size and brand filters reset paging.
     next.delete("page");
     const qs = next.toString();
-    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+    const url = `${pathname}${qs ? `?${qs}` : ""}`;
+    if (transition) {
+      transition.navigate(url);
+      return;
+    }
+    router.replace(url, { scroll: false });
   };
 
   const inline = layout === "inline";

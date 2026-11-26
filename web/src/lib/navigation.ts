@@ -192,7 +192,11 @@ export const CONCENTRATIONS: ReadonlyArray<{
 }> = [
   { value: "EDT", label: "Тоалетни води", short: "EDT" },
   { value: "EDP", label: "Парфимирани води", short: "EDP" },
-  { value: "EDC", label: "Колонски води", short: "EDC" },
+  // Both spellings of the same strength. The shops write "EDC" and
+  // "Cologne" for one thing, and a shopper reading Колонски води means
+  // the thirteen the catalogue files under the second as much as the
+  // three under the first.
+  { value: "EDC,COLOGNE", label: "Колонски води", short: "EDC" },
   // No abbreviation: "Парфем - Парфеми" would be the same word twice.
   { value: "PARFUM,EXTRAIT,ELIXIR,ABSOLU", label: "Парфеми", short: null },
 ];

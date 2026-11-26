@@ -256,6 +256,14 @@ export type SizeFacetOption = {
 export type Facets = {
   genders?: FacetOption[];
   categories?: FacetOption[];
+  /**
+   * Fragrance strengths, which are that vertical's product types.
+   *
+   * `fragrances` is its only category leaf, so the Производи control is
+   * filled from here instead: EDT, EDP, a cologne, a parfum -- the thing a
+   * shopper on that storefront actually picks between.
+   */
+  concentrations?: FacetOption[];
   sizes?: SizeFacetOption[];
   brands?: FacetOption[];
   shops?: FacetOption[];

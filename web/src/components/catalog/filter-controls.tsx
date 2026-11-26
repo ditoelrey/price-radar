@@ -1,17 +1,28 @@
-import Link from "next/link";
+"use client";
+
 import { Check, Search } from "lucide-react";
 
-import { type FilterGroupModel, type FilterOption } from "@/lib/filters";
+import {
+  FilterLink,
+  useOptimisticSelected,
+} from "@/components/catalog/filter-transition";
+import {
+  type FilterGroupModel,
+  type FilterOption,
+  type GroupKey,
+} from "@/lib/filters";
 import { cn } from "@/lib/utils";
 
 /**
  * The parts both filter surfaces are built from.
  *
- * The desktop rail renders on the server and the mobile drawer is a client
- * component, so these are plain presentational components with no `"use
- * client"` of their own: imported from either side, they compile into either
- * bundle. Keeping them in one file is what stops the two surfaces drifting
- * into two different controls that happen to look alike.
+ * The desktop rail is a server component and the mobile drawer a client one,
+ * and both render these: keeping them in one file is what stops the two
+ * surfaces drifting into two controls that happen to look alike.
+ *
+ * `"use client"` because a box now answers before the server does -- see
+ * `useOptimisticSelected`. The rail above them stays on the server; only the
+ * controls themselves cross over.
  *
  * Every option is a `<Link>` dressed as a checkbox rather than an `<input>`.
  * Filtering is a navigation here -- the listing is server-rendered and the
@@ -22,42 +33,69 @@ import { cn } from "@/lib/utils";
  */
 export function OptionRow({
   option,
+  group,
+  single,
   className,
 }: {
   option: FilterOption;
+  /** Which group this belongs to, so a click can be shown before it lands. */
+  group: GroupKey;
+  /** Drawn as a radio, and clicking the active one clears it. */
+  single?: boolean;
   className?: string;
 }) {
+  const selected = useOptimisticSelected(
+    group,
+    option.value,
+    option.selected,
+    single,
+  );
+
   return (
-    <Link
+    <FilterLink
       href={option.href}
-      scroll={false}
-      role="checkbox"
-      aria-checked={option.selected}
+      pick={{ group, value: option.value, selected: !option.selected }}
+      role={single ? "radio" : "checkbox"}
+      aria-checked={selected}
       className={cn(
         "group flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-accent",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        option.selected ? "font-medium" : "text-muted-foreground",
+        selected ? "font-medium" : "text-muted-foreground",
         className,
       )}
     >
       <span
         aria-hidden
         className={cn(
-          "grid size-4 shrink-0 place-items-center rounded-[4px] border transition-colors",
-          option.selected
+          "grid size-4 shrink-0 place-items-center border transition-colors",
+          // A circle says "one of these" before a word does, which is the
+          // whole reason this group looks different from the other five.
+          single ? "rounded-full" : "rounded-[4px]",
+          selected
             ? "border-primary bg-primary text-primary-foreground"
             : "border-input bg-background group-hover:border-primary",
         )}
       >
-        {option.selected && <Check className="size-3" strokeWidth={3} />}
+        {selected &&
+          (single ? (
+            <span className="size-1.5 rounded-full bg-primary-foreground" />
+          ) : (
+            <Check className="size-3" strokeWidth={3} />
+          ))}
       </span>
-      <span className="min-w-0 flex-1 truncate">{option.label}</span>
+      {/* Производи wraps, everything else truncates. Its labels are the
+          longest on the page -- "EDP — Парфимирани води", "Кациги, наочари и
+          заштитници" -- and there are at most a dozen of them, where Бренд
+          has sixty rows that have to stay one line each to be scannable. */}
+      <span className={cn("min-w-0 flex-1", single ? "break-words" : "truncate")}>
+        {option.label}
+      </span>
       {/* The count is the facet's promise, and it is why the boxes are worth
           ticking: a shopper can see which option leaves them something. */}
       <span className="shrink-0 text-[11px] tabular-nums opacity-60">
         {option.count}
       </span>
-    </Link>
+    </FilterLink>
   );
 }
 
@@ -66,25 +104,33 @@ export function SizeChips({ options }: { options: FilterOption[] }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {options.map((option) => (
-        <Link
-          key={option.value}
-          href={option.href}
-          scroll={false}
-          role="checkbox"
-          aria-checked={option.selected}
-          title={`${option.count} производи`}
-          className={cn(
-            "inline-flex h-9 min-w-[3rem] items-center justify-center rounded-md border px-2 text-sm font-medium transition-colors",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-            option.selected
-              ? "border-primary bg-primary text-primary-foreground shadow-sm"
-              : "border-input bg-background hover:border-primary hover:bg-primary/5",
-          )}
-        >
-          {option.label}
-        </Link>
+        <SizeChip key={option.value} option={option} />
       ))}
     </div>
+  );
+}
+
+/** Its own component so it can hold the hook that fills it in early. */
+function SizeChip({ option }: { option: FilterOption }) {
+  const selected = useOptimisticSelected("size", option.value, option.selected);
+
+  return (
+    <FilterLink
+      href={option.href}
+      pick={{ group: "size", value: option.value, selected: !option.selected }}
+      role="checkbox"
+      aria-checked={selected}
+      title={`${option.count} производи`}
+      className={cn(
+        "inline-flex h-9 min-w-[3rem] items-center justify-center rounded-md border px-2 text-sm font-medium transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+        selected
+          ? "border-primary bg-primary text-primary-foreground shadow-sm"
+          : "border-input bg-background hover:border-primary hover:bg-primary/5",
+      )}
+    >
+      {option.label}
+    </FilterLink>
   );
 }
 
@@ -156,9 +202,17 @@ export function GroupBody({
           Нема резултати
         </p>
       ) : (
-        <div className="-mx-1 max-h-64 space-y-0.5 overflow-y-auto px-1">
+        <div
+          role={group.single ? "radiogroup" : undefined}
+          className="-mx-1 max-h-64 space-y-0.5 overflow-y-auto px-1"
+        >
           {options.map((option) => (
-            <OptionRow key={option.value} option={option} />
+            <OptionRow
+              key={option.value}
+              option={option}
+              group={group.key}
+              single={group.single}
+            />
           ))}
         </div>
       )}
@@ -189,7 +243,11 @@ export function FilterSection({
 }) {
   return (
     <details
-      open={defaultOpen || selectedCount > 0}
+      // `defaultOpen` alone, not `|| selectedCount > 0`. A group a shopper
+      // has already answered is the one they need least: the chips above the
+      // grid say what is applied, and opening every answered section pushed
+      // the unanswered ones off the screen.
+      open={defaultOpen}
       className="group border-b border-border/60 py-3 last:border-b-0 [&_summary::-webkit-details-marker]:hidden"
     >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold">

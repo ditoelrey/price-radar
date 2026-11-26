@@ -33,15 +33,15 @@ export function FilterRail({ groups }: { groups: FilterGroupModel[] }) {
   return (
     <aside className="hidden w-64 shrink-0 lg:block">
       <div className="rounded-lg border bg-card px-4 py-1">
-        {shown.map((group, index) => (
+        {shown.map((group) => (
           <FilterSection
             key={group.key}
             title={group.title}
             selectedCount={group.selectedCount}
-            // The first three open, the rest closed. Пол, Категорија and
-            // Големина are what a shopper narrows by first, and opening all
-            // six would put Цена below the fold of a laptop screen.
-            defaultOpen={index < 3}
+            // Closed unless the page says otherwise, and what it says is in
+            // `open`: the question a shopper has not answered yet is the one
+            // worth showing them.
+            defaultOpen={group.open}
           >
             {group.search ? (
               <SearchableGroup group={group} />

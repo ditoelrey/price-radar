@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { ArrowDownUp, Check, SlidersHorizontal, X } from "lucide-react";
 
 import {
   FilterSection,
   GroupBody,
 } from "@/components/catalog/filter-controls";
+import { FilterLink } from "@/components/catalog/filter-transition";
 import { SearchableGroup } from "@/components/catalog/searchable-group";
 import {
   type ActiveChip,
@@ -145,11 +145,10 @@ export function MobileFilterBar({
           {panel.kind === "sort" ? (
             <div className="space-y-0.5">
               {sortOptions.map((option) => (
-                <Link
+                <FilterLink
                   key={option.value}
                   href={option.href}
-                  scroll={false}
-                  onClick={() => setPanel(null)}
+                  onNavigate={() => setPanel(null)}
                   aria-current={option.selected}
                   className={cn(
                     "flex items-center justify-between rounded-md px-2 py-2.5 text-sm transition-colors hover:bg-accent",
@@ -160,7 +159,7 @@ export function MobileFilterBar({
                 >
                   {option.label}
                   {option.selected && <Check className="size-4" />}
-                </Link>
+                </FilterLink>
               ))}
             </div>
           ) : (
@@ -168,23 +167,21 @@ export function MobileFilterBar({
               {chips.length > 0 && (
                 <div className="mb-3 flex flex-wrap items-center gap-2 border-b pb-3">
                   {chips.map((chip) => (
-                    <Link
+                    <FilterLink
                       key={`${chip.key}:${chip.value}`}
                       href={chip.href}
-                      scroll={false}
                       className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 py-1 pl-3 pr-2 text-xs font-medium text-primary"
                     >
                       {chip.label}
                       <X aria-hidden className="size-3.5 opacity-70" />
-                    </Link>
+                    </FilterLink>
                   ))}
-                  <Link
+                  <FilterLink
                     href={clearHref}
-                    scroll={false}
                     className="px-1 text-xs font-medium text-muted-foreground underline underline-offset-4"
                   >
                     Исчисти сè
-                  </Link>
+                  </FilterLink>
                 </div>
               )}
 

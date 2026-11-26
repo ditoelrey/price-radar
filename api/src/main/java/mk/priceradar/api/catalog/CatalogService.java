@@ -218,6 +218,8 @@ public class CatalogService {
                 departments(repository.facet(
                         CatalogRepository.Facet.GENDER, scope, limit)),
                 repository.facet(CatalogRepository.Facet.CATEGORY, scope, limit),
+                repository.facet(
+                        CatalogRepository.Facet.CONCENTRATION, scope, limit),
                 repository.sizeFacet(scope),
                 repository.facet(CatalogRepository.Facet.BRAND, scope, limit),
                 repository.facet(CatalogRepository.Facet.SHOP, scope, limit),
@@ -240,9 +242,17 @@ public class CatalogService {
         }
         int unisex = counts.getOrDefault("unisex", 0);
         var out = new ArrayList<Dtos.FacetOption>();
-        for (String slug : new String[] {"men", "women", "kids"}) {
+        for (String slug : new String[] {"men", "women", "kids", "unisex"}) {
             int own = counts.getOrDefault(slug, 0);
-            int total = slug.equals("kids") ? own : own + unisex;
+            // Мажи and Жени include unisex, as the listing predicate and the
+            // shops' own facets do. Деца does not. Унисекс asks for only
+            // those, which is why it is offered beside them rather than
+            // folded away: on fragrances it is a third of the catalogue, and
+            // a shopper who wants a scent for either is not browsing a
+            // department -- they are browsing that answer.
+            int total = slug.equals("men") || slug.equals("women")
+                    ? own + unisex
+                    : own;
             if (total > 0) {
                 out.add(new Dtos.FacetOption(slug, slug, total));
             }

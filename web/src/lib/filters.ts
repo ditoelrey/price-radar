@@ -37,7 +37,11 @@ export type GroupKey = (typeof GROUP_KEYS)[number];
  */
 export const GROUP_LABELS: Record<GroupKey, string> = {
   gender: "Пол",
-  category: "Категорија",
+  // "Производи", not "Категорија": on Обувки the options are Патики and
+  // Копачки, which are things a shopper buys, and on Парфеми they are EDT
+  // and EDP, which are not categories at all. One word covers both, and it
+  // is the word the shops use.
+  category: "Производи",
   size: "Големина",
   brand: "Бренд",
   shop: "Продавница",
@@ -222,7 +226,25 @@ export type FilterGroupModel = {
   sections?: Array<{ title: string; options: FilterOption[] }>;
   /** Only Бренд. Any other group is short enough to read. */
   search?: boolean;
+  /**
+   * One at a time, drawn as radio rows rather than checkboxes.
+   *
+   * Производи alone. Two product types side by side is a page about nothing
+   * in particular -- patike and kopachki have different sizes, different
+   * prices and different reasons to be bought -- and every shop a Macedonian
+   * shopper uses makes it a choice too. Clicking the active one clears it
+   * and returns the whole vertical.
+   */
+  single?: boolean;
   selectedCount: number;
+  /**
+   * Whether the section starts open on the desktop rail.
+   *
+   * Decided per listing rather than by position: a shopper who has not
+   * picked a product type yet should land with that list open, and one who
+   * arrived by clicking Патики should not have to close it again.
+   */
+  open?: boolean;
 };
 
 /**

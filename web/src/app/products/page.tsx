@@ -6,12 +6,18 @@ import { formatSizeEu } from "@/lib/format";
 import { ActiveFilters } from "@/components/catalog/active-filters";
 import { FilterRail } from "@/components/catalog/filter-rail";
 import {
+  FilterTransitionProvider,
+  PendingGrid,
+} from "@/components/catalog/filter-transition";
+import {
   MobileFilterBar,
   type SortOption,
 } from "@/components/catalog/mobile-filter-bar";
 import { SortSelect } from "@/components/catalog/sort-select";
 import {
+  CONCENTRATIONS,
   GENDER_COLUMNS,
+  GENDER_LABEL_MK,
   categoriesFor,
   listingHref,
   listingTitle,
@@ -123,8 +129,21 @@ export default async function ProductsPage({
   ]);
 
   // ------------------------------------------------------------ the controls
+  // Nouns, because a filter heading names a department rather than
+  // describing a product: Мажи, not Машки. Унисекс has no column in the mega
+  // menu -- it is not a department a shop opens with -- but it is a real
+  // answer here, and on fragrances it is a third of the catalogue.
   const genderLabel = (slug: string) =>
-    GENDER_COLUMNS.find((g) => g.slug === slug)?.label ?? slug;
+    slug === "unisex"
+      ? GENDER_LABEL_MK.unisex
+      : (GENDER_COLUMNS.find((g) => g.slug === slug)?.label ?? slug);
+
+  // A bottle's strength is this vertical's product type. `fragrances` is the
+  // only leaf there is, so Производи would otherwise offer one option
+  // reading "Парфем" over the whole catalogue, while the thing a shopper
+  // actually picks between -- EDT, EDP, a parfum -- sat in a menu they had
+  // to go back to.
+  const isFragrance = filters.kind === "fragrance";
   // The leaf's Macedonian name comes from the API, which reads it from the
   // same column the mega menu's labels were copied from. The menu is the
   // fallback for a leaf the facet named without a translation.
@@ -161,6 +180,59 @@ export default async function ProductsPage({
       };
     });
 
+  /**
+   * Производи, the one group that takes a single answer.
+   *
+   * Two product types at once is a page about nothing in particular: patiki
+   * and kopachki have different sizes, different prices and different
+   * reasons to be bought, and every shop here makes it a choice too.
+   * Clicking the active one clears it and gives the vertical back.
+   */
+  const productOptions = (): FilterOption[] => {
+    if (!isFragrance) {
+      return (facets.categories ?? []).map((row) => {
+        const selected = filters.category.includes(row.value);
+        return {
+          value: row.value,
+          label: categoryLabel(row.value, row.label),
+          count: row.productCount,
+          selected,
+          href: filterHref(filters, {
+            category: selected ? [] : [row.value],
+          }),
+        };
+      });
+    }
+    // The four the menu offers, counted from the strengths behind them:
+    // "Парфеми" is PARFUM, EXTRAIT, ELIXIR and ABSOLU together, because a
+    // shopper reading that word does not distinguish them.
+    const counted = new Map(
+      (facets.concentrations ?? []).map((row) => [row.value, row.productCount]),
+    );
+    const chosen = new Set(
+      (filters.concentration ?? "").split(",").filter(Boolean),
+    );
+    return CONCENTRATIONS.map((entry) => {
+      const members = entry.value.split(",");
+      const count = members.reduce(
+        (sum, member) => sum + (counted.get(member) ?? 0),
+        0,
+      );
+      const selected =
+        chosen.size === members.length &&
+        members.every((member) => chosen.has(member));
+      return {
+        value: entry.value,
+        label: entry.short ? `${entry.short} — ${entry.label}` : entry.label,
+        count,
+        selected,
+        href: filterHref(filters, {
+          concentration: selected ? undefined : entry.value,
+        }),
+      };
+    }).filter((option) => option.count > 0 || option.selected);
+  };
+
   const sizeOptions = (axis: string): FilterOption[] =>
     (facets.sizes ?? [])
       .filter((row) => row.axis === axis)
@@ -187,7 +259,25 @@ export default async function ProductsPage({
     { title: "Милилитража", options: sizeOptions("ml") },
   ].filter((section) => section.options.length > 0);
 
+  const products = productOptions();
+  const productsChosen = products.some((option) => option.selected);
+
   const groups: FilterGroupModel[] = [
+    // Производи first, because it is the question a shopper answers first:
+    // what am I buying. Пол narrows it; on Обувки three quarters of the
+    // catalogue is in whichever department they are already in, so opening
+    // with it narrows almost nothing.
+    {
+      key: "category",
+      title: GROUP_LABELS.category,
+      options: products,
+      single: true,
+      selectedCount: productsChosen ? 1 : 0,
+      // Open when it is still unanswered -- someone who clicked Обувки or
+      // Машки обувки lands on the list they came to choose from. Someone who
+      // clicked Патики has answered it, and gets the space back.
+      open: !productsChosen,
+    },
     {
       key: "gender",
       title: GROUP_LABELS.gender,
@@ -195,18 +285,13 @@ export default async function ProductsPage({
         genderLabel(row.value),
       ),
       selectedCount: ticked.length,
-    },
-    {
-      key: "category",
-      title: GROUP_LABELS.category,
-      options: plainOptions("category", facets.categories, (row) =>
-        categoryLabel(row.value, row.label),
-      ),
-      selectedCount: filters.category.length,
+      open: ticked.length === 0,
     },
     {
       key: "size",
-      title: GROUP_LABELS.size,
+      // A bottle is not a size, it is an amount, and the shops label it so:
+      // e-elixir's own attribute is милилитража.
+      title: isFragrance ? "Милитража" : GROUP_LABELS.size,
       options: sizeSections.flatMap((section) => section.options),
       sections: sizeSections,
       selectedCount: filters.sizeEu.length + filters.size.length,
@@ -261,6 +346,10 @@ export default async function ProductsPage({
   // of it. Same for a slug in a hand-edited or outdated link.
   for (const group of groups) {
     if (group.key === "size") continue;
+    // On fragrances Производи is the concentration, which is not one of the
+    // lists below -- its options already carry their own remove links, and
+    // the menu never writes a strength the facet cannot name.
+    if (group.key === "category" && isFragrance) continue;
     const offered = new Set(group.options.map((option) => option.value));
     const key = group.key as "gender" | "category" | "brand" | "shop" | "price";
     for (const value of key === "gender" ? ticked : filters[key]) {
@@ -326,6 +415,11 @@ export default async function ProductsPage({
     <div className="flex min-h-screen flex-col">
       <SiteHeader query={filters.q} activeKind={filters.kind} />
 
+      {/* Every filter control inside this is a link whose click is run as a
+          transition, so the second the server spends rebuilding the listing
+          is a second the page can show it is working. See
+          `FilterTransitionProvider`. */}
+      <FilterTransitionProvider>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -353,15 +447,6 @@ export default async function ProductsPage({
             </p>
           </div>
 
-          {/* Top right, where every shop a Macedonian shopper already uses
-              puts it, and out of the filter rail -- sorting does not change
-              what the page holds. Hidden on a phone, where it is the first
-              pill in the row below. */}
-          <SortSelect
-            selected={filters.sort}
-            layout="inline"
-            className="hidden lg:flex"
-          />
         </div>
 
         <MobileFilterBar
@@ -377,7 +462,20 @@ export default async function ProductsPage({
           <FilterRail groups={groups} />
 
           <section className="min-w-0 flex-1">
-            <ActiveFilters chips={chips} clearHref={clearedHref(filters)} />
+            {/* Chips left, Сортирај right, on one line directly above the
+                grid. The control used to sit up in the header, a row and a
+                half above the cards it reorders; here it is level with the
+                filters it is not one of, and the eye finds both at the top
+                edge of the results. Hidden on a phone, where it is the first
+                pill in the row above. */}
+            <div className="mb-4 flex min-h-9 items-center justify-between gap-3">
+              <ActiveFilters chips={chips} clearHref={clearedHref(filters)} />
+              <SortSelect
+                selected={filters.sort}
+                layout="inline"
+                className="ml-auto hidden shrink-0 lg:flex"
+              />
+            </div>
 
             {result.items.length === 0 ? (
               <div className="grid place-items-center rounded-lg border border-dashed py-20 text-center">
@@ -393,16 +491,18 @@ export default async function ProductsPage({
                 </Button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-                {result.items.map((product) => (
-                  <ProductCard
-                    key={product.slug}
-                    product={product}
-                    sizeEu={firstEu}
-                    size={firstSize}
-                  />
-                ))}
-              </div>
+              <PendingGrid>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+                  {result.items.map((product) => (
+                    <ProductCard
+                      key={product.slug}
+                      product={product}
+                      sizeEu={firstEu}
+                      size={firstSize}
+                    />
+                  ))}
+                </div>
+              </PendingGrid>
             )}
 
             {/* `total` is what lets the bar number itself and offer the
@@ -425,6 +525,7 @@ export default async function ProductsPage({
           </section>
         </div>
       </main>
+      </FilterTransitionProvider>
 
       <SiteFooter />
     </div>
