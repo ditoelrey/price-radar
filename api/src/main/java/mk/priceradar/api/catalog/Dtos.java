@@ -71,6 +71,50 @@ public final class Dtos {
      * told the site compares Sport Vision and Sizeer -- which sell no
      * perfume -- and was not told about the two perfumeries that do.
      */
+    /**
+     * One option of one filter group, with the number beside it.
+     *
+     * <p>The shape every group shares, because the controls do: a checkbox, a
+     * Macedonian label and a count that says what the page would hold if it
+     * were ticked. {@code value} is what travels in the URL -- a slug, a
+     * gender, a bare size -- and {@code label} is what a shopper reads.
+     *
+     * <p>Replaces the per-group records for the new sidebar.
+     * {@link BrandFacet} and {@link MerchantFacet} are the same thing under
+     * older names, kept while {@code /brands} and {@code /merchants} are
+     * still served.
+     */
+    public record FacetOption(String value, String label, int productCount) {
+    }
+
+    /**
+     * One size option, and which ladder it is a rung of.
+     *
+     * <p>{@code axis} is {@code eu}, {@code alpha} or {@code ml}. The three
+     * share a control because to a shopper they are one question, and they
+     * cannot share a list because no product is on two ladders -- which axis
+     * comes back with options is how the sidebar knows which rail to draw.
+     */
+    public record SizeOption(String axis, String value, int productCount) {
+    }
+
+    /**
+     * Every control on the listing page, answered in one call.
+     *
+     * <p>Five queries rather than one, because each group's options are
+     * counted with every <em>other</em> group's filters applied and its own
+     * left out. That is what makes a multi-select usable: the number beside
+     * Nike has to mean "this many more if you add Nike", not "this many,
+     * given you already picked adidas".
+     */
+    public record Facets(List<FacetOption> genders,
+                         List<FacetOption> categories,
+                         List<SizeOption> sizes,
+                         List<FacetOption> brands,
+                         List<FacetOption> shops,
+                         List<FacetOption> prices) {
+    }
+
     public record MerchantFacet(String slug, String name, int productCount) {
     }
 

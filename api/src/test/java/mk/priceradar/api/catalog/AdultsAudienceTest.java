@@ -32,7 +32,7 @@ class AdultsAudienceTest {
                 CatalogRepository.listBaseSql(),
                 CatalogRepository.brandFacetsSql(),
                 CatalogRepository.merchantFacetsSql()}) {
-            assertThat(sql).contains("CAST(:gender AS text) = 'adults'");
+            assertThat(sql).contains("'adults' = ANY(");
         }
     }
 
@@ -58,7 +58,9 @@ class AdultsAudienceTest {
     @Test
     @DisplayName("the men and women departments still include unisex")
     void departmentsUnchanged() {
+        // Now an overlap test, because the filter is a list: picking
+        // Мажи and Жени together must still admit unisex once.
         assertThat(CatalogRepository.listBaseSql())
-                .contains("CAST(:gender AS text) IN ('men', 'women')");
+                .contains("&& ARRAY['men', 'women']");
     }
 }

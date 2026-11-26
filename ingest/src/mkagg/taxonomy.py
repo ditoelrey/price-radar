@@ -185,7 +185,14 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                    # and 38 of those were swimsuits. "swimming" stays; it is
                    # how the gear is written ("swimming goggles"), and no
                    # live garment title uses it.
-                   "swimming", "goggles")),
+                   "swimming", "goggles",
+                   # A beach towel is equipment, not a garment. megasport
+                   # shelves them in its swimwear tree, which put three
+                   # Colmar towels in Облека за капење; `peskir` is the word
+                   # every shop uses. "towel" is safe as a whole word --
+                   # "Toweling", as in Juicy Couture's towelling tee, is a
+                   # different word and does not match.
+                   "peskir", "peshkir", "beach towel", "towel")),
     # Wallets before bags, and that ordering is the whole reason the leaf can
     # exist: megasport publishes one facet, "Ранци и Паричници", for both. A
     # wallet is only ever recognisable there by its own name.
@@ -253,16 +260,20 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
     ("caps_hats", ("kapa", "kapi", "kachket", "kacket", "kachketi",
                    "kacketi", "shapka", "shapki", "bandana", "bandani",
                    "zimski kapi", "zimska kapa", "podkapa",
-                   # `traka za glava` is a headband and stays. Its
-                   # neighbour `traka za kosa` -- a hair tie -- moved to
-                   # `other_accessories`, which is where the shops'
-                   # own hair-elastic and sweatband shelves now go.
-                   "traka za glava",
+                   # `traka za glava` left too, on 2026-11-26. It was kept
+                   # here because this leaf is named for бандани and a
+                   # headband looked like one -- but a бандана is a scarf
+                   # and a sweatband is not, and keeping them apart put the
+                   # same four products in two leaves depending on which
+                   # shop shelved them. They are all in `other_accessories`
+                   # now, beside the hair ties they are sold with.
+                   # Measured: 10 products move, every one a head or hair
+                   # band.
+                   # `headband` and `headbands` went with it, for the same
+                   # reason and in the same change. The plural matters
+                   # either way -- the padding matches whole words and the
+                   # shops write "Headbands Wide 3pk".
                    "grejac za vrat", "grejach za vrat",
-                   # Plural too: the padding matches whole words, and
-                   # "Nike Flex Classic Headbands Wide 3pk" is how the
-                   # shops write it.
-                   "headband", "headbands",
                    "beanie", "cap", "shal", "sal")),
     # "torbici" is megasport's spelling for the women's bag facet, and it is
     # here because the slug probe caught it falling through to the parent
@@ -284,7 +295,23 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                         "drzaci za sklekovi", "sklekovi", "jaze za skokanje",
                         "oprema za trening", "pumpa za topka", "pumpa",
                         "fitnes rekvizit", "pomagalo za sklekovi",
-                        "mat", "yoga")),
+                        "yoga",
+                        # Not a bare "mat": that is also how a matte finish
+                        # is written, and it put a ski helmet in here --
+                        # "Uvex Legend 2.0 White Black Mat". Four more Uvex
+                        # helmets matched it and were saved only by their
+                        # facet. The real mats say which kind they are, and
+                        # `podloga` and `prostirka` above catch the
+                        # Macedonian ones.
+                        "yoga mat", "aerobics mat", "fitness mat",
+                        "exercise mat", "strunjak",
+                        # Read off the live titles: "Ring Sport Ластик за
+                        # вежбање 86x8cm", "Lonsdale Resistance Band Set".
+                        # Both sat in the `accessories` umbrella because no
+                        # rule claimed them.
+                        "resistance band", "lastik za vezhbanje",
+                        "lastik za vezbanje", "elastika za vezhbanje",
+                        "elastika za vezbanje")),
     # Folded into `other_accessories` on 2026-11-25. 61 products, and
     # the leaf was never reachable: it sat under the hundred-product
     # threshold the menu uses, so it was hidden from the one surface
@@ -325,6 +352,19 @@ _RULES: list[tuple[str, tuple[str, ...]]] = [
                            # parent bucket or wherever a title guessed.
                            # `elastik za kosa` likewise.
                            "potnik", "potnici", "znojnik", "znojnici",
+                           # `traka za glava` and the English word only.
+                           # Bare `traka` looked safe measured on titles --
+                           # two matches, both hair bands -- and is not,
+                           # because the word lives in URLs: Sport Vision's
+                           # `/mk/traka/` shelf carries Lonsdale resistance
+                           # bands and Ring Sport exercise loops beside the
+                           # headbands. "Трака" is any band or strap.
+                           "traka za glava", "headband", "headbands",
+                           # Under Armour's own line name, and the only
+                           # thing that identifies the 6-pack buzz shelves
+                           # under `ostanata-oprema` -- its title says
+                           # neither headband nor hair tie.
+                           "mini elastic",
                            # The shelf is `/mk/lastik-za-kosa/` -- no
                            # leading e. Taken from the live URLs rather
                            # than from the Macedonian word, which is

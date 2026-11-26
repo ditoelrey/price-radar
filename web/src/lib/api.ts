@@ -121,34 +121,6 @@ export type ProductCard = {
   updatedAt: string | null;
 };
 
-/**
- * One brand the current listing scope actually has products in.
- *
- * Replaces the sidebar's own fixed list. `productCount` is what the listing
- * would return for that brand under the same filters, so the facet and the
- * page it leads to cannot disagree.
- */
-export type BrandFacet = {
-  slug: string;
-  name: string;
-  productCount: number;
-};
-
-/**
- * One shop that sells inside the current listing scope.
- *
- * Same shape and same reason as `BrandFacet`. The sidebar's "Продавници
- * што ги споредуваме" rail was a fixed array of the six sneaker shops, so
- * a shopper on Машки парфеми read that we compare Sport Vision and Sizeer
- * -- neither of which sells perfume -- and was not told about e-elixir or
- * Schatze, which is where every offer on that page came from.
- */
-export type MerchantFacet = {
-  slug: string;
-  name: string;
-  productCount: number;
-};
-
 export type ProductPage = {
   items: ProductCard[];
   page: number;
@@ -247,12 +219,64 @@ export type ProductDetail = {
   offers: Offer[];
 };
 
+/**
+ * One option of one filter group, with the number beside it.
+ *
+ * The shape every control shares. `value` is what travels in the URL, `label`
+ * is what the API knows to call it -- a brand's own name, a leaf's Macedonian
+ * name, a bare gender or price band id the storefront words itself.
+ */
+export type FacetOption = {
+  value: string;
+  label: string;
+  productCount: number;
+};
+
+/** One size option, and which of the three ladders it is a rung of. */
+export type SizeFacetOption = {
+  /** `eu`, `alpha` or `ml`. */
+  axis: string;
+  value: string;
+  productCount: number;
+};
+
+/**
+ * Every filter control for one listing scope, in one response.
+ *
+ * Each group is counted with every other group's filters applied and its own
+ * left out, so a count reads as "this many if you tick this too" rather than
+ * "this many, given what you have already picked". That is what makes a
+ * multi-select usable: with its own filter applied, every unticked option in
+ * a group would count zero.
+ *
+ * Optional fields for cache skew, the same reason the card's are: a body
+ * cached by `fetch` before the API served a group has none, and a missing
+ * group renders as no section rather than taking the page down.
+ */
+export type Facets = {
+  genders?: FacetOption[];
+  categories?: FacetOption[];
+  sizes?: SizeFacetOption[];
+  brands?: FacetOption[];
+  shops?: FacetOption[];
+  prices?: FacetOption[];
+};
+
 export type SearchParams = {
   q?: string;
+  /**
+   * Every filter group takes a comma-separated list now: `nike,adidas` is a
+   * page about both. One value is still one value, so every link written
+   * before this change means what it meant.
+   */
   brand?: string;
-  sizeEu?: number;
-  /** A letter from the ladder, XXS to 5XL. The garment half of `sizeEu`. */
+  sizeEu?: string;
+  /** Letters and millilitres, which share this parameter. */
   size?: string;
+  /** Merchant slugs. */
+  shop?: string;
+  /** Price band ids: `0-1000`, `10000-`. */
+  price?: string;
   /**
    * Which category kinds the listing serves: `footwear` (the default on the
    * API side), `apparel`, `accessory`, `equipment`, or `all`.
@@ -304,6 +328,8 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
       kind: params.kind,
       category: params.category,
       gender: params.gender,
+      shop: params.shop,
+      price: params.price,
       concentration: params.concentration,
       sort: params.sort,
       page: params.page ?? 0,
@@ -313,62 +339,39 @@ export async function searchProducts(params: SearchParams): Promise<ProductPage>
 }
 
 /**
- * Brands with products under the given scope, commonest first.
+ * Every filter control for the current scope.
  *
- * Asked with the listing's own filters minus the brand, so the sidebar
- * offers exactly the brands whose pages would return something. The
- * sidebar used to render a fixed list of twelve sneaker brands, which was
- * right while the catalogue was shoes and is now wrong in both directions:
- * Hoka and Jordan on the apparel listing where they have nothing, and none
- * of Ajmal, Lattafa or Dolce & Gabbana under Парфеми.
+ * Asked with the listing's own filters, all of them: the API leaves each
+ * group's own filter out of that group's count, which is the only way the
+ * numbers beside the boxes mean anything in a multi-select.
  *
- * Failure is survivable and silent on purpose. A listing that cannot show a
- * brand filter is still a usable listing, whereas a listing that throws
- * because a facet call failed is not.
+ * Failure is survivable and silent, like the two facet calls it replaces. A
+ * listing with no filters is still a usable listing; a listing that throws
+ * because a facet call failed is not. Every group comes back empty and the
+ * sidebar renders nothing rather than a guess -- guessing is what the old
+ * hardcoded brand list and shop rail did.
  */
-export async function fetchBrandFacets(
-  params: Pick<SearchParams, "q" | "kind" | "category" | "gender" | "concentration">,
-): Promise<BrandFacet[]> {
+export async function fetchFacets(
+  params: Omit<SearchParams, "sort" | "page" | "pageSize">,
+): Promise<Facets> {
   try {
-    return await get<BrandFacet[]>(
-      `/api/v1/brands${buildQuery({
+    return await get<Facets>(
+      `/api/v1/facets${buildQuery({
         q: params.q,
+        brand: params.brand,
+        sizeEu: params.sizeEu,
+        size: params.size,
         kind: params.kind,
         category: params.category,
         gender: params.gender,
+        shop: params.shop,
+        price: params.price,
         concentration: params.concentration,
-        limit: 40,
+        limit: 120,
       })}`,
     );
   } catch {
-    return [];
-  }
-}
-
-/**
- * The shops this listing actually compares.
- *
- * Silent on failure like `fetchBrandFacets`, and for the same reason: a
- * listing missing its shop rail is still a usable listing. The caller
- * renders nothing rather than falling back to a guess, because a wrong
- * rail is what this replaced.
- */
-export async function fetchMerchantFacets(
-  params: Pick<SearchParams, "q" | "kind" | "category" | "gender" | "concentration">,
-): Promise<MerchantFacet[]> {
-  try {
-    return await get<MerchantFacet[]>(
-      `/api/v1/merchants${buildQuery({
-        q: params.q,
-        kind: params.kind,
-        category: params.category,
-        gender: params.gender,
-        concentration: params.concentration,
-        limit: 20,
-      })}`,
-    );
-  } catch {
-    return [];
+    return {};
   }
 }
 

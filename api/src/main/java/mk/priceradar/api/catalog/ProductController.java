@@ -58,21 +58,65 @@ public class ProductController {
     @GetMapping("/products")
     public Dtos.ProductPage search(
             @RequestParam(required = false) String q,
-            @RequestParam(required = false) String brand,
-            @RequestParam(required = false) Double sizeEu,
-            @RequestParam(required = false) String size,
+            // Every filter group takes a list. Spring binds a repeated
+            // parameter (?brand=a&brand=b) and a comma-separated one
+            // (?brand=a,b) to the same List, so the storefront may send
+            // either and an old single-valued link keeps working as a
+            // one-element list.
+            @RequestParam(required = false) List<String> brand,
+            @RequestParam(required = false) List<String> sizeEu,
+            @RequestParam(required = false) List<String> size,
             @RequestParam(required = false) String kind,
-            @RequestParam(required = false) String category,
-            @RequestParam(required = false) String gender,
+            @RequestParam(required = false) List<String> category,
+            @RequestParam(required = false) List<String> gender,
             @RequestParam(required = false) String concentration,
+            @RequestParam(required = false) List<String> shop,
+            // A price band id, or several: `0-1000`, `10000-`. Only a band
+            // this API published is honoured; see CatalogService.PRICE_BANDS.
+            @RequestParam(required = false) List<String> price,
             @RequestParam(required = false) String sort,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "24") @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         boolean isDefaultScope = kind == null || kind.isBlank();
-        return catalog.search(q, brand, sizeEu, size, kindsFor(kind),
-                isDefaultScope, normalize(category), normalize(gender),
-                concentration, CatalogRepository.Sort.parse(sort),
+        return catalog.search(q, csv(brand), csv(sizeEu), csv(size),
+                kindsFor(kind), isDefaultScope,
+                csvLower(category), csvLower(gender),
+                concentration, csvLower(shop), csv(price),
+                CatalogRepository.Sort.parse(sort),
                 page, Math.min(pageSize, MAX_PAGE_SIZE));
+    }
+
+    /**
+     * Every filter control for one listing scope, in one call.
+     *
+     * <p>Takes exactly what {@code /products} takes, minus the sort and the
+     * page, and answers with each group's options and counts. Each group is
+     * counted with every other group's filters applied and its own left out,
+     * so a count means "this many if you tick it too" rather than "this many,
+     * given what you already picked".
+     *
+     * <p>One call rather than five: the sidebar renders six sections and a
+     * round trip per section would be six round trips on every listing, and
+     * five of them would have to be sent the same filter state anyway.
+     */
+    @GetMapping("/facets")
+    public Dtos.Facets facets(
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) List<String> brand,
+            @RequestParam(required = false) List<String> sizeEu,
+            @RequestParam(required = false) List<String> size,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false) List<String> category,
+            @RequestParam(required = false) List<String> gender,
+            @RequestParam(required = false) String concentration,
+            @RequestParam(required = false) List<String> shop,
+            @RequestParam(required = false) List<String> price,
+            @RequestParam(defaultValue = "60") @Min(1) @Max(400) int limit) {
+        boolean isDefaultScope = kind == null || kind.isBlank();
+        return catalog.facets(q, csv(brand), csv(sizeEu), csv(size),
+                kindsFor(kind), isDefaultScope,
+                csvLower(category), csvLower(gender),
+                concentration, csvLower(shop), csv(price), limit);
     }
 
     /**
@@ -124,6 +168,31 @@ public class ProductController {
      * truthful answer. A 400 would be worse -- it turns a mistyped link into
      * an error page instead of a listing with nothing in it.
      */
+    /**
+     * A bound list back to the comma-separated string the repository reads.
+     *
+     * <p>Blank entries are dropped: "?brand=" and "?brand=,," both mean no
+     * brand filter, and an empty element would become `slug = ''`, which
+     * matches nothing and empties the page.
+     */
+    static String csv(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        String joined = values.stream()
+                .filter(v -> v != null && !v.isBlank())
+                .map(String::trim)
+                .collect(java.util.stream.Collectors.joining(","));
+        return joined.isBlank() ? null : joined;
+    }
+
+    /** As {@link #csv}, lower-cased: slugs and genders are canonical. */
+    static String csvLower(List<String> values) {
+        String joined = csv(values);
+        return joined == null
+                ? null : joined.toLowerCase(java.util.Locale.ROOT);
+    }
+
     static String normalize(String value) {
         if (value == null || value.isBlank()) {
             return null;

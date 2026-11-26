@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  * The detail page's non-EU size rail: letters for adult garments, age or
  * height bands for kids'.
  *
- * Distinct from {@link AlphaSizePicker}, which is the listing's rail and only
+ * Distinct from the listing's own size chips, which only
  * ever shows ladder letters gathered from a page of products. This one shows
  * whatever one product actually comes in, so "9-10 год." is a first-class
  * chip rather than something off the ladder to be ranked last, and the order

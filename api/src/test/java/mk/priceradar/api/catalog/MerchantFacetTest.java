@@ -33,8 +33,8 @@ class MerchantFacetTest {
                 "s.country_code = CAST(:country AS text)",
                 "s.min_price_minor IS NOT NULL",
                 "cat.kind::text = ANY(CAST(:kinds AS text[]))",
-                "cat.slug = CAST(:category AS text)",
-                "p.gender::text = CAST(:gender AS text)",
+                "cat.slug = ANY(",
+                "p.gender::text = ANY(",
                 "string_to_array(CAST(:concentration AS text), ',')"}) {
             assertThat(facets).contains(clause);
         }

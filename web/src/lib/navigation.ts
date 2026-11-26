@@ -494,16 +494,30 @@ export function allCategoriesFor(
 
 export const COMING_SOON = "Наскоро";
 
+/**
+ * One filter group's value: nothing, one thing, or several.
+ *
+ * Every group is multi-select now, and a single string is still accepted
+ * because most links carry exactly one value -- the mega menu's leaves, a
+ * breadcrumb, a brand link on a product page. Writing `["sneakers"]` at forty
+ * call sites to say the same thing would be worse.
+ */
+export type Multi = string | readonly string[] | undefined;
+
 /** Every parameter the listing page reads out of the URL. */
 export type ListingParams = {
   q?: string;
-  brand?: string;
-  sizeEu?: number;
-  /** A letter from the ladder. Mutually exclusive with `sizeEu`. */
-  size?: string;
+  brand?: Multi;
+  sizeEu?: Multi | number;
+  /** A letter or a volume. Mutually exclusive with `sizeEu`. */
+  size?: Multi;
   kind?: string;
-  category?: string;
-  gender?: string;
+  category?: Multi;
+  gender?: Multi;
+  /** Merchant slugs: which shops the listing is narrowed to. */
+  shop?: Multi;
+  /** Price band ids, as `lib/filters` spells them: `0-1000`, `10000-`. */
+  price?: Multi;
   /**
    * A fragrance strength, or several separated by commas. Carried here
    * rather than assembled at the call site for the reason the whole builder
@@ -524,18 +538,37 @@ export type ListingParams = {
  */
 export function listingHref(params: ListingParams = {}): string {
   const sp = new URLSearchParams();
+  // The comma form rather than a repeated parameter: both reach the API as a
+  // list, and this one is short enough to read in an address bar and to
+  // survive being pasted into a message.
+  const list = (value: ListingParams[keyof ListingParams]): string[] => {
+    if (value === undefined || value === null || value === "") return [];
+    if (Array.isArray(value)) return value.map(String).filter((v) => v !== "");
+    return [String(value)];
+  };
+  const set = (
+    key: string,
+    value: ListingParams[keyof ListingParams],
+  ): boolean => {
+    const values = list(value);
+    if (values.length === 0) return false;
+    sp.set(key, values.join(","));
+    return true;
+  };
+
   if (params.q) sp.set("q", params.q);
   if (params.kind) sp.set("kind", params.kind);
-  if (params.gender) sp.set("gender", params.gender);
-  if (params.category) sp.set("category", params.category);
+  set("gender", params.gender);
+  set("category", params.category);
   if (params.concentration) sp.set("concentration", params.concentration);
-  if (params.brand) sp.set("brand", params.brand);
+  set("brand", params.brand);
+  set("shop", params.shop);
+  set("price", params.price);
   // One axis or the other, never both: no article carries an EU number and
   // a letter, so a URL holding both would return an empty page. Whichever
   // the caller set last is the one it meant, and clearing happens by passing
-  // `undefined` for the other.
-  if (params.sizeEu !== undefined) sp.set("sizeEu", String(params.sizeEu));
-  else if (params.size) sp.set("size", params.size);
+  // `undefined` or an empty list for the other.
+  if (!set("sizeEu", params.sizeEu)) set("size", params.size);
   // Every explicit sort goes in the URL now. There is no visible default to
   // leave out: an absent `sort` means the API's hidden shop-count ordering,
   // which is a different thing from any of the four the control offers.
@@ -558,14 +591,23 @@ export function listingTitle(params: ListingParams): string {
   // Both trees, because a listing can be either vertical now. Looked up by
   // slug across all of them rather than by `params.kind`, so a link that
   // carries a category but no kind still gets its real heading.
+  //
+  // One value per group, even though a group can hold several. "Машки патики
+  // и копачки, Adidas и Nike" is not a heading anyone wants; with two leaves
+  // ticked the title falls back to the vertical, and the chips above the grid
+  // say exactly what is filtered.
+  const only = (value: ListingParams[keyof ListingParams]) => {
+    const values = Array.isArray(value) ? value : value ? [String(value)] : [];
+    return values.length === 1 ? String(values[0]) : undefined;
+  };
   const category = [
     ...FOOTWEAR_CATEGORIES,
     ...APPAREL_CATEGORIES,
     ...ACCESSORY_CATEGORIES,
-  ].find((c) => c.slug === params.category)?.label;
+  ].find((c) => c.slug === only(params.category))?.label;
   const vertical = VERTICALS.find((v) => v.kind === params.kind)?.label;
   const gender = GENDER_COLUMNS.find(
-    (g) => g.slug === params.gender,
+    (g) => g.slug === only(params.gender),
   )?.adjectiveLabel;
 
   const noun = category ?? vertical ?? "Обувки";

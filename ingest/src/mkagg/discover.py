@@ -886,6 +886,13 @@ _SV_ACCESSORY = (
     ("sise-za-voda", "other_accessories", None),
     ("oprema-za-plivanje", "swim_gear", None),
     ("naocari-za-plivanje", "swim_gear", None),
+    # The mask shelf, and a facet rather than a keyword on purpose: "маска"
+    # alone is a face mask as often as a diving one, and the
+    # `other_accessories` rule claims those. Sport Vision is the only shop
+    # that publishes it, and it holds three Speedo swim masks and a J2C --
+    # the J2C was in Облека за капење, because its title says nothing but
+    # "Swim" and the swimwear rule runs before any equipment one.
+    ("maska", "swim_gear", None),
     ("topka", "balls_training", None),
     ("podloga", "balls_training", None),
     ("oprema-za-trening", "balls_training", None),
@@ -937,7 +944,10 @@ _SR_ACCESSORY = (
     ("kacket", "caps_hats", None),
     ("podkapa", "caps_hats", None),
     ("sal", "caps_hats", None),
-    ("traka-za-glava", "caps_hats", None),
+    # With `traka-za-kosa` below, and for the same reason: a sweatband
+    # is not headwear. The facet is read before `classify`, so both the
+    # mapping and the keyword had to move.
+    ("traka-za-glava", "other_accessories", None),
     ("grejac-za-vrat", "caps_hats", None),
     ("ranec", "bags_backpacks", None),
     ("torbi", "bags_backpacks", None),
@@ -1030,20 +1040,26 @@ _MEGA_ACCESSORY = (
     ("/kategorija/mazhi/oprema-mazhi/ski-bandana/", "caps_hats", "men"),
     ("/kategorija/mazhi/oprema-mazhi/torbi-ranci-i-parichnici/",
      "bags_backpacks", "men"),
+    # megasport suffixes its slugs with the department, so these three
+     # escaped the V33 repointing that caught the bare `rakavici`. They are
+     # the shop's glove shelves and they carried five gloves -- two Nike
+     # goalkeeper pairs, two Brugi, one Icepeak -- on in `protective_gear`
+     # long after the leaf existed, because `FACET_CATEGORY` is consulted
+     # before `classify` and the taxonomy rule never got a say.
     ("/kategorija/mazhi/oprema-mazhi/rakavici-oprema-mazhi/",
-     "protective_gear", "men"),
+     "gloves", "men"),
     ("/kategorija/mazhi/oprema-mazhi/kacigi-oprema-mazhi/",
      "protective_gear", "men"),
     ("/kategorija/mazhi/oprema-mazhi/naochari/", "protective_gear", "men"),
     ("/kategorija/zheni/oprema-zheni/torbici/", "bags_backpacks", "women"),
     ("/kategorija/zheni/oprema-zheni/rakavici-oprema-zheni/",
-     "protective_gear", "women"),
+     "gloves", "women"),
     ("/kategorija/zheni/oprema-zheni/kacigi-oprema-zheni/",
      "protective_gear", "women"),
     ("/kategorija/zheni/oprema-zheni/ski-bandana-oprema-zheni/",
      "caps_hats", "women"),
     ("/kategorija/deca/oprema-deca/ranec/", "bags_backpacks", "kids"),
-    ("/kategorija/deca/oprema-deca/rakavici/", "protective_gear", "kids"),
+    ("/kategorija/deca/oprema-deca/rakavici/", "gloves", "kids"),
     ("/kategorija/deca/oprema-deca/kacigi-oprema-deca/",
      "protective_gear", "kids"),
     # Outside the gender tree entirely, and absent from recon. Sixteen

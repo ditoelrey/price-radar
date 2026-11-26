@@ -59,14 +59,14 @@ class ConcentrationAndBrandFacetTest {
                 "s.country_code = CAST(:country AS text)",
                 "s.min_price_minor IS NOT NULL",
                 "cat.kind::text = ANY(CAST(:kinds AS text[]))",
-                "cat.slug = CAST(:category AS text)",
-                "p.gender::text = CAST(:gender AS text)",
+                "cat.slug = ANY(",
+                "p.gender::text = ANY(",
                 // A list, not a single value: one menu entry ("Парфеми")
                 // names both PARFUM and EXTRAIT.
                 "string_to_array(CAST(:concentration AS text), ',')"}) {
             assertThat(facets).contains(clause);
         }
-        assertThat(facets).doesNotContain("b.slug = CAST(:brand AS text)");
+        assertThat(facets).doesNotContain("b.slug = ANY(");
     }
 
     @Test
@@ -105,7 +105,8 @@ class ConcentrationAndBrandFacetTest {
         var alpha = CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA);
         var ml = CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.VOLUME);
 
-        assertThat(ml).isEqualTo("ov.size_ml = CAST(:sizeMl AS integer)");
+        assertThat(ml).isEqualTo("ov.size_ml = ANY(string_to_array("
+                + "CAST(:sizeMl AS text), ',')::integer[])");
         // The three are substituted into one CTE, so a predicate naming a
         // second column would match nothing at all.
         assertThat(eu).doesNotContain("size_alpha").doesNotContain("size_ml");
@@ -120,6 +121,6 @@ class ConcentrationAndBrandFacetTest {
         // its own facets that way ("maski+unisex"). The facet has to agree
         // with the listing or the counts drift.
         assertThat(CatalogRepository.brandFacetsSql())
-                .contains("AND p.gender = 'unisex'");
+                .contains("p.gender = 'unisex'");
     }
 }

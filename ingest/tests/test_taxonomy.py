@@ -1143,13 +1143,50 @@ class TestTheSmallAccessoriesNothingUsedToRead:
         assert classify("Nike Flex Classic Mixed Hair Ties 8pk") \
             == "other_accessories"
 
-    def test_a_headband_is_still_headwear(self):
-        """`traka za glava` stays in Капи, качкети и бандани -- a headband
-        is one of the things that leaf is named for. Only its neighbour
-        `traka za kosa`, a hair tie, moved."""
-        assert classify("traka-za-glava") == "caps_hats"
-        assert classify("Nike Flex Classic Headbands Wide 3pk") == "caps_hats"
+    def test_a_headband_is_not_headwear(self):
+        """Reversed on 2026-11-26, and the first reading was the weaker one.
+
+        `traka za glava` was kept in Капи, качкети и бандани because that
+        leaf is named for бандани and a headband looked like one. But a
+        бандана is a scarf, a sweatband is not, and holding them apart put
+        the same four products in two leaves depending on which shop
+        shelved them. Measured: 10 products move, every one a head or hair
+        band.
+        """
+        assert classify("traka-za-glava") == "other_accessories"
         assert classify("traka-za-kosa") == "other_accessories"
+        assert classify("Nike Flex Classic Headbands Wide 3pk")             == "other_accessories"
+        assert classify("Under Armour Mini Headbands") == "other_accessories"
+
+    def test_what_stays_headwear(self):
+        """The leaf keeps the things it is actually named for."""
+        assert classify("Зимска капа") == "caps_hats"
+        assert classify("Nike Beanie") == "caps_hats"
+        assert classify("Bandana") == "caps_hats"
+        assert classify("kapi") == "caps_hats"
+
+    def test_a_bare_traka_decides_nothing(self):
+        """"Трака" is any band or strap, and Sport Vision's `/mk/traka/`
+        proves it: Lonsdale resistance bands and Ring Sport exercise loops
+        sit there beside the headbands. Measured on titles alone the word
+        looked safe -- two matches, both hair bands -- which is why the
+        URLs had to be checked too."""
+        assert classify("traka") is None
+        assert classify(
+            "Lonsdale Resistance Band Set",
+            url="https://www.sportvision.mk/mk/traka/8517690-x",
+        ) == "balls_training"
+        assert classify("Ring Sport Ластик за вежбање 86x8cm")             == "balls_training"
+
+    def test_every_glove_shelf_reaches_the_glove_leaf(self):
+        """megasport suffixes its slugs with the department, so these three
+        escaped the V33 repointing that caught the bare `rakavici` and
+        carried five gloves on in `protective_gear`."""
+        from mkagg.discover import FACET_CATEGORY
+
+        for slug in ("rakavici", "rakavici-oprema-mazhi",
+                     "rakavici-oprema-zheni", "golmanski-rakavici"):
+            assert FACET_CATEGORY.get(slug) == "gloves", slug
 
     def test_a_resistance_band_is_training_kit_not_miscellany(self):
         """The word "elastic" alone decides nothing: Sport Ring Elastic Band
@@ -1163,3 +1200,49 @@ class TestTheSmallAccessoriesNothingUsedToRead:
         assert classify("Brugi Stegac Crn") == "protective_gear"
         assert classify("Стегач") == "protective_gear"
         assert classify("bandazer") == "protective_gear"
+
+
+class TestTheLastCleanupBatch:
+    """Four leaves tidied on 2026-11-26, each from a word reading wrong."""
+
+    def test_matte_is_not_a_mat(self):
+        """"Mat" is how a matte finish is written, and a bare `mat` in the
+        training rule put a ski helmet in Топки и тренинг опрема -- "Uvex
+        Legend 2.0 White Black Mat". Four more Uvex helmets matched it and
+        were saved only by their facet."""
+        assert classify("Uvex Legend 2.0 White Black Mat") != "balls_training"
+        assert classify("Uvex Topic Fm Sph White Mat") != "balls_training"
+
+    def test_a_real_mat_still_reads(self):
+        """The mats say which kind they are, and the Macedonian ones are
+        caught by `podloga` and `prostirka`."""
+        assert classify("Lonsdale Yoga Mat") == "balls_training"
+        assert classify("Sport Ring Aerobics Mat") == "balls_training"
+        assert classify("Dare 2b Fitness Yoga Mat Ebony") == "balls_training"
+        assert classify("Reebok Подлога за вежбање") == "balls_training"
+
+    def test_a_beach_towel_is_equipment_not_a_garment(self):
+        """megasport shelves them under `kupaki` -- swimsuits -- which put
+        three Colmar towels in Облека за капење."""
+        assert classify("Peskir BEACH TOWEL") == "swim_gear"
+        assert classify("Sport Vision Towel 90X160") == "swim_gear"
+
+    def test_toweling_is_not_a_towel(self):
+        """Whole words only: Juicy Couture's towelling tee stays a tee."""
+        assert classify("Juicy Couture Маица Sophie Toweling") == "tshirts"
+
+    def test_the_swim_mask_shelf_is_a_facet_not_a_keyword(self):
+        """"Маска" is a face mask as often as a diving one, and
+        `other_accessories` claims those. Sport Vision's `/mk/maska/` holds
+        swim masks, so it is mapped as that shop's facet instead."""
+        from mkagg.discover import FACET_CATEGORY
+
+        assert FACET_CATEGORY.get("maska") == "swim_gear"
+        assert classify("Заштитна маска за лице") == "other_accessories"
+
+    def test_a_wallet_names_itself(self):
+        """megasport publishes one combined `torbi-ranci-i-parichnici`
+        shelf, so the facet says bags and only the title says wallet. The
+        two Reebok ones are pinned; the rule still has to read the word."""
+        assert classify("Паричник WOR WALLET") == "wallets"
+        assert classify("parichnik") == "wallets"

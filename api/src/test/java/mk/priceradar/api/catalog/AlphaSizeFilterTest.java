@@ -20,17 +20,19 @@ class AlphaSizeFilterTest {
     @Test
     @DisplayName("each flag selects its own column")
     void predicatePerAxis() {
+        // A list on every axis since the filters became multi-select: a
+        // shopper who wears 42 is served by 42 and 42.5 both.
         assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.EU))
-                .isEqualTo("ov.size_eu = CAST(:sizeEu AS numeric)");
+                .isEqualTo("ov.size_eu = ANY(string_to_array("
+                        + "CAST(:sizeEu AS text), ',')::numeric[])");
         // A range test, not an equality: "M/L" is stored as size_alpha M
         // with size_alpha_max L and has to answer either letter. coalesce
         // collapses a single-letter row to M..M, so one expression serves
         // both cases.
-        assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA)).isEqualTo(
-                "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
-                + "alpha_size_rank(ov.size_alpha) AND "
-                + "alpha_size_rank(coalesce(ov.size_alpha_max, "
-                + "ov.size_alpha))");
+assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA))
+                .contains("alpha_size_rank(want.v) BETWEEN")
+                .contains("alpha_size_rank(coalesce(ov.size_alpha_max,")
+                .contains("unnest(string_to_array(CAST(:sizeAlpha AS text)");
     }
 
     @Test

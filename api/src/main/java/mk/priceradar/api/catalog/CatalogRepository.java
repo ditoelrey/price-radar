@@ -201,12 +201,31 @@ public class CatalogRepository {
                                   AND qmo.status = 'active'
                                   AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
                                        OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
-               AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
+               AND (CAST(:brand AS text) IS NULL
+                    OR b.slug = ANY(
+                           string_to_array(CAST(:brand AS text), ',')))
+               -- Which shops carry it. A group of its own, so picking two
+               -- shops widens within the group and narrows against every
+               -- other one, the same as the rest.
+               --
+               -- EXISTS rather than a join: `merchant_offer` has many rows
+               -- per product, and joining would multiply the result before
+               -- the LIMIT ever saw it.
+               AND (CAST(:shop AS text) IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                          FROM merchant_offer smo
+                          JOIN merchant sm ON sm.id = smo.merchant_id
+                         WHERE smo.product_id = p.id
+                           AND smo.status = 'active'
+                           AND sm.slug = ANY(
+                                   string_to_array(CAST(:shop AS text), ','))))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
                -- means "a shoe, kind unspecified".
                AND (CAST(:category AS text) IS NULL
-                    OR cat.slug = CAST(:category AS text))
+                    OR cat.slug = ANY(
+                           string_to_array(CAST(:category AS text), ',')))
                -- The men's and women's departments include unisex articles,
                -- which is not a convenience we invented: it is how every one
                -- of these shops publishes its own facets ("maski+unisex").
@@ -216,9 +235,11 @@ public class CatalogRepository {
                -- where unknown products are admitted because the default
                -- storefront would otherwise hide most of the catalogue.
                AND (CAST(:gender AS text) IS NULL
-                    OR p.gender::text = CAST(:gender AS text)
-                    OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex')
+                    OR p.gender::text = ANY(
+                           string_to_array(CAST(:gender AS text), ','))
+                    OR (p.gender = 'unisex'
+                        AND string_to_array(CAST(:gender AS text), ',')
+                            && ARRAY['men', 'women'])
                     -- `adults` is "everything a grown-up buys": men, women
                     -- and unisex, but not kids. It exists because the Опрема
                     -- menu stopped splitting the adult departments -- most
@@ -231,7 +252,8 @@ public class CatalogRepository {
                     -- An unclassified article is included: `gender IS NULL`
                     -- means we do not know who it is for, and hiding it from
                     -- the only adult route there is would lose it entirely.
-                    OR (CAST(:gender AS text) = 'adults'
+                    OR ('adults' = ANY(
+                            string_to_array(CAST(:gender AS text), ','))
                         AND (p.gender IS NULL OR p.gender <> 'kids')))
                -- Fragrances only, and an exact match. "Valentino Donna" in
                -- Eau de Parfum and in Eau de Toilette are different liquids
@@ -240,6 +262,24 @@ public class CatalogRepository {
                AND (CAST(:concentration AS text) IS NULL
                     OR p.concentration = ANY(
                            string_to_array(CAST(:concentration AS text), ',')))
+               -- A price band, or several. The bounds arrive as two parallel
+               -- lists -- `:priceLo` and `:priceHi`, one pair per band -- so
+               -- nothing of the shopper's is ever spliced into SQL and a
+               -- malformed band cannot reach the database at all; the service
+               -- drops it. An open top band carries -1.
+               --
+               -- Lower bound inclusive, upper exclusive, so the bands a
+               -- shopper reads as "1 000 - 2 500" and "2 500 - 5 000" cannot
+               -- both claim a product at exactly 2 500.
+               AND (CAST(:priceLo AS text) IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                          FROM unnest(
+                                   string_to_array(CAST(:priceLo AS text), ',')::bigint[],
+                                   string_to_array(CAST(:priceHi AS text), ',')::bigint[])
+                               AS band(lo, hi)
+                         WHERE s.min_price_minor >= band.lo
+                           AND (band.hi < 0 OR s.min_price_minor < band.hi)))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -348,12 +388,31 @@ public class CatalogRepository {
                                   AND qmo.status = 'active'
                                   AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
                                        OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
-               AND (CAST(:brand AS text) IS NULL OR b.slug = CAST(:brand AS text))
+               AND (CAST(:brand AS text) IS NULL
+                    OR b.slug = ANY(
+                           string_to_array(CAST(:brand AS text), ',')))
+               -- Which shops carry it. A group of its own, so picking two
+               -- shops widens within the group and narrows against every
+               -- other one, the same as the rest.
+               --
+               -- EXISTS rather than a join: `merchant_offer` has many rows
+               -- per product, and joining would multiply the result before
+               -- the LIMIT ever saw it.
+               AND (CAST(:shop AS text) IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                          FROM merchant_offer smo
+                          JOIN merchant sm ON sm.id = smo.merchant_id
+                         WHERE smo.product_id = p.id
+                           AND smo.status = 'active'
+                           AND sm.slug = ANY(
+                                   string_to_array(CAST(:shop AS text), ','))))
                -- An exact leaf match, so asking for Копачки returns cleats
                -- and nothing else -- not the generic `footwear` parent, which
                -- means "a shoe, kind unspecified".
                AND (CAST(:category AS text) IS NULL
-                    OR cat.slug = CAST(:category AS text))
+                    OR cat.slug = ANY(
+                           string_to_array(CAST(:category AS text), ',')))
                -- The men's and women's departments include unisex articles,
                -- which is not a convenience we invented: it is how every one
                -- of these shops publishes its own facets ("maski+unisex").
@@ -363,9 +422,11 @@ public class CatalogRepository {
                -- where unknown products are admitted because the default
                -- storefront would otherwise hide most of the catalogue.
                AND (CAST(:gender AS text) IS NULL
-                    OR p.gender::text = CAST(:gender AS text)
-                    OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex')
+                    OR p.gender::text = ANY(
+                           string_to_array(CAST(:gender AS text), ','))
+                    OR (p.gender = 'unisex'
+                        AND string_to_array(CAST(:gender AS text), ',')
+                            && ARRAY['men', 'women'])
                     -- `adults` is "everything a grown-up buys": men, women
                     -- and unisex, but not kids. It exists because the Опрема
                     -- menu stopped splitting the adult departments -- most
@@ -378,7 +439,8 @@ public class CatalogRepository {
                     -- An unclassified article is included: `gender IS NULL`
                     -- means we do not know who it is for, and hiding it from
                     -- the only adult route there is would lose it entirely.
-                    OR (CAST(:gender AS text) = 'adults'
+                    OR ('adults' = ANY(
+                            string_to_array(CAST(:gender AS text), ','))
                         AND (p.gender IS NULL OR p.gender <> 'kids')))
                -- Fragrances only, and an exact match. "Valentino Donna" in
                -- Eau de Parfum and in Eau de Toilette are different liquids
@@ -387,6 +449,24 @@ public class CatalogRepository {
                AND (CAST(:concentration AS text) IS NULL
                     OR p.concentration = ANY(
                            string_to_array(CAST(:concentration AS text), ',')))
+               -- A price band, or several. The bounds arrive as two parallel
+               -- lists -- `:priceLo` and `:priceHi`, one pair per band -- so
+               -- nothing of the shopper's is ever spliced into SQL and a
+               -- malformed band cannot reach the database at all; the service
+               -- drops it. An open top band carries -1.
+               --
+               -- Lower bound inclusive, upper exclusive, so the bands a
+               -- shopper reads as "1 000 - 2 500" and "2 500 - 5 000" cannot
+               -- both claim a product at exactly 2 500.
+               AND (CAST(:priceLo AS text) IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                          FROM unnest(
+                                   string_to_array(CAST(:priceLo AS text), ',')::bigint[],
+                                   string_to_array(CAST(:priceHi AS text), ',')::bigint[])
+                               AS band(lo, hi)
+                         WHERE z.from_price_minor >= band.lo
+                           AND (band.hi < 0 OR z.from_price_minor < band.hi)))
              ORDER BY /*{ORDER}*/
              LIMIT :limit OFFSET :offset
             """;
@@ -400,12 +480,13 @@ public class CatalogRepository {
      *        does not want twelve uncategorised sneakers as well.
      */
     public List<Dtos.ProductCard> list(String country, String query, String brandSlug,
-                                       Double sizeEu, String sizeAlpha,
-                                       Integer sizeMl,
+                                       String sizeEu, String sizeAlpha,
+                                       String sizeMl,
                                        String[] kinds,
                                        boolean includeUnclassified,
                                        String categorySlug, String gender,
-                                       String concentration,
+                                       String concentration, String shopSlug,
+                                       String priceLo, String priceHi,
                                        Sort sort, int limit, int offset) {
         String alpha = blankToNull(sizeAlpha);
         // An EU number wins when both arrive. They cannot both be satisfied
@@ -418,8 +499,8 @@ public class CatalogRepository {
         // Honouring two at once cannot work -- no variant carries two -- so
         // it would empty the page for a shopper who merely changed vertical
         // with a size still in the URL.
-        SizeAxis axis = sizeEu != null ? SizeAxis.EU
-                : sizeMl != null ? SizeAxis.VOLUME
+        SizeAxis axis = blankToNull(sizeEu) != null ? SizeAxis.EU
+                : blankToNull(sizeMl) != null ? SizeAxis.VOLUME
                 : alpha != null ? SizeAxis.ALPHA
                 : null;
         boolean sized = axis != null;
@@ -445,12 +526,15 @@ public class CatalogRepository {
                 .param("category", blankToNull(categorySlug))
                 .param("gender", blankToNull(gender))
                 .param("concentration", blankToNull(concentration))
+                .param("shop", blankToNull(shopSlug))
+                .param("priceLo", blankToNull(priceLo))
+                .param("priceHi", blankToNull(priceHi))
                 .param("limit", limit)
                 .param("offset", offset);
         if (axis == SizeAxis.EU) {
-            spec = spec.param("sizeEu", sizeEu);
+            spec = spec.param("sizeEu", blankToNull(sizeEu));
         } else if (axis == SizeAxis.VOLUME) {
-            spec = spec.param("sizeMl", sizeMl);
+            spec = spec.param("sizeMl", blankToNull(sizeMl));
         } else if (axis == SizeAxis.ALPHA) {
             spec = spec.param("sizeAlpha", alpha);
         } else {
@@ -479,13 +563,14 @@ public class CatalogRepository {
      * themselves so the fast LIMIT path is untouched.
      */
     public int count(String country, String query, String brandSlug,
-                     Double sizeEu, String sizeAlpha, Integer sizeMl,
+                     String sizeEu, String sizeAlpha, String sizeMl,
                      String[] kinds, boolean includeUnclassified,
                      String categorySlug, String gender,
-                     String concentration) {
+                     String concentration, String shopSlug,
+                     String priceLo, String priceHi) {
         String alpha = blankToNull(sizeAlpha);
-        SizeAxis axis = sizeEu != null ? SizeAxis.EU
-                : sizeMl != null ? SizeAxis.VOLUME
+        SizeAxis axis = blankToNull(sizeEu) != null ? SizeAxis.EU
+                : blankToNull(sizeMl) != null ? SizeAxis.VOLUME
                 : alpha != null ? SizeAxis.ALPHA
                 : null;
         boolean sized = axis != null;
@@ -510,11 +595,14 @@ public class CatalogRepository {
                 .param("includeUnclassified", includeUnclassified)
                 .param("category", blankToNull(categorySlug))
                 .param("gender", blankToNull(gender))
-                .param("concentration", blankToNull(concentration));
+                .param("concentration", blankToNull(concentration))
+                .param("shop", blankToNull(shopSlug))
+                .param("priceLo", blankToNull(priceLo))
+                .param("priceHi", blankToNull(priceHi));
         if (axis == SizeAxis.EU) {
-            spec = spec.param("sizeEu", sizeEu);
+            spec = spec.param("sizeEu", blankToNull(sizeEu));
         } else if (axis == SizeAxis.VOLUME) {
-            spec = spec.param("sizeMl", sizeMl);
+            spec = spec.param("sizeMl", blankToNull(sizeMl));
         } else if (axis == SizeAxis.ALPHA) {
             spec = spec.param("sizeAlpha", alpha);
         } else {
@@ -554,41 +642,71 @@ public class CatalogRepository {
         // Millilitres are a plain equality, unlike the letters. A bottle is
         // 50ml or it is not; there is no span to straddle, because no shop
         // here prints one.
+        // Each axis takes a list now, because a shopper who wears 42 is
+        // served by 42 and 42.5 both and should not have to choose. The
+        // CTE's `min(ov.price_minor)` then prices the product at the
+        // cheapest offer in ANY selected size, which is the figure the card
+        // should show.
         return switch (axis) {
-            case EU -> "ov.size_eu = CAST(:sizeEu AS numeric)";
-            case VOLUME -> "ov.size_ml = CAST(:sizeMl AS integer)";
-            case ALPHA -> "alpha_size_rank(CAST(:sizeAlpha AS text)) BETWEEN "
+            case EU -> "ov.size_eu = ANY(string_to_array("
+                    + "CAST(:sizeEu AS text), ',')::numeric[])";
+            case VOLUME -> "ov.size_ml = ANY(string_to_array("
+                    + "CAST(:sizeMl AS text), ',')::integer[])";
+            // The letters stay a range test per selected value -- "M/L" is
+            // stored M..L and has to answer a shopper filtering either --
+            // so the list is unnested rather than compared with ANY.
+            case ALPHA -> "EXISTS (SELECT 1 FROM unnest(string_to_array("
+                    + "CAST(:sizeAlpha AS text), ',')) AS want(v) "
+                    + "WHERE alpha_size_rank(want.v) BETWEEN "
                     + "alpha_size_rank(ov.size_alpha) AND "
                     + "alpha_size_rank(coalesce(ov.size_alpha_max, "
-                    + "ov.size_alpha))";
+                    + "ov.size_alpha)))";
         };
     }
 
     /**
-     * Brands that actually have something to show under the current scope.
+     * The predicates a facet shares with the listing, in pieces.
      *
-     * <p>The storefront rendered a hard-coded list of twelve sneaker brands,
-     * which was right while the catalogue was shoes. It is now wrong in both
-     * directions: Hoka and Jordan are offered on the apparel listing where
-     * they have nothing, and the fragrance listing offers none of the brands
-     * it carries -- Ajmal, Lattafa, Dolce &amp; Gabbana.
+     * <p>There are six filter groups and five facet queries, and every one of
+     * them has to narrow on exactly the same terms as the listing: a facet
+     * counting differently would offer a shopper an option whose page then
+     * came back empty, which is worse than offering nothing. Written out per
+     * query that was five copies of this clause set -- the search predicate
+     * alone is thirty-five lines -- so they are assembled from one copy here
+     * instead, and {@link #facetWhere} leaves out whichever group the facet
+     * is enumerating.
      *
-     * <p>The WHERE here mirrors {@code LIST_BASE} clause for clause, minus
-     * the brand filter itself. A facet counting on different terms from the
-     * listing would offer a brand whose page then came back empty, which is
-     * worse than offering nothing at all.
+     * <p>Whitespace is the only thing that differs from {@code LIST_BASE}'s
+     * own copy, which still stands apart because the listing selects columns
+     * these do not and is substituted twice over for sort and size.
      */
-    private static final String BRAND_FACETS = """
-            SELECT b.slug, b.name, count(DISTINCT p.id) AS product_count
+    private static final String FACET_FROM = """
               FROM product_price_summary s
               JOIN product p ON p.id = s.product_id
               JOIN brand   b ON b.id = p.brand_id
               LEFT JOIN category cat ON cat.id = p.category_id
+            """;
+
+    /**
+     * How a shop facet reaches a product: through an active offer, never a
+     * dead one. A shop whose listing went away keeps its rows, and naming it
+     * would claim a comparison the page cannot make.
+     */
+    private static final String SHOP_JOIN = """
+              JOIN merchant_offer mo
+                   ON mo.product_id = p.id AND mo.status = 'active'
+              JOIN merchant m ON m.id = mo.merchant_id
+            """;
+
+    private static final String W_SCOPE = """
              WHERE s.country_code = CAST(:country AS text)
                AND s.min_price_minor IS NOT NULL
                AND (CAST(:kinds AS text[]) IS NULL
                     OR (cat.kind IS NULL AND :includeUnclassified)
                     OR cat.kind::text = ANY(CAST(:kinds AS text[])))
+            """;
+
+    private static final String W_QUERY = """
                -- Every word of the query has to be found somewhere, and
                -- "somewhere" is wider than our own name for the product.
                -- See `tokenQuery` for why this is word-wise and what the
@@ -624,12 +742,39 @@ public class CatalogRepository {
                                   AND qmo.status = 'active'
                                   AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
                                        OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
+            """;
+
+    private static final String W_BRAND = """
+               AND (CAST(:brand AS text) IS NULL
+                    OR b.slug = ANY(
+                           string_to_array(CAST(:brand AS text), ',')))
+            """;
+
+    private static final String W_SHOP = """
+               AND (CAST(:shop AS text) IS NULL
+                    OR EXISTS (
+                        SELECT 1
+                          FROM merchant_offer smo
+                          JOIN merchant sm ON sm.id = smo.merchant_id
+                         WHERE smo.product_id = p.id
+                           AND smo.status = 'active'
+                           AND sm.slug = ANY(
+                                   string_to_array(CAST(:shop AS text), ','))))
+            """;
+
+    private static final String W_CATEGORY = """
                AND (CAST(:category AS text) IS NULL
-                    OR cat.slug = CAST(:category AS text))
+                    OR cat.slug = ANY(
+                           string_to_array(CAST(:category AS text), ',')))
+            """;
+
+    private static final String W_GENDER = """
                AND (CAST(:gender AS text) IS NULL
-                    OR p.gender::text = CAST(:gender AS text)
-                    OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex')
+                    OR p.gender::text = ANY(
+                           string_to_array(CAST(:gender AS text), ','))
+                    OR (p.gender = 'unisex'
+                        AND string_to_array(CAST(:gender AS text), ',')
+                            && ARRAY['men', 'women'])
                     -- `adults` is "everything a grown-up buys": men, women
                     -- and unisex, but not kids. It exists because the Опрема
                     -- menu stopped splitting the adult departments -- most
@@ -642,134 +787,253 @@ public class CatalogRepository {
                     -- An unclassified article is included: `gender IS NULL`
                     -- means we do not know who it is for, and hiding it from
                     -- the only adult route there is would lose it entirely.
-                    OR (CAST(:gender AS text) = 'adults'
+                    OR ('adults' = ANY(
+                            string_to_array(CAST(:gender AS text), ','))
                         AND (p.gender IS NULL OR p.gender <> 'kids')))
+            """;
+
+    /**
+     * The price the band is measured against, for a facet.
+     *
+     * <p>Mirrors the listing: the overall cheapest offer normally, and the
+     * cheapest in the selected size when there is one. A facet that counted
+     * against the overall minimum on a size-filtered page would offer a band
+     * that then held products priced outside it.
+     */
+    private static String priceExpr(SizeAxis axis) {
+        if (axis == null) {
+            return "s.min_price_minor";
+        }
+        return "(SELECT min(ov.price_minor)\n"
+                + "   FROM merchant_offer pmo\n"
+                + "   JOIN offer_variant ov ON ov.offer_id = pmo.id\n"
+                + "  WHERE pmo.product_id = p.id\n"
+                + "    AND pmo.status = 'active'\n"
+                + "    AND ov.in_stock IS NOT FALSE\n"
+                + "    AND " + sizeMatch(axis) + ")";
+    }
+
+    /** The band predicate, against whichever price expression applies. */
+    private static String priceBand(String col) {
+        return "   AND (CAST(:priceLo AS text) IS NULL\n"
+                + "        OR EXISTS (\n"
+                + "            SELECT 1\n"
+                + "              FROM unnest(\n"
+                + "                       string_to_array(CAST(:priceLo AS text), ',')::bigint[],\n"
+                + "                       string_to_array(CAST(:priceHi AS text), ',')::bigint[])\n"
+                + "                   AS band(lo, hi)\n"
+                + "             WHERE " + col + " >= band.lo\n"
+                + "               AND (band.hi < 0 OR " + col + " < band.hi)))\n";
+    }
+
+    private static final String W_CONCENTRATION = """
                AND (CAST(:concentration AS text) IS NULL
                     OR p.concentration = ANY(
                            string_to_array(CAST(:concentration AS text), ',')))
+            """;
+
+    /**
+     * Which filter group a facet enumerates.
+     *
+     * <p>Also the group it must not apply. A brand facet narrowed by the
+     * chosen brand answers "how many Nike products are there, given that you
+     * picked Nike" -- the count the shopper can already see, and zero for
+     * every other brand, so a multi-select could never add a second one.
+     * Leaving a group's own filter out is what makes the numbers mean "and
+     * this many more if you tick that too".
+     */
+    public enum Facet { BRAND, SHOP, CATEGORY, GENDER, SIZE, PRICE }
+
+    /**
+     * The WHERE clause for a facet, with its own group left out.
+     *
+     * <p>The size filter is the one piece that cannot be a constant: it
+     * exists only when a size is selected, and the axis decides the
+     * predicate. Written as an EXISTS over the offers rather than the join
+     * {@code LIST_BY_SIZE} uses, because a facet counts products and a join
+     * through {@code offer_variant} would multiply them.
+     */
+    private static String facetWhere(Facet enumerating, SizeAxis axis) {
+        StringBuilder where = new StringBuilder(W_SCOPE).append(W_QUERY);
+        if (enumerating != Facet.BRAND) {
+            where.append(W_BRAND);
+        }
+        if (enumerating != Facet.SHOP) {
+            where.append(W_SHOP);
+        }
+        if (enumerating != Facet.CATEGORY) {
+            where.append(W_CATEGORY);
+        }
+        if (enumerating != Facet.GENDER) {
+            where.append(W_GENDER);
+        }
+        where.append(W_CONCENTRATION);
+        if (enumerating != Facet.PRICE) {
+            where.append(priceBand(priceExpr(axis)));
+        }
+        if (enumerating != Facet.SIZE && axis != null) {
+            where.append("""
+               AND EXISTS (
+                   SELECT 1
+                     FROM merchant_offer fmo
+                     JOIN offer_variant ov ON ov.offer_id = fmo.id
+                    WHERE fmo.product_id = p.id
+                      AND fmo.status = 'active'
+                      AND ov.in_stock IS NOT FALSE
+                      AND
+                      """).append(sizeMatch(axis)).append(")\n");
+        }
+        return where.toString();
+    }
+
+    /**
+     * One option list: the values of a group, with how many products each
+     * would leave on the page.
+     *
+     * <p>{@code count(DISTINCT p.id)} throughout, so the number beside a shop
+     * means what the number beside a brand means -- products, not listings.
+     * A shop that lists one product under three SKUs counts once.
+     */
+    static String facetSql(Facet facet, SizeAxis axis) {
+        String select = switch (facet) {
+            case BRAND -> "SELECT b.slug AS value, b.name AS label,\n"
+                    + "       count(DISTINCT p.id) AS product_count\n";
+            case SHOP -> "SELECT m.slug AS value, m.name AS label,\n"
+                    + "       count(DISTINCT p.id) AS product_count\n";
+            // The Macedonian leaf name as the label, read from the column the
+            // listing heading and the mega menu already use, so a leaf cannot
+            // be called two things one control apart.
+            case CATEGORY -> "SELECT cat.slug AS value, cat.name_mk AS label,\n"
+                    + "       count(DISTINCT p.id) AS product_count\n";
+            case GENDER -> "SELECT p.gender::text AS value,\n"
+                    + "       p.gender::text AS label,\n"
+                    + "       count(DISTINCT p.id) AS product_count\n";
+            case SIZE -> throw new IllegalArgumentException(
+                    "sizes come from sizeFacetSql: they are three axes in one "
+                    + "group and are counted from the summary's own arrays");
+            case PRICE -> throw new IllegalArgumentException(
+                    "price bands come from priceFacetSql: the options are the "
+                    + "site's own bands, not values found in a column");
+        };
+        String tail = switch (facet) {
+            case BRAND -> """
              GROUP BY b.slug, b.name
              ORDER BY product_count DESC, b.name
              LIMIT :limit
             """;
-
-    /**
-     * The shops selling inside a listing scope, with how much each has.
-     *
-     * <p>The WHERE clause is {@link #BRAND_FACETS}'s, which is
-     * {@code LIST_BASE}'s, so the rail cannot name a shop the listing would
-     * not show. The join is the only difference: a merchant reaches a
-     * product through an offer, and only an active one counts -- a shop
-     * whose listing went away still has rows, and naming it would claim a
-     * comparison the page cannot make.
-     *
-     * <p>{@code count(DISTINCT p.id)} rather than counting offers, so the
-     * number means what it means beside a brand: products, not listings.
-     */
-    private static final String MERCHANT_FACETS = """
-            SELECT m.slug, m.name, count(DISTINCT p.id) AS product_count
-              FROM product_price_summary s
-              JOIN product p ON p.id = s.product_id
-              JOIN brand   b ON b.id = p.brand_id
-              JOIN merchant_offer mo
-                   ON mo.product_id = p.id AND mo.status = 'active'
-              JOIN merchant m ON m.id = mo.merchant_id
-              LEFT JOIN category cat ON cat.id = p.category_id
-             WHERE s.country_code = CAST(:country AS text)
-               AND s.min_price_minor IS NOT NULL
-               AND (CAST(:kinds AS text[]) IS NULL
-                    OR (cat.kind IS NULL AND :includeUnclassified)
-                    OR cat.kind::text = ANY(CAST(:kinds AS text[])))
-               -- Every word of the query has to be found somewhere, and
-               -- "somewhere" is wider than our own name for the product.
-               -- See `tokenQuery` for why this is word-wise and what the
-               -- shop's own title and URL are doing in here.
-               -- Gated on `:q`, not on `:qTokens`. The two say different
-               -- things: no query at all means no filter, while a query
-               -- that yields no usable token -- "%" or "---" -- must match
-               -- nothing. Keying the gate on the token array conflated
-               -- them and answered "%" with the whole catalogue.
-               AND (CAST(:q AS text) IS NULL
-                    OR p.primary_mpn ILIKE CAST(:qSku AS text)
-                    OR (CAST(:qTokens AS text[]) IS NOT NULL
-                        AND NOT EXISTS (
-                        SELECT 1
-                          FROM unnest(CAST(:qTokens AS text[])) AS needle(tok)
-                         WHERE p.canonical_name NOT ILIKE '%' || needle.tok || '%'
-                           AND coalesce(b.name, '') NOT ILIKE '%' || needle.tok || '%'
-                           AND coalesce(p.primary_mpn, '') NOT ILIKE '%' || needle.tok || '%'
-                           -- The leaf's Macedonian name, which is what makes
-                           -- a pasted "Дуксер" or "Патики" resolve without a
-                           -- stop-word list: the word is not discarded, it is
-                           -- required to describe the product.
-                           AND coalesce(cat.name_mk, '') NOT ILIKE '%' || needle.tok || '%'
-                           -- And the shop's own words. `raw_title` carries
-                           -- what the merchant printed, `product_url` its
-                           -- Latin shelf -- so `dukser` and `patiki` match
-                           -- the same products `Дуксер` and `Патики` do,
-                           -- with no transliteration table to maintain.
-                           AND NOT EXISTS (
-                               SELECT 1
-                                 FROM merchant_offer qmo
-                                WHERE qmo.product_id = p.id
-                                  AND qmo.status = 'active'
-                                  AND (qmo.raw_title ILIKE '%' || needle.tok || '%'
-                                       OR qmo.product_url ILIKE '%' || needle.tok || '%')))))
-               AND (CAST(:category AS text) IS NULL
-                    OR cat.slug = CAST(:category AS text))
-               AND (CAST(:gender AS text) IS NULL
-                    OR p.gender::text = CAST(:gender AS text)
-                    OR (CAST(:gender AS text) IN ('men', 'women')
-                        AND p.gender = 'unisex')
-                    -- `adults` is "everything a grown-up buys": men, women
-                    -- and unisex, but not kids. It exists because the Опрема
-                    -- menu stopped splitting the adult departments -- most
-                    -- equipment is unisex, so Мажи and Жени were roughly 85
-                    -- percent the same links -- and a leaf link carrying no
-                    -- gender at all would put 19-21 baby socks back beside a
-                    -- men's three-pack, which is the mixing that split was
-                    -- made to end.
-                    --
-                    -- An unclassified article is included: `gender IS NULL`
-                    -- means we do not know who it is for, and hiding it from
-                    -- the only adult route there is would lose it entirely.
-                    OR (CAST(:gender AS text) = 'adults'
-                        AND (p.gender IS NULL OR p.gender <> 'kids')))
-               AND (CAST(:concentration AS text) IS NULL
-                    OR p.concentration = ANY(
-                           string_to_array(CAST(:concentration AS text), ',')))
+            case SHOP -> """
              GROUP BY m.slug, m.name
              ORDER BY product_count DESC, m.name
              LIMIT :limit
             """;
-
-    /** The facet SQL, exposed so a test can hold it beside the listing's. */
-    static String merchantFacetsSql() {
-        return MERCHANT_FACETS;
+            // An unclassified product has no leaf to offer, so it is counted
+            // in the listing and left out of this control.
+            case CATEGORY -> """
+             GROUP BY cat.slug, cat.name_mk
+            HAVING cat.slug IS NOT NULL
+             ORDER BY product_count DESC, cat.name_mk
+             LIMIT :limit
+            """;
+            case GENDER -> """
+             GROUP BY p.gender
+            HAVING p.gender IS NOT NULL
+             ORDER BY product_count DESC
+            """;
+            case SIZE, PRICE -> "";
+        };
+        return select + FACET_FROM
+                + (facet == Facet.SHOP ? SHOP_JOIN : "")
+                + facetWhere(facet, axis) + tail;
     }
 
-    public List<Dtos.MerchantFacet> merchantFacets(String country, String query,
-                                                   String[] kinds,
-                                                   boolean includeUnclassified,
-                                                   String categorySlug,
-                                                   String gender,
-                                                   String concentration,
-                                                   int limit) {
-        return db.sql(MERCHANT_FACETS)
-                .param("country", country)
-                .param("q", normalizeQuery(query))
-                .param("qTokens", tokenQuery(query))
-                .param("qSku", skuQuery(query))
-                .param("kinds", kinds)
-                .param("includeUnclassified", includeUnclassified)
-                .param("category", blankToNull(categorySlug))
-                .param("gender", blankToNull(gender))
-                .param("concentration", blankToNull(concentration))
-                .param("limit", limit)
-                .query((rs, rowNum) -> new Dtos.MerchantFacet(
-                        rs.getString("slug"),
-                        rs.getString("name"),
-                        rs.getInt("product_count")))
-                .list();
+    /**
+     * The size options, all three axes at once.
+     *
+     * <p>Counted from {@code product_price_summary}'s own arrays rather than
+     * from {@code offer_variant}, which is where the rail has always read
+     * them: the arrays are already "sizes a shopper can actually buy"
+     * ({@code in_stock IS NOT FALSE}, distinct, in order), and recomputing
+     * that per request would join three tables to reach the same answer.
+     *
+     * <p>Three branches because a shoe is on the EU ladder, a garment on the
+     * letters and a bottle in millilitres, and no product is on two. Which
+     * branch comes back with rows is how the control knows which rail to
+     * draw. {@code ord} carries the ladder: sorting the letters as text gives
+     * 3XL, L, M, S, XL.
+     */
+    static String sizeFacetSql(SizeAxis axis) {
+        String where = facetWhere(Facet.SIZE, axis);
+        return "SELECT axis, value, product_count\n  FROM (\n"
+                // Trailing zeros off the EU number: the column is numeric
+                // with a scale, so the raw text of a 42 reads "42.000" and of
+                // a 42.5 "42.500", and the chip has to say what the shop
+                // says.
+                + sizeBranch("eu", "available_sizes_eu",
+                        "trim(trailing '.' from "
+                        + "trim(trailing '0' from opt.v::text))",
+                        "opt.v::numeric", where)
+                + "UNION ALL\n"
+                + sizeBranch("alpha", "available_sizes_alpha", "opt.v",
+                        "alpha_size_rank(opt.v)::numeric", where)
+                + "UNION ALL\n"
+                + sizeBranch("ml", "available_volumes_ml", "opt.v::text",
+                        "opt.v::numeric", where)
+                + ") AS opts\n ORDER BY axis, ord\n";
+    }
+
+    /**
+     * One axis of the size facet.
+     *
+     * <p>Concatenated rather than formatted: {@code where} carries the search
+     * predicate, whose {@code '%' || needle.tok || '%'} would be read as a
+     * format specifier and throw.
+     */
+    private static String sizeBranch(String axis, String column, String value,
+                                     String ord, String where) {
+        return "SELECT '" + axis + "' AS axis, " + value + " AS value,\n"
+                + "       " + ord + " AS ord,\n"
+                + "       count(DISTINCT p.id) AS product_count\n"
+                + FACET_FROM
+                + "  CROSS JOIN LATERAL unnest(s." + column + ") AS opt(v)\n"
+                + where
+                + " GROUP BY 1, 2, 3\n";
+    }
+
+    /**
+     * The price bands, each with the number of products inside it.
+     *
+     * <p>The one group whose options are not values read out of a column:
+     * they are bands this site chose, so they arrive as a VALUES list and the
+     * query counts into them. Which bands exist is the caller's business --
+     * the storefront writes the Macedonian labels, since every other label on
+     * the page is written there too.
+     *
+     * <p>`lo` inclusive and `hi` exclusive, matching the listing predicate, so
+     * the count beside a band is what the page would hold.
+     */
+    static String priceFacetSql(SizeAxis axis, int bands) {
+        StringBuilder values = new StringBuilder();
+        for (int i = 0; i < bands; i++) {
+            values.append(i == 0 ? "" : ", ")
+                  .append("(CAST(:bandId").append(i).append(" AS text), ")
+                  .append("CAST(:bandLo").append(i).append(" AS bigint), ")
+                  .append("CAST(:bandHi").append(i).append(" AS bigint))");
+        }
+        return "SELECT pb.id AS value, pb.id AS label,\n"
+                + "       count(DISTINCT p.id) AS product_count\n"
+                + FACET_FROM
+                + "  JOIN LATERAL (SELECT " + priceExpr(axis)
+                + " AS px) AS pr ON TRUE\n"
+                + "  CROSS JOIN (VALUES " + values + ") AS pb(id, lo, hi)\n"
+                + facetWhere(Facet.PRICE, axis)
+                + "   AND pr.px >= pb.lo\n"
+                + "   AND (pb.hi < 0 OR pr.px < pb.hi)\n"
+                + " GROUP BY pb.id, pb.lo\n"
+                + " ORDER BY pb.lo\n";
+    }
+
+    /** One band of the price facet: an id the URL carries, and its bounds. */
+    public record PriceBand(String id, long lo, long hi) {
     }
 
     /** The listing SQL, exposed so a test can hold the facets beside it. */
@@ -779,28 +1043,103 @@ public class CatalogRepository {
 
     /** The facet SQL, exposed so a test can hold it beside the listing's. */
     static String brandFacetsSql() {
-        return BRAND_FACETS;
+        return facetSql(Facet.BRAND, null);
     }
 
-    public List<Dtos.BrandFacet> brandFacets(String country, String query,
-                                             String[] kinds,
-                                             boolean includeUnclassified,
-                                             String categorySlug, String gender,
-                                             String concentration, int limit) {
-        return db.sql(BRAND_FACETS)
-                .param("country", country)
-                .param("q", normalizeQuery(query))
-                .param("qTokens", tokenQuery(query))
-                .param("qSku", skuQuery(query))
-                .param("kinds", kinds)
-                .param("includeUnclassified", includeUnclassified)
-                .param("category", blankToNull(categorySlug))
-                .param("gender", blankToNull(gender))
-                .param("concentration", blankToNull(concentration))
+    /** The facet SQL, exposed so a test can hold it beside the listing's. */
+    static String merchantFacetsSql() {
+        return facetSql(Facet.SHOP, null);
+    }
+
+    /**
+     * Everything a facet has to narrow by, as one value.
+     *
+     * <p>Seven filters and a country, passed as a record because they travel
+     * together to five queries, and a positional argument list that long is
+     * how a category ends up bound to the gender parameter.
+     */
+    public record FacetScope(String country, String query, String[] kinds,
+                             boolean includeUnclassified, String brandSlug,
+                             String shopSlug, String categorySlug,
+                             String gender, String concentration,
+                             String priceLo, String priceHi,
+                             String sizeEu, String sizeAlpha, String sizeMl) {
+    }
+
+    /** The axis a size list is on, or null when nothing is filtered. */
+    static SizeAxis axisOf(String sizeEu, String sizeAlpha, String sizeMl) {
+        return blankToNull(sizeEu) != null ? SizeAxis.EU
+                : blankToNull(sizeMl) != null ? SizeAxis.VOLUME
+                : blankToNull(sizeAlpha) != null ? SizeAxis.ALPHA
+                : null;
+    }
+
+    private org.springframework.jdbc.core.simple.JdbcClient.StatementSpec
+            bindFacet(String sql, FacetScope f, SizeAxis axis) {
+        var spec = db.sql(sql)
+                .param("country", f.country())
+                .param("q", normalizeQuery(f.query()))
+                .param("qTokens", tokenQuery(f.query()))
+                .param("qSku", skuQuery(f.query()))
+                .param("kinds", f.kinds())
+                .param("includeUnclassified", f.includeUnclassified())
+                .param("brand", blankToNull(f.brandSlug()))
+                .param("shop", blankToNull(f.shopSlug()))
+                .param("category", blankToNull(f.categorySlug()))
+                .param("gender", blankToNull(f.gender()))
+                .param("concentration", blankToNull(f.concentration()))
+                .param("priceLo", blankToNull(f.priceLo()))
+                .param("priceHi", blankToNull(f.priceHi()));
+        // Bound only when the SQL asks for it. A facet that leaves its own
+        // group out has no placeholder for it, and the template only looks up
+        // the names it finds.
+        if (axis == SizeAxis.EU) {
+            spec = spec.param("sizeEu", blankToNull(f.sizeEu()));
+        } else if (axis == SizeAxis.VOLUME) {
+            spec = spec.param("sizeMl", blankToNull(f.sizeMl()));
+        } else if (axis == SizeAxis.ALPHA) {
+            spec = spec.param("sizeAlpha", blankToNull(f.sizeAlpha()));
+        }
+        return spec;
+    }
+
+    /** One group's options under the given scope, commonest first. */
+    public List<Dtos.FacetOption> facet(Facet facet, FacetScope f, int limit) {
+        SizeAxis axis = axisOf(f.sizeEu(), f.sizeAlpha(), f.sizeMl());
+        return bindFacet(facetSql(facet, axis), f, axis)
                 .param("limit", limit)
-                .query((rs, rowNum) -> new Dtos.BrandFacet(
-                        rs.getString("slug"),
-                        rs.getString("name"),
+                .query((rs, rowNum) -> new Dtos.FacetOption(
+                        rs.getString("value"),
+                        rs.getString("label"),
+                        rs.getInt("product_count")))
+                .list();
+    }
+
+    /** The price bands under the given scope, cheapest band first. */
+    public List<Dtos.FacetOption> priceFacet(FacetScope f,
+                                             List<PriceBand> bands) {
+        SizeAxis axis = axisOf(f.sizeEu(), f.sizeAlpha(), f.sizeMl());
+        var spec = bindFacet(priceFacetSql(axis, bands.size()), f, axis);
+        for (int i = 0; i < bands.size(); i++) {
+            PriceBand band = bands.get(i);
+            spec = spec.param("bandId" + i, band.id())
+                       .param("bandLo" + i, band.lo())
+                       .param("bandHi" + i, band.hi());
+        }
+        return spec.query((rs, rowNum) -> new Dtos.FacetOption(
+                        rs.getString("value"),
+                        rs.getString("label"),
+                        rs.getInt("product_count")))
+                .list();
+    }
+
+    /** The size options on every axis the scope has, in ladder order. */
+    public List<Dtos.SizeOption> sizeFacet(FacetScope f) {
+        SizeAxis axis = axisOf(f.sizeEu(), f.sizeAlpha(), f.sizeMl());
+        return bindFacet(sizeFacetSql(axis), f, axis)
+                .query((rs, rowNum) -> new Dtos.SizeOption(
+                        rs.getString("axis"),
+                        rs.getString("value"),
                         rs.getInt("product_count")))
                 .list();
     }

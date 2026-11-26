@@ -25,10 +25,18 @@ import { DEFAULT_SORT_LABEL, SORTS, type SortKey } from "@/lib/sort";
 export function SortSelect({
   selected,
   className,
+  layout = "stacked",
 }: {
   /** Undefined when the shopper has not chosen one. */
   selected?: SortKey;
   className?: string;
+  /**
+   * `stacked` puts the label above the control, which is what a sidebar
+   * wants. `inline` puts it beside, for the top right of the grid -- where
+   * this control now lives, because sorting is not filtering and it belongs
+   * with the result count rather than above the filters.
+   */
+  layout?: "stacked" | "inline";
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -49,17 +57,29 @@ export function SortSelect({
     router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
   };
 
+  const inline = layout === "inline";
+
   return (
-    <div className={cn("space-y-2", className)}>
+    <div
+      className={cn(
+        inline ? "flex items-center gap-2" : "space-y-2",
+        className,
+      )}
+    >
       <label
         htmlFor="sort"
-        className="flex items-center gap-1.5 text-sm font-semibold"
+        className={cn(
+          "flex items-center gap-1.5 font-semibold",
+          inline
+            ? "shrink-0 text-xs text-muted-foreground"
+            : "text-sm",
+        )}
       >
         <ArrowDownUp className="size-3.5 text-muted-foreground" />
         Сортирај
       </label>
 
-      <div className="relative">
+      <div className={cn("relative", inline && "min-w-[11rem]")}>
         <select
           id="sort"
           value={selected ?? ""}

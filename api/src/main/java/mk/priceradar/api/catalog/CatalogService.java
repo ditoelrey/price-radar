@@ -25,6 +25,63 @@ public class CatalogService {
             "Prices and availability are reported by the shops and may have changed. "
             + "Each offer shows when we last checked it.";
 
+    /**
+     * The price bands the storefront offers, in denars.
+     *
+     * <p>Fixed rather than computed from the data, and few rather than many.
+     * A band whose edges move with the catalogue is a band a shopper cannot
+     * bookmark, and quartiles of a catalogue holding both 300-denar socks and
+     * 20 000-denar ski helmets land nowhere a person would have chosen.
+     *
+     * <p>These five are the shape of the catalogue as it stands: half of
+     * everything is under 2 500, and the top band is open because a dozen
+     * products carry five figures. {@code hi} of -1 means open-ended, which
+     * is what the SQL reads.
+     *
+     * <p>Macedonian labels are not here. The storefront writes them from the
+     * bounds, as it writes every other label on the page -- the API returns
+     * the band id and the count.
+     */
+    static final List<CatalogRepository.PriceBand> PRICE_BANDS = List.of(
+            new CatalogRepository.PriceBand("0-1000", 0, 1000),
+            new CatalogRepository.PriceBand("1000-2500", 1000, 2500),
+            new CatalogRepository.PriceBand("2500-5000", 2500, 5000),
+            new CatalogRepository.PriceBand("5000-10000", 5000, 10000),
+            new CatalogRepository.PriceBand("10000-", 10000, -1));
+
+    /**
+     * The selected bands as two parallel lists of bounds.
+     *
+     * <p>An allow-list, not a parse: only an id this site published reaches
+     * the query, so a hand-edited URL asking for {@code 0-999999999} or
+     * anything stranger is simply not a filter. That keeps the bounds
+     * numeric by construction rather than by escaping.
+     *
+     * <p>Returns {@code null} for both when nothing valid was asked for,
+     * which the repository reads as "no price filter" -- the same thing a
+     * missing parameter means.
+     */
+    static String[] priceBounds(String bands) {
+        if (bands == null || bands.isBlank()) {
+            return new String[] {null, null};
+        }
+        var lo = new ArrayList<String>();
+        var hi = new ArrayList<String>();
+        for (String id : bands.split(",")) {
+            String want = id.trim();
+            for (var band : PRICE_BANDS) {
+                if (band.id().equals(want) && !lo.contains(String.valueOf(band.lo()))) {
+                    lo.add(String.valueOf(band.lo()));
+                    hi.add(String.valueOf(band.hi()));
+                    break;
+                }
+            }
+        }
+        return lo.isEmpty()
+                ? new String[] {null, null}
+                : new String[] {String.join(",", lo), String.join(",", hi)};
+    }
+
     private final CatalogRepository repository;
     private final Duration staleAfter;
     private final String country;
@@ -35,7 +92,7 @@ public class CatalogService {
         this.country = props.country();
     }
 
-    public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+    public Dtos.ProductPage search(String query, String brand, String sizeEu,
                                    int page, int pageSize) {
         return search(query, brand, sizeEu, null,
                 CatalogRepository.FOOTWEAR_KINDS,
@@ -49,22 +106,23 @@ public class CatalogService {
      *        and the ingestion side crawls merchants that also sell socks,
      *        ski leggings and helmets.
      */
-    public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+    public Dtos.ProductPage search(String query, String brand, String sizeEu,
                                    String size,
                                    String[] kinds, boolean includeUnclassified,
                                    String category, String gender,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
         return search(query, brand, sizeEu, size, kinds, includeUnclassified,
-                category, gender, null, sort, page, pageSize);
+                category, gender, null, null, null, sort, page, pageSize);
     }
 
     /** As above, narrowed to one fragrance concentration. */
-    public Dtos.ProductPage search(String query, String brand, Double sizeEu,
+    public Dtos.ProductPage search(String query, String brand, String sizeEu,
                                    String size,
                                    String[] kinds, boolean includeUnclassified,
                                    String category, String gender,
-                                   String concentration,
+                                   String concentration, String shop,
+                                   String price,
                                    CatalogRepository.Sort sort,
                                    int page, int pageSize) {
         // A volume and a letter arrive in the same `size` parameter,
@@ -73,14 +131,23 @@ public class CatalogService {
         // Read as a volume first: "30ml" would otherwise be upper-cased to
         // "30ML" and offered to the letter ladder, which has no such rung,
         // and the page would come back empty.
-        Integer volumeMl = normalizeVolumeMl(size);
-        String alpha = volumeMl == null ? normalizeAlpha(size) : null;
+        // Each arrives as a comma-separated list now. They are read as
+        // one axis, not mixed: "42,42.5" is two rungs of the same ladder,
+        // while "42,M" is two different questions and no variant could
+        // answer both. Whichever axis the first readable value names wins,
+        // and the rest are read on that axis.
+        String volumeMl = eachSize(size, CatalogService::normalizeVolumeMl);
+        String alpha = volumeMl == null
+                ? eachSize(size, CatalogService::normalizeAlpha)
+                : null;
         // Fetch one extra row to answer hasMore without a second count query,
         // which on a listing is pure waste.
+        String[] bounds = priceBounds(price);
         List<Dtos.ProductCard> rows = repository.list(
                 country, query, brand, sizeEu, alpha, volumeMl, kinds,
                 includeUnclassified,
-                category, gender, normalizeConcentration(concentration),
+                category, gender, normalizeConcentration(concentration), shop,
+                bounds[0], bounds[1],
                 sort, pageSize + 1, page * pageSize);
         boolean hasMore = rows.size() > pageSize;
         if (hasMore) {
@@ -89,13 +156,16 @@ public class CatalogService {
         // Whichever axis actually filtered, as the client should echo it. The
         // EU number wins when both are present, exactly as the repository
         // resolves them.
-        String applied = sizeEu != null ? trimSize(sizeEu)
-                : volumeMl != null ? volumeMl + "ml"
+        // Echoed back as the client sent it, so a multi-select round
+        // trips unchanged.
+        String applied = sizeEu != null && !sizeEu.isBlank() ? sizeEu
+                : volumeMl != null ? volumeMl
                 : alpha;
         int total = repository.count(
                 country, query, brand, sizeEu, alpha, volumeMl, kinds,
                 includeUnclassified, category, gender,
-                normalizeConcentration(concentration));
+                normalizeConcentration(concentration), shop,
+                bounds[0], bounds[1]);
         return new Dtos.ProductPage(rows, page, pageSize, hasMore, total,
                                     applied);
     }
@@ -116,22 +186,104 @@ public class CatalogService {
      * shopper browsing Опрема is not offered Ajmal and one browsing
      * Парфеми is not offered Hoka.
      */
+    /**
+     * Every filter control for one listing scope.
+     *
+     * <p>The sidebar used to derive its size rails from the twenty-four cards
+     * on the page, which meant the rungs changed as a shopper paged and a
+     * size present on page 3 could not be reached from page 1. These come
+     * from the whole result set.
+     *
+     * <p>The three adult audiences are folded here rather than in SQL. The
+     * database knows four genders; the control offers three departments, and
+     * the men's and women's ones include unisex exactly as the shops' own
+     * facets do -- so the number beside Мажи has to be men plus unisex, or it
+     * would promise fewer products than the page then shows.
+     */
+    public Dtos.Facets facets(String query, String brand, String sizeEu,
+                              String size, String[] kinds,
+                              boolean includeUnclassified, String category,
+                              String gender, String concentration, String shop,
+                              String price, int limit) {
+        String volumeMl = eachSize(size, CatalogService::normalizeVolumeMl);
+        String alpha = volumeMl == null
+                ? eachSize(size, CatalogService::normalizeAlpha)
+                : null;
+        String[] bounds = priceBounds(price);
+        var scope = new CatalogRepository.FacetScope(
+                country, query, kinds, includeUnclassified, brand, shop,
+                category, gender, normalizeConcentration(concentration),
+                bounds[0], bounds[1], sizeEu, alpha, volumeMl);
+        return new Dtos.Facets(
+                departments(repository.facet(
+                        CatalogRepository.Facet.GENDER, scope, limit)),
+                repository.facet(CatalogRepository.Facet.CATEGORY, scope, limit),
+                repository.sizeFacet(scope),
+                repository.facet(CatalogRepository.Facet.BRAND, scope, limit),
+                repository.facet(CatalogRepository.Facet.SHOP, scope, limit),
+                repository.priceFacet(scope, PRICE_BANDS));
+    }
+
+    /**
+     * The four stored genders as the three departments a shopper picks from.
+     *
+     * <p>`unisex` is not one of them: it is a finding about an article -- both
+     * adult departments list it -- and the men's and women's filters include
+     * it, which is why its count is added to each rather than offered on its
+     * own. Kids' does not include it, matching the listing predicate.
+     */
+    private static List<Dtos.FacetOption> departments(
+            List<Dtos.FacetOption> stored) {
+        var counts = new LinkedHashMap<String, Integer>();
+        for (var option : stored) {
+            counts.merge(option.value(), option.productCount(), Integer::sum);
+        }
+        int unisex = counts.getOrDefault("unisex", 0);
+        var out = new ArrayList<Dtos.FacetOption>();
+        for (String slug : new String[] {"men", "women", "kids"}) {
+            int own = counts.getOrDefault(slug, 0);
+            int total = slug.equals("kids") ? own : own + unisex;
+            if (total > 0) {
+                out.add(new Dtos.FacetOption(slug, slug, total));
+            }
+        }
+        return out;
+    }
+
     public List<Dtos.BrandFacet> brands(String query, String[] kinds,
                                         boolean includeUnclassified,
                                         String category, String gender,
                                         String concentration, int limit) {
-        return repository.brandFacets(country, query, kinds,
-                includeUnclassified, category, gender,
-                normalizeConcentration(concentration), limit);
+        return repository.facet(CatalogRepository.Facet.BRAND,
+                        bareScope(query, kinds, includeUnclassified, category,
+                                  gender, concentration), limit)
+                .stream()
+                .map(o -> new Dtos.BrandFacet(o.value(), o.label(),
+                                              o.productCount()))
+                .toList();
     }
 
     public List<Dtos.MerchantFacet> merchants(String query, String[] kinds,
                                               boolean includeUnclassified,
                                               String category, String gender,
                                               String concentration, int limit) {
-        return repository.merchantFacets(country, query, kinds,
-                includeUnclassified, category, gender,
-                normalizeConcentration(concentration), limit);
+        return repository.facet(CatalogRepository.Facet.SHOP,
+                        bareScope(query, kinds, includeUnclassified, category,
+                                  gender, concentration), limit)
+                .stream()
+                .map(o -> new Dtos.MerchantFacet(o.value(), o.label(),
+                                                 o.productCount()))
+                .toList();
+    }
+
+    /** The scope the two single-group endpoints ask with: no size, no shop. */
+    private CatalogRepository.FacetScope bareScope(
+            String query, String[] kinds, boolean includeUnclassified,
+            String category, String gender, String concentration) {
+        return new CatalogRepository.FacetScope(
+                country, query, kinds, includeUnclassified, null, null,
+                category, gender, normalizeConcentration(concentration),
+                null, null, null, null, null);
     }
 
     /**
@@ -186,6 +338,30 @@ public class CatalogService {
     private static final java.util.regex.Pattern VOLUME =
             java.util.regex.Pattern.compile("(\\d{1,4})\\s*ml",
                     java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * Normalise every value in a comma-separated size list.
+     *
+     * <p>Values the normaliser rejects are dropped rather than failing the
+     * list: a shopper who has "42,M" in the URL after switching vertical
+     * should still see the 42s, not an empty page. An empty result is null,
+     * which the repository reads as "no size filter" -- the same thing a
+     * missing parameter means.
+     */
+    private static String eachSize(
+            String csv, java.util.function.Function<String, Object> one) {
+        if (csv == null || csv.isBlank()) {
+            return null;
+        }
+        List<String> out = new java.util.ArrayList<>();
+        for (String part : csv.split(",")) {
+            Object value = one.apply(part.trim());
+            if (value != null && !String.valueOf(value).isBlank()) {
+                out.add(String.valueOf(value));
+            }
+        }
+        return out.isEmpty() ? null : String.join(",", out);
+    }
 
     static String normalizeAlpha(String size) {
         if (size == null || size.isBlank()) {
