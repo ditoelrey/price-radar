@@ -7,6 +7,10 @@ import { getProduct, type Offer } from "@/lib/api";
 import { formatMoney, formatSizeEu, sizeDisplayLabel } from "@/lib/format";
 import { OfferRow } from "@/components/catalog/offer-row";
 import { LabelSizePicker } from "@/components/catalog/label-size-picker";
+import {
+  SizeScalePicker,
+  type SizeRung,
+} from "@/components/catalog/size-scale-picker";
 import { SizePicker } from "@/components/catalog/size-picker";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -237,6 +241,60 @@ export default async function ProductDetailPage({
     if (variant.stock !== "SOLD_OUT") otherInStock.add(label);
   }
 
+  // ---------------------------------------------------------------------
+  // The second scale, where this product has one.
+  //
+  // Offered only when it is complete. A grid where some chips have a
+  // centimetre and others do not is worse than one scale: the shopper reads
+  // the gaps as sizes that do not exist. So the rule is all or nothing, per
+  // product, and most products fall on the nothing side -- which is why the
+  // tabs appear on roughly half of footwear and nowhere else.
+  //
+  // Nothing here is converted. The centimetre is the shop's own figure from
+  // its size widget, and a child's height is the shop's or the one its age
+  // band maps to in `kids_size_chart`. Neither is derived from the EU
+  // number, because it cannot be: EU 22 is 12.0 to 14.7 cm depending on the
+  // shoe.
+  const variants = product.offers.flatMap((offer) => offer.variants);
+  const trim = (value: number) => String(Number(value));
+
+  const cmByEu = new Map<number, string>();
+  for (const variant of variants) {
+    if (variant.sizeEu !== null && variant.sizeCm != null) {
+      cmByEu.set(variant.sizeEu, trim(variant.sizeCm));
+    }
+  }
+  const euRungs: SizeRung[] | null =
+    allSizes.length >= 2 && allSizes.every((size) => cmByEu.has(size))
+      ? allSizes.map((size) => ({
+          value: String(size),
+          label: formatSizeEu(size),
+          cm: cmByEu.get(size) ?? null,
+          inStock: sizesWithStock.has(size),
+        }))
+      : null;
+
+  // Kids' garments only: every rung an age band, every band with a height.
+  // Adult apparel is letters and has no second scale to offer, fragrances
+  // are millilitres, and gear is left exactly as it was.
+  const heightByLabel = new Map<string, string>();
+  for (const variant of labelled) {
+    if (variant.sizeSystem === "age" && variant.sizeHeightCm != null) {
+      heightByLabel.set(sizeDisplayLabel(variant), String(variant.sizeHeightCm));
+    }
+  }
+  const ageRungs: SizeRung[] | null =
+    otherSizes.length >= 2 &&
+    labelled.every((variant) => variant.sizeSystem === "age") &&
+    otherSizes.every((label) => heightByLabel.has(label))
+      ? otherSizes.map((label) => ({
+          value: label,
+          label,
+          cm: heightByLabel.get(label) ?? null,
+          inStock: otherInStock.has(label),
+        }))
+      : null;
+
   return (
     <div className="flex min-h-screen flex-col">
       <SiteHeader />
@@ -416,15 +474,30 @@ export default async function ProductDetailPage({
 
             {allSizes.length > 0 && (
               <div className="mt-5">
-                <p className="mb-2 text-sm font-semibold">
-                  Големини{" "}
-                  <span className="font-normal text-muted-foreground">(EU)</span>
-                </p>
-                <SizePicker
-                  sizes={allSizes}
-                  selected={sizeEu}
-                  unavailable={allSizes.filter((s) => !sizesWithStock.has(s))}
-                />
+                {euRungs ? (
+                  <SizeScalePicker
+                    param="sizeEu"
+                    defaultScaleLabel="Големини EU"
+                    altScaleLabel="Големини CM"
+                    rungs={euRungs}
+                  />
+                ) : (
+                  <>
+                    <p className="mb-2 text-sm font-semibold">
+                      Големини{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (EU)
+                      </span>
+                    </p>
+                    <SizePicker
+                      sizes={allSizes}
+                      selected={sizeEu}
+                      unavailable={allSizes.filter(
+                        (s) => !sizesWithStock.has(s),
+                      )}
+                    />
+                  </>
+                )}
               </div>
             )}
 
@@ -435,14 +508,27 @@ export default async function ProductDetailPage({
                     attribute. "Size" is right for a hoodie and wrong here,
                     where the choice changes the price as well as the fit.
                     Only fragrances: Обувки, Облека and Опрема keep theirs. */}
-                <p className="mb-2 text-sm font-semibold">
-                  {isFragrance ? "Милилитража" : "Големини"}
-                </p>
-                <LabelSizePicker
-                  sizes={otherSizes}
-                  selected={size}
-                  unavailable={otherSizes.filter((s) => !otherInStock.has(s))}
-                />
+                {ageRungs ? (
+                  <SizeScalePicker
+                    param="size"
+                    defaultScaleLabel="Возраст"
+                    altScaleLabel="Големини CM"
+                    rungs={ageRungs}
+                  />
+                ) : (
+                  <>
+                    <p className="mb-2 text-sm font-semibold">
+                      {isFragrance ? "Милилитража" : "Големини"}
+                    </p>
+                    <LabelSizePicker
+                      sizes={otherSizes}
+                      selected={size}
+                      unavailable={otherSizes.filter(
+                        (s) => !otherInStock.has(s),
+                      )}
+                    />
+                  </>
+                )}
               </div>
             )}
           </div>

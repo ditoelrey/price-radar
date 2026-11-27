@@ -1282,7 +1282,23 @@ public class CatalogRepository {
                        -- Carried only so the ORDER BY below can reach them:
                        -- an age or height size has no place on the alpha
                        -- ladder and sorts on its own normalised number.
-                       ov.size_age_min_months, ov.size_height_cm,
+                       ov.size_age_min_months,
+                       -- The second scale, where the shops publish one.
+                       --
+                       -- `size_cm` is the shoe's own foot length, scraped
+                       -- from the size widget rather than converted here:
+                       -- EU 22 is anywhere from 12.0 to 14.7 cm depending on
+                       -- the last, which no conversion table could tell us.
+                       ov.size_cm,
+                       -- A child's height. The shop's own figure when it
+                       -- publishes one, and otherwise the height its age
+                       -- band corresponds to -- `kids_size_chart` is exactly
+                       -- that pairing, learned from the shops that publish
+                       -- both. Matched on the whole band, never on one end:
+                       -- 48-60 months has no row, and inventing 110cm for it
+                       -- would be the kind of guess this pipeline refuses.
+                       coalesce(ov.size_height_cm, ksc.height_cm)
+                           AS size_height_cm,
                        ov.price_minor, ov.list_price_minor, ov.currency_code,
                        ov.in_stock, ov.stock_qty, ov.last_checked_at,
                        CASE
@@ -1296,6 +1312,9 @@ public class CatalogRepository {
                   FROM merchant_offer mo
                   JOIN merchant m        ON m.id = mo.merchant_id
                   JOIN offer_variant ov  ON ov.offer_id = mo.id
+                  LEFT JOIN kids_size_chart ksc
+                       ON ksc.age_min_months = ov.size_age_min_months
+                      AND ksc.age_max_months = ov.size_age_max_months
                   JOIN currency cur      ON cur.code = ov.currency_code
                  WHERE mo.product_id = :productId
                    AND mo.status = 'active'
@@ -1375,6 +1394,8 @@ public class CatalogRepository {
                         rs.getString("size_alpha"),
                         rs.getString("size_alpha_max"),
                         rs.getString("size_system"),
+                        nullableDouble(rs, "size_cm"),
+                        nullableInt(rs, "size_height_cm"),
                         // nullableLong, not getLong: a sold-out offer whose
                         // shop publishes no price has price_minor NULL, and
                         // getLong would silently turn that into 0 -- which
@@ -1417,7 +1438,8 @@ public class CatalogRepository {
                                   String relatedMerchantSlug, long variantId,
                                   String sizeLabel, Double sizeEu,
                                   String sizeAlpha, String sizeAlphaMax,
-                                  String sizeSystem,
+                                  String sizeSystem, Double sizeCm,
+                                  Integer sizeHeightCm,
                                   Long priceMinor, Long listPriceMinor,
                                   long shippingMinor, Long totalMinor,
                                   Long offerFromPriceMinor,

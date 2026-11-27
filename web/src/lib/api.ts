@@ -158,6 +158,21 @@ export type OfferVariant = {
    * `sizeAlpha` the lower. Null for an ordinary single letter.
    */
   sizeAlphaMax?: string | null;
+  /**
+   * Foot length in centimetres, as the shop publishes it beside the EU
+   * number on its size widget. Not converted from `sizeEu` and not
+   * convertible: EU 22 is 12.0 to 14.7 cm depending on the last.
+   *
+   * Null where the shop does not publish one, which is why the detail page
+   * only offers the CM tab when every rung of a product has it.
+   */
+  sizeCm?: number | null;
+  /**
+   * A child's height in centimetres: the shop's own figure, or the one its
+   * age band maps to through the kids' size chart. Null for a band the
+   * chart does not cover.
+   */
+  sizeHeightCm?: number | null;
   price: Money | null;
   listPrice: Money | null;
   shipping: Money | null;

@@ -494,6 +494,8 @@ public class CatalogService {
                         row.sizeAlpha(),
                         row.sizeAlphaMax(),
                         row.sizeSystem(),
+                        row.sizeCm(),
+                        row.sizeHeightCm(),
                         Dtos.Money.of(row.priceMinor(), row.currency(), row.minorUnit()),
                         Dtos.Money.of(row.listPriceMinor(), row.currency(), row.minorUnit()),
                         Dtos.Money.of(row.shippingMinor(), row.currency(), row.minorUnit()),

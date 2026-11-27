@@ -44,6 +44,9 @@ class CatalogServiceTest {
                 // which is the point -- a variant sits on one ladder or the
                 // other, never both.
                 null, null, null,
+                // sizeCm, sizeHeightCm: the second scale, which none of
+                // these rows carries -- these are bare EU numbers.
+                null, null,
                 price, null, shipping, price + shipping, price, offerFromTotal,
                 "MKD", inStock, inStock == Boolean.TRUE ? 3 : null,
                 checkedAt, 0);

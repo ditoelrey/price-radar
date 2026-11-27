@@ -96,6 +96,8 @@ assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA))
         var span = new CatalogRepository.OfferVariantRow(
                 3L, "buzz", "Buzz Sneakers", 4.0, 10, true, 2, 4, null,
                 3L, "M/L", null, "M", "L", "alpha",
+                // sizeCm, sizeHeightCm: a garment has neither.
+                null, null,
                 100L, null, 0L, 100L, 100L, 100L, "MKD", true, 1,
                 java.time.Instant.now(), 0);
         assertThat(CatalogService.sameLabel(span, "M/L")).isTrue();
@@ -118,6 +120,7 @@ assertThat(CatalogRepository.sizeMatch(CatalogRepository.SizeAxis.ALPHA))
         return new CatalogRepository.OfferVariantRow(
                 id, "sportvision", "Sport Vision", 4.0, 10, true, 2, 4, null,
                 id, label, null, alpha, null, "alpha",
+                null, null,
                 100L, null, 0L, 100L, 100L, 100L, "MKD", true, 1,
                 java.time.Instant.now(), 0);
     }

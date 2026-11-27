@@ -69,7 +69,7 @@ export function OfferRow({
         "grid grid-cols-1 gap-4 border-t p-4 transition-colors",
         // Fixed track widths, not `auto`. Each row is its own grid, so
         // auto-sized columns measure their own content: a row whose button
-        // reads „Погледни ја понудата" rather than „Види понуда" shifts its
+        // reads „Види сепак" rather than „Види понуда" shifts its
         // neighbours, and the logo column stops being a column. Measured
         // at 1.6px of drift between rows before pinning these.
         "sm:grid-cols-[minmax(0,1fr)_7rem_20rem] sm:items-center sm:gap-8",

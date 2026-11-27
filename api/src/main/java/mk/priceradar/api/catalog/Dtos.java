@@ -257,6 +257,26 @@ public final class Dtos {
              * of them in stock. A client showing sizes should skip them.
              */
             String sizeSystem,
+            /**
+             * Foot length in centimetres, as the shop publishes it.
+             *
+             * The second scale a shoe can be read in, and scraped rather
+             * than converted: Sport Vision, Sport Reality and Buzz each put
+             * it on the size widget. Null where a shop does not, which is
+             * why the storefront only offers the CM tab when every rung of
+             * a product has one -- a grid with holes in it is worse than
+             * one scale.
+             */
+            Double sizeCm,
+            /**
+             * A child's height in centimetres.
+             *
+             * The shop's own figure when it publishes one, and otherwise the
+             * height the age band maps to through `kids_size_chart`. Null
+             * for a band the chart does not cover -- 4-5 years has no row,
+             * and the storefront hides the tab rather than guess.
+             */
+            Integer sizeHeightCm,
             Money price,
             Money listPrice,
             Money shipping,
