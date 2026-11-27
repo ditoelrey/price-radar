@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
 
+import { HeaderSearch } from "@/components/header-search";
 import { BRAND_DOMAIN, Logo } from "@/components/logo";
 
 import { MainNav } from "@/components/nav/main-nav";
@@ -38,29 +38,7 @@ export function SiteHeader({
           <Logo />
         </Link>
 
-        <form action="/products" className="relative mx-auto w-full max-w-2xl">
-          {/* Search spans the whole catalogue, and has to say so.
-              The API defaults an absent `kind` to footwear -- the right
-              default for a listing, since the shops it crawls also sell
-              socks and ski leggings -- but the wrong one for a search box.
-              Without this the box answered "Versace" with shoes only and
-              claimed the four fragrance verticals did not exist; the same
-              silence hid облека and опрема before them. */}
-          <input type="hidden" name="kind" value="all" />
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            name="q"
-            defaultValue={query}
-            placeholder="Пребарај производ, бренд или шифра…"
-            aria-label="Пребарај производи"
-            className={cn(
-              "h-10 w-full rounded-full border border-input bg-background pl-9 pr-4 text-sm",
-              "placeholder:text-muted-foreground focus-visible:outline-none",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-            )}
-          />
-        </form>
+        <HeaderSearch query={query} />
 
         <span className="hidden shrink-0 text-xs text-muted-foreground lg:block">
           6 продавници · Македонија
