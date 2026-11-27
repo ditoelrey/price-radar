@@ -52,7 +52,7 @@ export function discountPercent(
  */
 export function formatSizeEu(
   size: number | null | undefined,
-  fallback = "One size",
+  fallback = "Една големина",
 ): string {
   // Null-safe because a size genuinely can be absent: dsport lists one-size
   // articles as "BEZ VELICINA" and the pipeline stores those with size_eu
@@ -72,18 +72,19 @@ export function formatSizeEu(
   return size.toFixed(1).replace(/\.0$/, "");
 }
 
-/** "checked 4 min ago" — shown against every price, never buried. */
+/** „Проверена пред 4 мин." — shown against every price, never buried. */
 export function formatCheckedAt(iso: string | null | undefined): string {
-  if (!iso) return "not checked yet";
+  if (!iso) return "сè уште не е проверено";
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "not checked yet";
+  if (Number.isNaN(then)) return "сè уште не е проверено";
   const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
-  if (minutes < 1) return "checked just now";
-  if (minutes < 60) return `checked ${minutes} min ago`;
+  if (minutes < 1) return "Токму сега проверена";
+  if (minutes < 60) return `Проверена пред ${minutes} мин.`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `checked ${hours} h ago`;
+  if (hours < 24) return `Проверена пред ${hours} ч.`;
   const days = Math.round(hours / 24);
-  return `checked ${days} ${days === 1 ? "day" : "days"} ago`;
+  // Два дена, not два денs: both forms spelled out, as everywhere else.
+  return `Проверена пред ${days} ${days === 1 ? "ден" : "дена"}`;
 }
 
 /**
@@ -99,14 +100,14 @@ export function stockLabel(stock: StockState): {
 } {
   switch (stock) {
     case "IN_STOCK":
-      return { text: "In stock", tone: "good" };
+      return { text: "На залиха", tone: "good" };
     case "SOLD_OUT":
-      return { text: "Sold out", tone: "bad" };
+      return { text: "Распродадено", tone: "bad" };
     case "STALE":
-      return { text: "Was in stock", tone: "unknown" };
+      return { text: "Претходно на залиха", tone: "unknown" };
     case "NOT_PUBLISHED":
     default:
-      return { text: "Stock not published", tone: "unknown" };
+      return { text: "Залихите не се објавени", tone: "unknown" };
   }
 }
 

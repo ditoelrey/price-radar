@@ -1,4 +1,4 @@
-import { AlertCircle, Check, Link2, Truck } from "lucide-react";
+import { AlertCircle, Check } from "lucide-react";
 
 import type { Offer, OfferVariant } from "@/lib/api";
 import {
@@ -46,7 +46,6 @@ export function OfferRow({
 }) {
   const stock = stockLabel(variant.stock);
   const discount = discountPercent(variant.price, variant.listPrice);
-  const shippingMinor = variant.shipping?.amountMinor ?? 0;
   // Only claim "EU" when the EU size is actually known. Sport Vision ships
   // some rows with its own conversion missing, and the pipeline now stores
   // those with a null sizeEu while keeping the shop's printed label. Pasting
@@ -69,8 +68,8 @@ export function OfferRow({
       className={cn(
         "grid grid-cols-1 gap-4 border-t p-4 transition-colors",
         // Fixed track widths, not `auto`. Each row is its own grid, so
-        // auto-sized columns measure their own content: a row whose
-        // button reads "View anyway" rather than "Go to shop" shifts its
+        // auto-sized columns measure their own content: a row whose button
+        // reads „Погледни ја понудата" rather than „Види понуда" shifts its
         // neighbours, and the logo column stops being a column. Measured
         // at 1.6px of drift between rows before pinning these.
         "sm:grid-cols-[minmax(0,1fr)_7rem_20rem] sm:items-center sm:gap-8",
@@ -100,21 +99,7 @@ export function OfferRow({
 
           {isBest && (
             <Badge variant="price" className="font-semibold">
-              Best total price
-            </Badge>
-          )}
-
-          {offer.sameOperatorAs && (
-            // sizeer and sport-m share a platform, a host IP and identical
-            // prices. Unlabelled, two rows of the same operator just make the
-            // list look padded.
-            <Badge
-              variant="muted"
-              className="gap-1"
-              title={`Same operator as ${offer.sameOperatorAs}`}
-            >
-              <Link2 className="size-3" />
-              same operator as {offer.sameOperatorAs}
+              Најниска цена
             </Badge>
           )}
         </div>
@@ -123,13 +108,13 @@ export function OfferRow({
           {!sizeFiltered && availableSizes > 1 ? (
             <>
               <span className="font-medium text-foreground">
-                {availableSizes} of {totalSizes} sizes
+                Достапни {availableSizes} од {totalSizes} големини
               </span>{" "}
-              available · from {sizeText}
+              · од {sizeText}
             </>
           ) : variant.sizeLabel ? (
             <>
-              Size{" "}
+              Големина{" "}
               <span className="font-medium text-foreground">
                 {sizeText}
               </span>
@@ -139,11 +124,15 @@ export function OfferRow({
             // can take the size list down along with the price -- megasport
             // does -- so we hold no sizes for this offer and must not imply
             // it was ever sold as a single size.
-            <span className="font-medium text-foreground">Sizes not listed</span>
+            <span className="font-medium text-foreground">
+              Големините не се достапни
+            </span>
           ) : (
             // dsport lists one-size articles as "BEZ VELICINA"; the pipeline
             // stores those with no size rather than inventing one.
-            <span className="font-medium text-foreground">One size</span>
+            <span className="font-medium text-foreground">
+              Универзална големина
+            </span>
           )}
           {" · "}
           <span
@@ -160,21 +149,20 @@ export function OfferRow({
             )}
             {stock.text}
             {variant.stockQty !== null && variant.stockQty > 0 && (
-              <> · {variant.stockQty} left</>
+              <> · Уште {variant.stockQty} на залиха</>
             )}
           </span>
         </p>
 
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1">
-            <Truck className="size-3" />
-            {shippingMinor === 0
-              ? "Free delivery"
-              : `+ ${formatMoney(variant.shipping)} delivery`}
-            {offer.deliveryEstimate && ` · ${offer.deliveryEstimate}`}
-          </span>
-          {/* Honest UI: the check time sits next to the price, not in a footnote. */}
-          <span>{formatCheckedAt(variant.checkedAt)}</span>
+        {/* Delivery is gone from this row entirely -- the line that named
+            it, the estimate beside it and the price breakdown below. The
+            shops publish it inconsistently and the figures we hold for it
+            are the least reliable thing on the page; quoting a total built
+            on them, and then explaining the build, put the weakest number
+            we have in the most prominent place. */}
+        {/* Honest UI: the check time sits next to the price, not in a footnote. */}
+        <p className="text-xs text-muted-foreground">
+          {formatCheckedAt(variant.checkedAt)}
         </p>
       </div>
 
@@ -194,29 +182,20 @@ export function OfferRow({
                 : "text-xl",
             )}
           >
-            {unpriced ? "Sold out" : formatMoney(variant.totalPrice)}
+            {unpriced ? "Распродадено" : formatMoney(variant.totalPrice)}
           </p>
-          <p className="whitespace-nowrap text-xs text-muted-foreground">
-            {/*
-              When delivery is free the total IS the price, so repeating the
-              number here said nothing and made this block wide enough to
-              overflow its grid track and crowd the logo. The breakdown is
-              only worth showing when there is actually something to break
-              down.
-            */}
-            {unpriced ? (
-              "no price while out of stock"
-            ) : shippingMinor === 0 ? (
-              "delivery included"
-            ) : (
-              <span className="tnum">
-                {formatMoney(variant.price)} + {formatMoney(variant.shipping)}
-              </span>
-            )}
-          </p>
+          {/* Only the one thing left to say under a price: that there is
+              none. The breakdown that used to live here split the total
+              into goods and delivery, which is the mention this row no
+              longer makes. */}
+          {unpriced && (
+            <p className="whitespace-nowrap text-xs text-muted-foreground">
+              Цената не е достапна
+            </p>
+          )}
           {discount !== null && (
             <Badge variant="discount" className="mt-1">
-              −{discount}% vs {formatMoney(variant.listPrice)}
+              −{discount}% од {formatMoney(variant.listPrice)}
             </Badge>
           )}
         </div>
@@ -237,7 +216,7 @@ export function OfferRow({
             rel="sponsored nofollow noopener"
             target="_blank"
           >
-            {buyable ? "Go to shop" : "View anyway"}
+            {buyable ? "Види понуда" : "Види сепак"}
           </a>
         </Button>
       </div>

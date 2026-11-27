@@ -25,12 +25,12 @@
  * `category` and `gender` here. One builder, one contract.
  */
 import {
-  Backpack,
-  Footprints,
-  Shirt,
-  SprayCan,
-  type LucideIcon,
-} from "lucide-react";
+  BackpackIcon,
+  PerfumeIcon,
+  ShirtIcon,
+  SneakerIcon,
+  type CategoryIcon,
+} from "@/components/nav/category-icons";
 
 import { type SortKey } from "@/lib/sort";
 
@@ -338,8 +338,12 @@ export type Vertical = {
    * Kept here rather than in the nav component, so a vertical cannot be
    * added in one file and acquire its icon in another. The icon is part of
    * what the vertical *is*, the same way its Macedonian label is.
+   *
+   * Three of the four are drawn for this bar; see `nav/category-icons`.
+   * Lucide's nearest nouns were a trail of footprints for shoes and a spray
+   * can for perfume, which are not those things.
    */
-  icon: LucideIcon;
+  icon: CategoryIcon;
   /**
    * `live` has a real menu and real links. `soon` renders the same shape
    * with a muted note and no links at all -- a disabled span, not an `<a>`
@@ -424,7 +428,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     kind: "footwear",
     label: "Обувки",
     status: "live",
-    icon: Footprints,
+    icon: SneakerIcon,
     allLabel: "Сите обувки",
     categories: FOOTWEAR_CATEGORIES,
     genderColumns: true,
@@ -433,7 +437,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     kind: "apparel",
     label: "Облека",
     status: "live",
-    icon: Shirt,
+    icon: ShirtIcon,
     allLabel: "Сета облека",
     categories: APPAREL_CATEGORIES,
     genderColumns: true,
@@ -445,7 +449,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     kind: "accessory",
     label: "Опрема",
     status: "live",
-    icon: Backpack,
+    icon: BackpackIcon,
     allLabel: "Сета опрема",
     categories: ACCESSORY_CATEGORIES,
     adultsAndKids: true,
@@ -458,7 +462,7 @@ export const VERTICALS: ReadonlyArray<Vertical> = [
     kind: "fragrance",
     label: "Парфеми",
     status: "live",
-    icon: SprayCan,
+    icon: PerfumeIcon,
     allLabel: "Сите парфеми",
     byConcentration: true,
   },

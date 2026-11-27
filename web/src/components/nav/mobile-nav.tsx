@@ -19,7 +19,9 @@
  */
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, ChevronDown, Menu, X, type LucideIcon } from "lucide-react";
+import { ArrowRight, ChevronDown, Menu, X } from "lucide-react";
+
+import { type CategoryIcon } from "@/components/nav/category-icons";
 
 import {
   COMING_SOON,
@@ -46,7 +48,7 @@ function Toggle({
   muted?: boolean;
   className?: string;
   /** Only the verticals carry one; the gender rows inside do not. */
-  icon?: LucideIcon;
+  icon?: CategoryIcon;
 }) {
   return (
     <button

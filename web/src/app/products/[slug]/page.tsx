@@ -12,14 +12,22 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
 import { VERTICALS, listingHref } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 type Params = Promise<{ slug: string }>;
 type Search = Promise<Record<string, string | string[] | undefined>>;
 
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+/**
+ * Macedonian has no "+s", so both forms are given outright.
+ *
+ * One продавница, two продавници; one понуда, two понуди. The English
+ * helper this replaces appended an `s`, which is not a rule any Slavic
+ * language has -- it printed "1 продавницаs".
+ */
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`;
 }
 
 function one(value: string | string[] | undefined): string | undefined {
@@ -34,15 +42,15 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const product = await getProduct(slug);
-  if (!product) return { title: "Product not found" };
+  if (!product) return { title: "Производот не е пронајден" };
   const from = product.lowestPrice
-    ? ` from ${formatMoney(product.lowestPrice)}`
+    ? ` од ${formatMoney(product.lowestPrice)}`
     : "";
   return {
     title: `${product.name}${from}`,
     description: product.lowestPrice
-      ? `Compare ${product.offerCount} offers for the ${product.name} across ${product.merchantCount} shops in North Macedonia. Prices include delivery.`
-      : `${product.name} — no shop we compare is listing this product right now.`,
+      ? `Спореди ${plural(product.offerCount, "понуда", "понуди")} за ${product.name} низ ${plural(product.merchantCount, "продавница", "продавници")} во Македонија.`
+      : `${product.name} — моментално ниту една продавница што ја следиме го нема овој производ.`,
   };
 }
 
@@ -164,6 +172,15 @@ export default async function ProductDetailPage({
     category: product.category ?? undefined,
   };
   const rows = rowsFor(product.offers, sizeEu, size);
+  // A bottle is sized in millilitres and the words for it are different all
+  // the way down: пакување rather than големина, and a note rather than a
+  // warning when the headline belongs to another one.
+  const isFragrance = product.categoryKind === "fragrance";
+  // The filtered size as the page says it, on whichever axis. Undefined when
+  // nothing is filtered, which is also what tells the empty state and the
+  // comparison subheading there is no size to name.
+  const sizeText =
+    sizeEu !== undefined ? `EU ${formatSizeEu(sizeEu)}` : size;
   const best = rows[0];
 
   // The headline across all sizes, so the page can say plainly when the
@@ -282,15 +299,20 @@ export default async function ProductDetailPage({
             <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               {product.colorway && <span>{product.colorway}</span>}
               {product.mpn && (
-                <span className="tnum">Art. {product.mpn}</span>
+                <span className="tnum">Шифра: {product.mpn}</span>
               )}
               <span className="inline-flex items-center gap-1">
                 <Store className="size-3.5" />
                 {/* Counts come from the summary, which a product with no
                     purchasable offer no longer has — so fall back to what is
                     actually on the page rather than printing "0 shops". */}
-                {plural(product.merchantCount || rows.length, "shop")} ·{" "}
-                {plural(product.offerCount || rows.length, "offer")}
+                {plural(
+                  product.merchantCount || rows.length,
+                  "продавница",
+                  "продавници",
+                )}{" "}
+                ·{" "}
+                {plural(product.offerCount || rows.length, "понуда", "понуди")}
               </span>
             </p>
 
@@ -298,12 +320,12 @@ export default async function ProductDetailPage({
               <div>
                 <p className="text-xs text-muted-foreground">
                   {!best
-                    ? "Currently unavailable"
+                    ? "Моментално недостапно"
                     : sizeEu !== undefined
-                      ? `Best total in EU ${formatSizeEu(sizeEu)}`
+                      ? `Најниска цена за EU ${formatSizeEu(sizeEu)}`
                       : size !== undefined
-                        ? `Best total in ${size}`
-                        : "Best total price"}
+                        ? `Најниска цена за ${size}`
+                        : "Најниска цена"}
                 </p>
                 <p className="tnum text-3xl font-bold text-price">
                   {/*
@@ -313,22 +335,45 @@ export default async function ProductDetailPage({
                     deactivated: the summary row outlived the offers it was
                     computed from.
                   */}
-                  {best ? formatMoney(best.variant.totalPrice) : "No price"}
+                  {best ? formatMoney(best.variant.totalPrice) : "Нема цена"}
                 </p>
               </div>
-              {best && product.highestPrice && product.lowestPrice
+              {/* Only on an unfiltered page. The range is the product's
+                  across every size, so beside a headline computed for one
+                  size it read "316 ден. до 316 ден." -- the same number
+                  twice, which looks like a bug and is at best an answer to
+                  a question the shopper has filtered out. */}
+              {!sizeText && best && product.highestPrice && product.lowestPrice
                 && product.highestPrice.amountMinor
                    > product.lowestPrice.amountMinor && (
                 <p className="tnum pb-1 text-sm text-muted-foreground">
-                  up to {formatMoney(product.highestPrice)}
+                  до {formatMoney(product.highestPrice)}
                 </p>
               )}
             </div>
 
             {/* The point of the whole size filter, stated outright. */}
             {headlineDiffers && (
-              <div className="mt-3 flex items-start gap-2 rounded-md border border-discount/30 bg-discount-muted px-3 py-2 text-sm">
-                <Info className="mt-0.5 size-4 shrink-0 text-discount" />
+              <div
+                className={cn(
+                  "mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-sm",
+                  // Two boxes, because they are two different warnings. A
+                  // shoe in the wrong size is the wrong product and the
+                  // shopper cannot buy it: red. A bottle in another volume
+                  // is the same perfume in a different amount -- a thing
+                  // they may well want -- so it is amber, a note rather
+                  // than a correction.
+                  isFragrance
+                    ? "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+                    : "border-discount/30 bg-discount-muted",
+                )}
+              >
+                <Info
+                  className={cn(
+                    "mt-0.5 size-4 shrink-0",
+                    isFragrance ? "text-amber-600" : "text-discount",
+                  )}
+                />
                 {/* Says only what is true in every case: the headline
                     belongs to a size the shopper did not pick.
                     
@@ -339,26 +384,41 @@ export default async function ProductDetailPage({
                     filtered price are routinely the same shop -- and the
                     page read "Elixir, which does not have 50ml ... the
                     cheapest is 8.930 at Elixir". */}
-                <p>
-                  The{" "}
-                  <span className="tnum font-semibold">
-                    {formatMoney(overallBest.variant.totalPrice)}
-                  </span>{" "}
-                  headline is for another size. In{" "}
-                  {sizeEu !== undefined ? `EU ${formatSizeEu(sizeEu)}` : size}{" "}
-                  the cheapest is{" "}
-                  <span className="tnum font-semibold">
-                    {formatMoney(best.variant.totalPrice)}
-                  </span>{" "}
-                  at {best.offer.merchantName}.
-                </p>
+                {isFragrance ? (
+                  <p>
+                    Цената од{" "}
+                    <span className="tnum font-semibold">
+                      {formatMoney(overallBest.variant.totalPrice)}
+                    </span>{" "}
+                    е за друго пакување. Пакувањето од {sizeText} е најевтино
+                    во {best.offer.merchantName} за{" "}
+                    <span className="tnum font-semibold">
+                      {formatMoney(best.variant.totalPrice)}
+                    </span>
+                    {/* No full stop: `formatMoney` ends in "ден." and the
+                        two together printed "4.648 ден..". */}
+                  </p>
+                ) : (
+                  <p>
+                    Прикажаната цена од{" "}
+                    <span className="tnum font-semibold">
+                      {formatMoney(overallBest.variant.totalPrice)}
+                    </span>{" "}
+                    е за друга големина. За број {sizeText}, најниската цена е{" "}
+                    <span className="tnum font-semibold">
+                      {formatMoney(best.variant.totalPrice)}
+                    </span>{" "}
+                    во {best.offer.merchantName}.
+                  </p>
+                )}
               </div>
             )}
 
             {allSizes.length > 0 && (
               <div className="mt-5">
                 <p className="mb-2 text-sm font-semibold">
-                  Size <span className="font-normal text-muted-foreground">(EU)</span>
+                  Големини{" "}
+                  <span className="font-normal text-muted-foreground">(EU)</span>
                 </p>
                 <SizePicker
                   sizes={allSizes}
@@ -376,9 +436,7 @@ export default async function ProductDetailPage({
                     where the choice changes the price as well as the fit.
                     Only fragrances: Обувки, Облека and Опрема keep theirs. */}
                 <p className="mb-2 text-sm font-semibold">
-                  {product.categoryKind === "fragrance"
-                    ? "Милилитража"
-                    : "Size"}
+                  {isFragrance ? "Милилитража" : "Големини"}
                 </p>
                 <LabelSizePicker
                   sizes={otherSizes}
@@ -393,26 +451,30 @@ export default async function ProductDetailPage({
         {/* ---------- comparison table ---------- */}
         <section className="mt-6 overflow-hidden rounded-lg border bg-card">
           <header className="flex flex-wrap items-baseline justify-between gap-2 p-4">
-            <h2 className="text-lg font-semibold">Price comparison</h2>
+            <h2 className="text-lg font-semibold">Споредба на цени</h2>
             <p className="text-xs text-muted-foreground">
-              Sorted by total price, delivery included
-              {sizeEu !== undefined && <> · EU {formatSizeEu(sizeEu)} only</>}
+              Подредено од најниска кон највисока цена
+              {sizeText && <> · само за {sizeText}</>}
             </p>
           </header>
 
           {rows.length === 0 ? (
             <div className="border-t p-8 text-center">
-              {sizeEu !== undefined ? (
+              {/* Keyed on `sizeText`, not on `sizeEu` alone. A letter or a
+                  volume empties the table exactly as a shoe size does, and
+                  those shoppers were being told the product has no offers at
+                  all -- which is a different, much worse thing to read. */}
+              {sizeText ? (
                 <>
-                  <p className="font-medium">No offers in this size</p>
+                  <p className="font-medium">Нема понуди за оваа големина</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    No shop currently lists EU {formatSizeEu(sizeEu)}.
+                    Моментално ниту една продавница нема залиха за {sizeText}.
                   </p>
                   <Link
                     href={`/products/${product.slug}`}
                     className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
                   >
-                    Show every size
+                    Прикажи ги сите големини
                   </Link>
                 </>
               ) : (
@@ -423,17 +485,17 @@ export default async function ProductDetailPage({
                     live price for it. Saying nothing is the honest answer --
                     the alternative is quoting a figure nobody can buy at.
                   */}
-                  <p className="font-medium">No current offers</p>
+                  <p className="font-medium">Моментално нема понуди</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    None of the shops we compare is listing this product right
-                    now. We would rather show nothing than a price you cannot
-                    buy at.
+                    Ниту една од продавниците што ги следиме моментално го нема
+                    овој производ. Подобро да не прикажеме цена отколку цена по
+                    која не можете да купите.
                   </p>
                   <Link
                     href="/products"
                     className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
                   >
-                    Browse everything else
+                    Разгледај ги останатите производи
                   </Link>
                 </>
               )}

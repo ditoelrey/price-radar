@@ -15,7 +15,7 @@ export const metadata: Metadata = {
     template: "%s · Price Radar",
   },
   description:
-    "Compare sneaker prices across North Macedonian shops. One product, every offer, sorted by total price including delivery.",
+    "Спореди ги цените на спортската опрема, обувките и парфемите во македонските продавници. Еден производ, сите достапни понуди, подредени од најниска кон највисоката цена.",
 };
 
 export default function RootLayout({

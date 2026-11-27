@@ -252,7 +252,7 @@ class CatalogServiceTest {
     @DisplayName("the price disclaimer is shown with every detail response")
     void disclaimerExists() {
         assertThat(CatalogService.PRICE_DISCLAIMER)
-                .contains("reported by the shops")
-                .contains("last checked");
+                .contains("преземени од продавниците")
+                .contains("последна проверка");
     }
 }

@@ -311,16 +311,26 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
         }
       }}
     >
-      <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 sm:px-6">
+      {/* Four equal columns rather than four buttons bunched at the left.
+          They were about a third of a 1280px bar with the rest empty, which
+          made the whole row read as a detail of the header instead of as the
+          site's own top level -- and gave each vertical a hit area the width
+          of its word, so Опрема was a smaller target than Парфеми for no
+          reason a shopper could see. */}
+      <div className="mx-auto grid max-w-7xl grid-cols-4 items-stretch px-4 sm:px-6">
         {VERTICALS.map((vertical) => {
           const isOpen = openKind === vertical.kind;
           const isActive = activeKind === vertical.kind;
           const Icon = vertical.icon;
           const shared = cn(
-            "flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition-colors",
+            "flex w-full items-center justify-center gap-2 px-4 py-3",
+            "text-sm font-medium transition-colors",
+            // The underline spans the whole column now, so the active
+            // vertical is marked by a quarter of the bar rather than by a
+            // dash under one word.
             "border-b-2",
             isActive || isOpen
-              ? "border-primary text-foreground"
+              ? "border-primary bg-primary/5 text-foreground"
               : "border-transparent",
           );
 
@@ -332,7 +342,7 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
                 aria-disabled="true"
                 className={cn(shared, "cursor-default text-muted-foreground")}
               >
-                <Icon className="size-4 opacity-70" />
+                <Icon className="size-5 opacity-70" />
                 {vertical.label}
                 <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
                   {COMING_SOON}
@@ -349,7 +359,7 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
                 aria-expanded={isOpen}
                 aria-haspopup="true"
               >
-                <Icon className="size-4 opacity-70" />
+                <Icon className="size-5 opacity-70" />
                 {vertical.label}
                 <ChevronDown className="size-3.5 opacity-60" />
               </Link>
@@ -360,7 +370,7 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
                 aria-expanded={isOpen}
                 aria-haspopup="true"
               >
-                <Icon className="size-4 opacity-70" />
+                <Icon className="size-5 opacity-70" />
                 {vertical.label}
                 <ChevronDown className="size-3.5 opacity-60" />
               </button>
@@ -369,6 +379,7 @@ export function MainNav({ activeKind }: { activeKind?: string }) {
           return (
             <div
               key={vertical.kind}
+              className="flex"
               onMouseEnter={() => open(vertical.kind)}
               onFocus={() => open(vertical.kind)}
             >

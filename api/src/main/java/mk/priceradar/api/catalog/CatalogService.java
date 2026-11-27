@@ -22,8 +22,9 @@ public class CatalogService {
      * any amount of crawling and does more for trust.
      */
     static final String PRICE_DISCLAIMER =
-            "Prices and availability are reported by the shops and may have changed. "
-            + "Each offer shows when we last checked it.";
+            "Цените и достапноста се преземени од продавниците и може да не "
+            + "се ажурирани. Времето на последна проверка е прикажано кај "
+            + "секоја понуда.";
 
     /**
      * The price bands the storefront offers, in denars.
