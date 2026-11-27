@@ -70,27 +70,52 @@ export function LogoMark({ className }: { className?: string }) {
           enough to read as pinned on rather than set square, little enough
           that the percent inside stays upright to the eye. */}
       <g transform="rotate(-12 12 12)">
-        {/* One path, two subpaths, `evenodd`: the eyelet is a hole punched
-            in the tag rather than a dot painted on it, so the background
-            shows through and the shape survives on any colour. */}
+        {/* The classic shape: a rounded label with a chamfered point at the
+            left and the eyelet punched through it. One path, two subpaths,
+            `evenodd`, so the hole is a hole and the background shows
+            through rather than a white dot painted on red. */}
         <path
-          fill="#CF1F3E"
+          fill="#e11d48"
           fillRule="evenodd"
           clipRule="evenodd"
-          d="M4.5 4.5h15A3.5 3.5 0 0 1 23 8v8a3.5 3.5 0 0 1-3.5 3.5h-15A3.5 3.5 0 0 1 1 16V8a3.5 3.5 0 0 1 3.5-3.5Zm-.4 6.3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"
+          d="M9.1 2.6h10.4A3.5 3.5 0 0 1 23 6.1v11.8a3.5 3.5 0 0 1-3.5 3.5H9.1a2.8 2.8 0 0 1-2-.83L1.5 14.4a3.4 3.4 0 0 1 0-4.8l5.6-6.17A2.8 2.8 0 0 1 9.1 2.6Zm-3 8.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"
         />
-        <circle cx="11.2" cy="10.1" r="1.6" fill="#fff" />
-        <path
-          d="M10.4 15.1 16.6 8.9"
+        {/* A percent, drawn as a percent: two open counters and a slash. The
+            first version folded the lower counter into the smile to make one
+            clever shape, and one clever shape is what it looked like -- a
+            squiggle. Two plain symbols, clearly apart, say both things.
+
+            `-50%` was the other candidate and it is the better poster: at
+            128px it is unmistakable. It is also four glyphs sharing eleven
+            pixels of tag at favicon size, where it turns to mush. This mark
+            is read at 16 to 32 far more often than at 128. */}
+        <circle
+          cx="12.5"
+          cy="8.2"
+          r="1.6"
+          fill="none"
           stroke="#fff"
-          strokeWidth="2"
+          strokeWidth="1.2"
+        />
+        <circle
+          cx="17.3"
+          cy="12.6"
+          r="1.6"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M11.8 13.4 18 7.3"
+          stroke="#fff"
+          strokeWidth="1.7"
           strokeLinecap="round"
         />
-        {/* Where a percent's second ring would be. */}
+        {/* Its own arc, under the percent and not touching it. */}
         <path
-          d="M13.6 13.7q2.5 3 5 0"
+          d="M11.5 16.2q3.4 2.6 6.8 0"
           stroke="#fff"
-          strokeWidth="1.9"
+          strokeWidth="1.55"
           strokeLinecap="round"
           fill="none"
         />
@@ -127,7 +152,7 @@ export function Logo({ className }: { className?: string }) {
           {/* Perched on the corner like a sticker, and pulled into the
               wordmark so the two read as one object rather than a logo with
               something next to it. */}
-          <LogoMark className="-ml-1 -mt-2 size-[18px] shrink-0" />
+          <LogoMark className="-ml-1.5 -mt-2 size-[22px] shrink-0" />
         </span>
         {/* Aligned to the wordmark's left edge, as price.com sets its own.
             `hidden lg:block`: on a tablet the header is tight enough that
