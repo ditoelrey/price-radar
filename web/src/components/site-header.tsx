@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { Radar, Search } from "lucide-react";
+import { Search } from "lucide-react";
+
+import { BRAND_DOMAIN, Logo } from "@/components/logo";
 
 import { MainNav } from "@/components/nav/main-nav";
 import { MobileNav } from "@/components/nav/mobile-nav";
@@ -28,13 +30,12 @@ export function SiteHeader({
       <div className="relative mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:gap-4 sm:px-6">
         <MobileNav />
 
-        <Link href="/" className="flex shrink-0 items-center gap-2">
-          <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Radar className="size-5" />
-          </span>
-          <span className="hidden text-lg font-semibold tracking-tight sm:inline">
-            price<span className="text-primary">radar</span>
-          </span>
+        <Link
+          href="/"
+          aria-label={BRAND_DOMAIN}
+          className="shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Logo />
         </Link>
 
         <form action="/products" className="relative mx-auto w-full max-w-2xl">

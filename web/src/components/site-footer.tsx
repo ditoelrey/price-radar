@@ -1,3 +1,5 @@
+import { BRAND_NAME } from "@/components/logo";
+
 export function SiteFooter() {
   return (
     <footer className="mt-16 border-t bg-muted/30">
@@ -8,7 +10,7 @@ export function SiteFooter() {
           последен пат била проверена.
         </p>
         <p>
-          <span className="font-semibold">TopCena</span> остварува провизија од
+          <span className="font-semibold">{BRAND_NAME}</span> остварува провизија од
           одредени кликови што водат кон продавниците. Тоа не влијае врз
           редоследот на понудите, тие секогаш се подредени според цената.
         </p>
